@@ -101,7 +101,7 @@ Python Script
 	empy			EmPy
 	cobra			Cobra
 	gs				GNOME Genie
-	bzl				Bazel BUILD file, https://docs.bazel.build/versions/master/build-ref.html
+	bzl				Bazel BUILD file, https://docs.bazel.build/versions/main/build-ref.html
 
 Ruby Script
 	rb
@@ -185,6 +185,12 @@ Assembler Source
 Asymptote Code
 	asy
 
+AutoHotkey Script
+	ahk
+
+	ia
+	scriptlet
+
 AutoIt3 Script
 	au3
 
@@ -212,6 +218,13 @@ CMake Script
 	CMakeCache.txt
 	*.cmake.in
 	*.ctest.in
+
+CoffeeScript
+	coffee
+	cjsx			CoffeeScript with JSX
+	cson			https://github.com/bevry/cson
+
+	Cakefile
 
 Config File
 	conf

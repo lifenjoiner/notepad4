@@ -19,6 +19,8 @@
     <VirtualDirectory Name="lexers">
       <File Name="../../scintilla/lexers/LexAPDL.cxx"/>
       <File Name="../../scintilla/lexers/LexAsm.cxx"/>
+      <File Name="../../scintilla/lexers/LexAsymptote.cxx"/>
+      <File Name="../../scintilla/lexers/LexAutoHotkey.cxx"/>
       <File Name="../../scintilla/lexers/LexAutoIt3.cxx"/>
       <File Name="../../scintilla/lexers/LexAviSynth.cxx"/>
       <File Name="../../scintilla/lexers/LexAwk.cxx"/>
@@ -26,8 +28,10 @@
       <File Name="../../scintilla/lexers/LexBatch.cxx"/>
       <File Name="../../scintilla/lexers/LexCIL.cxx"/>
       <File Name="../../scintilla/lexers/LexCMake.cxx"/>
+      <File Name="../../scintilla/lexers/LexCoffeeScript.cxx"/>
       <File Name="../../scintilla/lexers/LexConfig.cxx"/>
       <File Name="../../scintilla/lexers/LexCPP.cxx"/>
+      <File Name="../../scintilla/lexers/LexCSharp.cxx"/>
       <File Name="../../scintilla/lexers/LexCSS.cxx"/>
       <File Name="../../scintilla/lexers/LexDart.cxx"/>
       <File Name="../../scintilla/lexers/LexDiff.cxx"/>
@@ -185,6 +189,7 @@
       <File Name="../../src/EditLexers/stlAPDL.c"/>
       <File Name="../../src/EditLexers/stlAsm.c"/>
       <File Name="../../src/EditLexers/stlAsymptote.c"/>
+      <File Name="../../src/EditLexers/stlAutoHotkey.c"/>
       <File Name="../../src/EditLexers/stlAutoIt3.c"/>
       <File Name="../../src/EditLexers/stlAviSynth.c"/>
       <File Name="../../src/EditLexers/stlAwk.c"/>
@@ -192,6 +197,7 @@
       <File Name="../../src/EditLexers/stlBatch.c"/>
       <File Name="../../src/EditLexers/stlCIL.c"/>
       <File Name="../../src/EditLexers/stlCMake.c"/>
+      <File Name="../../src/EditLexers/stlCoffeeScript.c"/>
       <File Name="../../src/EditLexers/stlCPP.c"/>
       <File Name="../../src/EditLexers/stlCSharp.c"/>
       <File Name="../../src/EditLexers/stlCSS.c"/>

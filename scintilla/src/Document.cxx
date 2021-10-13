@@ -55,6 +55,11 @@ using namespace Scintilla;
 using namespace Scintilla::Internal;
 using namespace Lexilla;
 
+LexInterface::LexInterface(Document *pdoc_) noexcept : pdoc(pdoc_), performingStyle(false) {
+}
+
+LexInterface::~LexInterface() noexcept = default;
+
 void LexInterface::Colourise(Sci::Position start, Sci::Position end) {
 	if (pdoc && instance && !performingStyle) {
 		// Protect against reentrance, which may occur, for example, when
@@ -83,6 +88,10 @@ void LexInterface::Colourise(Sci::Position start, Sci::Position end) {
 	}
 }
 
+bool LexInterface::UseContainerLexing() const noexcept {
+	return !instance;
+}
+
 LineEndType LexInterface::LineEndTypesSupported() const noexcept {
 	if (instance) {
 		return static_cast<LineEndType>(instance->LineEndTypesSupported());
@@ -104,7 +113,7 @@ void ActionDuration::AddSample(Sci::Position numberActions, double durationOfAct
 	const double duration_ = alpha * durationOne + (1.0 - alpha) * duration;
 	//duration = Clamp(duration_, minDuration, maxDuration);
 	duration = std::max(duration_, minDuration);
-	//printf("%s actions=%.9f / %zd, one=%.9f, value=%.9f, [%.9f, %f, %f]\n", __func__,
+	//printf("%s actions=%.9f / %zd, one=%.9f, value=%.9f, [%.9f, %.8f, %.6f]\n", __func__,
 	//	durationOfActions, numberActions, durationOne, duration_, duration, minDuration, maxDuration);
 }
 
@@ -664,7 +673,7 @@ int Document::LenChar(Sci::Position pos, bool *invalid) noexcept {
 	}
 
 	const unsigned char leadByte = cb.UCharAt(pos);
-	if (!dbcsCodePage || UTF8IsAscii(leadByte)) {
+	if (UTF8IsAscii(leadByte) || !dbcsCodePage) {
 		// Common case: ASCII character
 		return 1;
 	}
@@ -1061,12 +1070,12 @@ bool SCI_METHOD Document::IsDBCSLeadByte(unsigned char ch) const noexcept {
 	return dbcsCharClass && dbcsCharClass->IsLeadByte(ch);
 }
 
-int Document::DBCSDrawBytes(std::string_view text) const noexcept {
-	if (text.length() <= 1) {
-		return static_cast<int>(text.length());
+int Document::DBCSDrawBytes(const char *text, size_t length) const noexcept {
+	if (length <= 1) {
+		return static_cast<int>(length);
 	}
 	if (IsDBCSLeadByteNoExcept(text[0])) {
-		return IsDBCSTrailByteNoExcept(text[1]) ? 2 : 1;
+		return 1 + IsDBCSTrailByteNoExcept(text[1]);
 	} else {
 		return 1;
 	}
@@ -1077,10 +1086,6 @@ bool Document::IsDBCSDualByteAt(Sci::Position pos) const noexcept {
 		&& IsDBCSTrailByteNoExcept(cb.UCharAt(pos + 1));
 }
 
-static constexpr bool IsSpaceOrTab(int ch) noexcept {
-	return ch == ' ' || ch == '\t';
-}
-
 // Need to break text into segments near lengthSegment but taking into
 // account the encoding to not break inside a UTF-8 or DBCS character
 // and also trying to avoid breaking inside a pair of combining characters.
@@ -1088,39 +1093,41 @@ static constexpr bool IsSpaceOrTab(int ch) noexcept {
 // so that there will be at least one whole character to make a segment.
 // For UTF-8, text must consist only of valid whole characters.
 // In preference order from best to worst:
-//   1) Break after space
-//   2) Break before punctuation
+//   1) Break before or after space
+//   2) Break before or after punctuation
 //   3) Break after whole character
 
-int Document::SafeSegment(const char *text, int length, int lengthSegment) const noexcept {
-	if (length <= lengthSegment)
-		return length;
-	int lastSpaceBreak = -1;
-	int lastPunctuationBreak = -1;
-	int lastEncodingAllowedBreak = 0;
-	for (int j = 0; j < lengthSegment;) {
-		const unsigned char ch = text[j];
-		if (j > 0) {
-			if (IsSpaceOrTab(text[j - 1]) && !IsSpaceOrTab(text[j])) {
-				lastSpaceBreak = j;
-			}
+int Document::SafeSegment(const char *text, int lengthSegment) const noexcept {
+	int j = lengthSegment;
+	do {
+		if (IsBreakSpace(text[j])) {
+			return j;
 		}
+		--j;
+	} while (j != 0);
 
+	int lastPunctuationBreak = 0;
+	int lastEncodingAllowedBreak = 0;
+	CharacterClass ccPrev = CharacterClass::space;
+	do {
+		const unsigned char ch = text[j];
 		lastEncodingAllowedBreak = j;
-		if (!dbcsCodePage || UTF8IsAscii(ch)) {
-			if (j > 0 && charClass.GetClass(ch) == CharacterClass::punctuation) {
-				lastPunctuationBreak = j;
-			}
+
+		CharacterClass cc = CharacterClass::word;
+		if (UTF8IsAscii(ch) || !dbcsCodePage) {
+			cc = charClass.GetClass(ch);
 			j++;
 		} else if (dbcsCodePage == CpUtf8) {
 			j += UTF8BytesOfLead(ch);
 		} else {
-			j += IsDBCSLeadByteNoExcept(ch) ? 2 : 1;
+			j += 1 + IsDBCSLeadByteNoExcept(ch);
 		}
-	}
-	if (lastSpaceBreak >= 0) {
-		return lastSpaceBreak;
-	} else if (lastPunctuationBreak >= 0) {
+		if (cc != ccPrev) {
+			ccPrev = cc;
+			lastPunctuationBreak = lastEncodingAllowedBreak;
+		}
+	} while (j < lengthSegment);
+	if (lastPunctuationBreak > 0) {
 		return lastPunctuationBreak;
 	}
 	return lastEncodingAllowedBreak;
@@ -2157,7 +2164,7 @@ Sci::Position Document::FindText(Sci::Position minPos, Sci::Position maxPos, con
 				bool characterMatches = true;
 				for (;;) {
 					const unsigned char leadByte = cbView.CharAt(pos + indexDocument);
-					const int widthChar = IsDBCSLeadByteNoExcept(leadByte) ? 2 : 1;
+					const int widthChar = 1 + IsDBCSLeadByteNoExcept(leadByte);
 					if (!widthFirstCharacter) {
 						widthFirstCharacter = widthChar;
 					}
@@ -2782,11 +2789,6 @@ Sci::Position Document::BraceMatch(Sci::Position position, Sci::Position /*maxRe
 class BuiltinRegex : public RegexSearchBase {
 public:
 	explicit BuiltinRegex(CharClassify *charClassTable) : search(charClassTable) {}
-	BuiltinRegex(const BuiltinRegex &) = delete;
-	BuiltinRegex(BuiltinRegex &&) = delete;
-	BuiltinRegex &operator=(const BuiltinRegex &) = delete;
-	BuiltinRegex &operator=(BuiltinRegex &&) = delete;
-	~BuiltinRegex() override = default;
 
 	Sci::Position FindText(Document *doc, Sci::Position minPos, Sci::Position maxPos, const char *s,
 		bool caseSensitive, FindOption flags, Sci::Position *length) override;
@@ -3202,7 +3204,8 @@ bool MatchOnLines(const Document *doc, const Regex &regexp, const RESearchRange 
 	}
 #endif
 	if (matched) {
-		for (size_t co = 0; co < match.size(); co++) {
+		const size_t maxTag = std::min(<size_t>(match.size(), RESearch::MAXTAG);
+		for (size_t co = 0; co < maxTag; co++) {
 			search.bopat[co] = match[co].first.Pos();
 			search.eopat[co] = match[co].second.PosRoundUp();
 			const Sci::Position lenMatch = search.eopat[co] - search.bopat[co];

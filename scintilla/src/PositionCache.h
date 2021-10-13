@@ -8,10 +8,6 @@
 
 namespace Scintilla::Internal {
 
-constexpr bool IsSpaceOrTab(int ch) noexcept {
-	return ch == ' ' || ch == '\t';
-}
-
 /**
 * A point in document space.
 * Uses double for sufficient resolution in large (>20,000,000 line) documents.
@@ -67,16 +63,13 @@ public:
 	int xHighlightGuide;
 	bool highlightColumn;
 	bool containsCaret;
+	unsigned char bracePreviousStyles[2];
 	int edgeColumn;
 	std::unique_ptr<char[]> chars;
 	std::unique_ptr<unsigned char[]> styles;
 	std::unique_ptr<XYPOSITION[]> positions;
-	char bracePreviousStyles[2];
 
 	std::unique_ptr<BidiData> bidiData;
-
-	// Hotspot support
-	Range hotspot;
 
 	// Wrapped line support
 	int widthLine;
@@ -107,7 +100,7 @@ public:
 	int SubLineFromPosition(int posInLine, PointEnd pe) const noexcept;
 	void SetLineStart(int line, int start);
 	void SetBracesHighlight(Range rangeLine, const Sci::Position braces[],
-		char bracesMatchStyle, int xHighlight, bool ignoreStyle) noexcept;
+		unsigned char bracesMatchStyle, int xHighlight, bool ignoreStyle) noexcept;
 	void RestoreBracesHighlight(Range rangeLine, const Sci::Position braces[], bool ignoreStyle) noexcept;
 	int SCICALL FindBefore(XYPOSITION x, Range range) const noexcept;
 	int SCICALL FindPositionFromX(XYPOSITION x, Range range, bool charPosition) const noexcept;
@@ -121,8 +114,8 @@ struct ScreenLine : public IScreenLine {
 	size_t len;
 	XYPOSITION width;
 	XYPOSITION height;
-	int ctrlCharPadding;
 	XYPOSITION tabWidth;
+	int ctrlCharPadding;
 	int tabWidthMinimumPixels;
 
 	ScreenLine(const LineLayout *ll_, int subLine, const ViewStyle &vs, XYPOSITION width_, int tabWidthMinimumPixels_) noexcept;
@@ -174,9 +167,9 @@ public:
 };
 
 class PositionCacheEntry {
-	unsigned int styleNumber : 8;
-	unsigned int len : 8;
-	unsigned int clock : 16;
+	uint16_t styleNumber;
+	uint16_t len;
+	uint32_t clock;
 	std::unique_ptr<XYPOSITION[]> positions;
 public:
 	PositionCacheEntry() noexcept;
@@ -187,10 +180,10 @@ public:
 	void operator=(const PositionCacheEntry &) = delete;
 	void operator=(PositionCacheEntry &&) = delete;
 	~PositionCacheEntry();
-	void Set(unsigned int styleNumber_, std::string_view sv, const XYPOSITION *positions_, unsigned int clock_);
+	void Set(uint16_t styleNumber_, std::string_view sv, const XYPOSITION *positions_, uint32_t clock_);
 	void Clear() noexcept;
-	bool Retrieve(unsigned int styleNumber_, std::string_view sv, XYPOSITION *positions_) const noexcept;
-	static size_t Hash(unsigned int styleNumber_, std::string_view sv) noexcept;
+	bool Retrieve(uint16_t styleNumber_, std::string_view sv, XYPOSITION *positions_) const noexcept;
+	static size_t Hash(uint16_t styleNumber_, std::string_view sv) noexcept;
 	bool NewerThan(const PositionCacheEntry &other) const noexcept;
 	void ResetClock() noexcept;
 };
@@ -210,14 +203,22 @@ typedef std::map<unsigned int, Representation> MapRepresentation;
 class SpecialRepresentations {
 	MapRepresentation mapReprs;
 	unsigned char startByteHasReprs[0x100] {};
+	bool crlf = false;
 public:
 	SpecialRepresentations() noexcept {}
 	void SetRepresentation(std::string_view charBytes, std::string_view value);
 	void SetRepresentationAppearance(std::string_view charBytes, RepresentationAppearance appearance);
 	void SetRepresentationColour(std::string_view charBytes, ColourRGBA colour);
 	void ClearRepresentation(std::string_view charBytes);
+	const Representation *GetRepresentation(std::string_view charBytes) const;
 	const Representation *RepresentationFromCharacter(std::string_view charBytes) const;
 	bool Contains(std::string_view charBytes) const;
+	bool ContainsCrLf() const noexcept {
+		return crlf;
+	}
+	bool MayContains(unsigned char ch) const noexcept {
+		return startByteHasReprs[ch] != 0;
+	}
 	void Clear() noexcept;
 };
 
@@ -270,14 +271,14 @@ public:
 
 class PositionCache {
 	std::vector<PositionCacheEntry> pces;
-	unsigned int clock;
+	uint32_t clock;
 	bool allClear;
 public:
 	PositionCache();
 	void Clear() noexcept;
 	void SetSize(size_t size_);
 	size_t GetSize() const noexcept;
-	void MeasureWidths(Surface *surface, const ViewStyle &vstyle, unsigned int styleNumber,
+	void MeasureWidths(Surface *surface, const ViewStyle &vstyle, uint16_t styleNumber,
 		std::string_view sv, XYPOSITION *positions);
 };
 

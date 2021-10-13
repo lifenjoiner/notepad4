@@ -133,6 +133,15 @@ constexpr bool IsASpaceOrTab(int ch) noexcept {
 	return ch == ' ' || ch == '\t';
 }
 
+constexpr bool IsSpaceOrTab(int ch) noexcept {
+	return ch == ' ' || ch == '\t';
+}
+
+constexpr bool IsBreakSpace(unsigned char ch) noexcept {
+	// used for text breaking, treat C0 control character as space.
+	return ch <= ' ';
+}
+
 constexpr bool IsADigit(int ch) noexcept {
 	return ch >= '0' && ch <= '9';
 }
@@ -305,6 +314,10 @@ constexpr bool IsJumpLabelNextChar(int chNext) noexcept {
 	// own line, comment, for, foreach, while, do, if, switch, repeat
 	// TODO: match each word exactly like HighlightTaskMarker().
 	return AnyOf(chNext, '\0', '/', 'f', 'w', 'd', 'i', 's', 'r');
+}
+
+constexpr bool IsInterfaceName(char ch, char chNext) noexcept {
+	return ch == 'I' && IsUpperCase(chNext);
 }
 
 // Simple case functions for ASCII supersets.

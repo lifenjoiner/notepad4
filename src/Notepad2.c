@@ -53,7 +53,7 @@
 HWND	hwndStatus;
 static HWND hwndToolbar;
 static HWND hwndReBar;
-static HWND hwndEdit;
+HWND	hwndEdit;
 static HWND hwndEditFrame;
 HWND	hwndMain;
 static HWND hwndNextCBChain = NULL;
@@ -1026,7 +1026,7 @@ static inline BOOL IsFileStartsWithDotLog(void) {
 	char tch[5] = "";
 	const Sci_Position len = SciCall_GetText(COUNTOF(tch), tch);
 	// upper case
-	return len >= 4 && StrEqualA(tch, ".LOG");
+	return len >= 4 && StrEqualExA(tch, ".LOG");
 }
 #endif
 
@@ -1271,7 +1271,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 					if (params->flagLexerSpecified) {
 						if (params->iInitialLexer <= 0) {
 							WCHAR wchExt[32] = L".";
-							lstrcpyn(CharNext(wchExt), StrEnd(&params->wchData) + 1, 30);
+							lstrcpyn(wchExt + 1, StrEnd(&params->wchData) + 1, COUNTOF(wchExt) - 1);
 							Style_SetLexerFromName(&params->wchData, wchExt);
 						} else {
 							Style_SetLexerFromID(params->iInitialLexer);
@@ -1663,6 +1663,7 @@ HWND EditCreate(HWND hwndParent) {
 
 	// current line
 	SciCall_SetCaretLineVisibleAlways(TRUE);
+	SciCall_SetCaretLineHighlightSubLine(bHighlightCurrentSubLine);
 
 	// Long Lines
 	if (bMarkLongLines) {
@@ -1792,7 +1793,7 @@ LRESULT MsgCreate(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	DragAcceptFiles(hwnd, TRUE);
 
 	// File MRU
-	pFileMRU = MRU_Create(MRU_KEY_RECENT_FILES, MRUFlags_CaseInsensitive, MRU_MAX_RECENT_FILES);
+	pFileMRU = MRU_Create(MRU_KEY_RECENT_FILES, MRUFlags_FilePath, MRU_MAX_RECENT_FILES);
 	MRU_Load(pFileMRU);
 
 	mruFind = MRU_Create(MRU_KEY_RECENT_FIND, MRUFlags_QuoteValue, MRU_MAX_RECENT_FIND);
@@ -2884,10 +2885,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 			WCHAR tchSelItem[MAX_PATH];
 
 			if (FavoritesDlg(hwnd, tchSelItem)) {
-				if (PathIsLnkToDirectory(tchSelItem, NULL, 0)) {
-					PathGetLnkPath(tchSelItem, tchSelItem, COUNTOF(tchSelItem));
-				}
-
+				PathGetLnkPath(tchSelItem, tchSelItem);
 				if (PathIsDirectory(tchSelItem)) {
 					WCHAR tchFile[MAX_PATH];
 
@@ -3534,10 +3532,10 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		char mszBuf[32];
 		FILETIME ft;
 		// Windows timestamp in 100-nanosecond
-#if _WIN32_WINNT < _WIN32_WINNT_WIN8
-		GetSystemTimeAsFileTime(&ft);
-#else
+#if _WIN32_WINNT >= _WIN32_WINNT_WIN8
 		GetSystemTimePreciseAsFileTime(&ft);
+#else
+		GetSystemTimeAsFileTime(&ft);
 #endif
 		uint64_t timestamp = (((uint64_t)(ft.dwHighDateTime)) << 32) | ft.dwLowDateTime;
 		// Between Jan 1, 1601 and Jan 1, 1970 there are 11644473600 seconds
@@ -4146,6 +4144,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
 	case IDM_VIEW_HIGHLIGHTCURRENTLINE_SUBLINE:
 		bHighlightCurrentSubLine = !bHighlightCurrentSubLine;
+		SciCall_SetCaretLineHighlightSubLine(bHighlightCurrentSubLine);
 		break;
 
 	case IDM_VIEW_ZOOMIN:
@@ -4329,7 +4328,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	case IDM_VIEW_SHOWFILENAMEFIRST:
 	case IDM_VIEW_SHOWFULLPATH:
 		iPathNameFormat = LOWORD(wParam) - IDM_VIEW_SHOWFILENAMEONLY;
-		lstrcpy(szTitleExcerpt, L"");
+		StrCpyExW(szTitleExcerpt, L"");
 		UpdateWindowTitle();
 		break;
 
@@ -5331,32 +5330,32 @@ void LoadSettings(void) {
 
 	LPCWSTR strValue = IniSectionGetValue(pIniSection, L"OpenWithDir");
 	if (StrIsEmpty(strValue)) {
-#if _WIN32_WINNT < _WIN32_WINNT_VISTA
-		SHGetFolderPath(NULL, CSIDL_DESKTOPDIRECTORY, NULL, SHGFP_TYPE_CURRENT, tchOpenWithDir);
-#else
+#if _WIN32_WINNT >= _WIN32_WINNT_VISTA
 		LPWSTR pszPath = NULL;
 		if (S_OK == SHGetKnownFolderPath(&FOLDERID_Desktop, KF_FLAG_DEFAULT, NULL, &pszPath)) {
 			lstrcpy(tchOpenWithDir, pszPath);
 			CoTaskMemFree(pszPath);
 		}
+#else
+		SHGetFolderPath(NULL, CSIDL_DESKTOPDIRECTORY, NULL, SHGFP_TYPE_CURRENT, tchOpenWithDir);
 #endif
 	} else {
-		PathAbsoluteFromApp(strValue, tchOpenWithDir, COUNTOF(tchOpenWithDir), TRUE);
+		PathAbsoluteFromApp(strValue, tchOpenWithDir, TRUE);
 	}
 
 	strValue = IniSectionGetValue(pIniSection, L"Favorites");
 	if (StrIsEmpty(strValue)) {
-#if _WIN32_WINNT < _WIN32_WINNT_VISTA
-		SHGetFolderPath(NULL, CSIDL_PERSONAL, NULL, SHGFP_TYPE_CURRENT, tchFavoritesDir);
-#else
+#if _WIN32_WINNT >= _WIN32_WINNT_VISTA
 		LPWSTR pszPath = NULL;
 		if (S_OK == SHGetKnownFolderPath(&FOLDERID_Documents, KF_FLAG_DEFAULT, NULL, &pszPath)) {
 			lstrcpy(tchFavoritesDir, pszPath);
 			CoTaskMemFree(pszPath);
 		}
+#else
+		SHGetFolderPath(NULL, CSIDL_PERSONAL, NULL, SHGFP_TYPE_CURRENT, tchFavoritesDir);
 #endif
 	} else {
-		PathAbsoluteFromApp(strValue, tchFavoritesDir, COUNTOF(tchFavoritesDir), TRUE);
+		PathAbsoluteFromApp(strValue, tchFavoritesDir, TRUE);
 	}
 
 	int iValue = IniSectionGetInt(pIniSection, L"PathNameFormat", 1);
@@ -5629,7 +5628,7 @@ void SaveSettingsNow(BOOL bOnlySaveStyle, BOOL bQuiet) {
 		if (StrNotEmpty(szIniFile2)) {
 			if (CreateIniFile(szIniFile2)) {
 				lstrcpy(szIniFile, szIniFile2);
-				lstrcpy(szIniFile2, L"");
+				StrCpyExW(szIniFile2, L"");
 			} else {
 				bCreateFailure = TRUE;
 			}
@@ -5711,9 +5710,9 @@ void SaveSettings(BOOL bSaveSettingsNow) {
 		IniSectionSetBoolEx(pIniSection, L"FindReplaceWildcardSearch", efrData.bWildcardSearch, 0);
 	}
 
-	PathRelativeToApp(tchOpenWithDir, wchTmp, COUNTOF(wchTmp), FALSE, TRUE, flagPortableMyDocs);
+	PathRelativeToApp(tchOpenWithDir, wchTmp, FALSE, TRUE, flagPortableMyDocs);
 	IniSectionSetString(pIniSection, L"OpenWithDir", wchTmp);
-	PathRelativeToApp(tchFavoritesDir, wchTmp, COUNTOF(wchTmp), FALSE, TRUE, flagPortableMyDocs);
+	PathRelativeToApp(tchFavoritesDir, wchTmp, FALSE, TRUE, flagPortableMyDocs);
 	IniSectionSetString(pIniSection, L"Favorites", wchTmp);
 	IniSectionSetIntEx(pIniSection, L"PathNameFormat", iPathNameFormat, 1);
 
@@ -6140,7 +6139,7 @@ int ParseCommandLineOption(LPWSTR lp1, LPWSTR lp2, BOOL *bIsNotepadReplacement) 
 
 		case L'F':
 			if (chNext == L'0' || chNext == L'O') {
-				lstrcpy(szIniFile, L"*?");
+				StrCpyExW(szIniFile, L"*?");
 				state = 1;
 			}
 			break;
@@ -6326,7 +6325,7 @@ int ParseCommandLineOption(LPWSTR lp1, LPWSTR lp2, BOOL *bIsNotepadReplacement) 
 			flagDefaultPos = 0;
 			state = 1;
 			while (*p && state == 1) {
-				switch (ToUpperA(*p)) {
+				switch (ToUpperA(*p++)) {
 				case L'F':
 					flagDefaultPos &= ~(4 | 8 | 16 | 32);
 					flagDefaultPos |= 64;
@@ -6363,7 +6362,6 @@ int ParseCommandLineOption(LPWSTR lp1, LPWSTR lp2, BOOL *bIsNotepadReplacement) 
 					state = 0;
 					break;
 				}
-				p = CharNext(p);
 			}
 		}
 		break;
@@ -6531,9 +6529,7 @@ void ParseCommandLine(void) {
 			PathFixBackslashes(lpFileArg);
 			StrTrim(lpFileArg, L" \"");
 
-			if (!PathIsRelative(lpFileArg) && !PathIsUNC(lpFileArg) &&
-					PathGetDriveNumber(lpFileArg) == -1 /*&& PathGetDriveNumber(g_wchWorkingDirectory) != -1*/) {
-
+			if (!PathIsRelative(lpFileArg) && !PathIsUNC(lpFileArg) && PathGetDriveNumber(lpFileArg) == -1) {
 				WCHAR wchPath[MAX_PATH];
 				lstrcpy(wchPath, g_wchWorkingDirectory);
 				PathStripToRoot(wchPath);
@@ -6661,7 +6657,26 @@ BOOL CheckIniFile(LPWSTR lpszFile, LPCWSTR lpszModule) {
 			return TRUE;
 		}
 
-#if _WIN32_WINNT < _WIN32_WINNT_VISTA
+#if _WIN32_WINNT >= _WIN32_WINNT_VISTA
+		REFKNOWNFOLDERID rfidList[] = {
+			&FOLDERID_LocalAppData,
+			&FOLDERID_RoamingAppData,
+			&FOLDERID_Profile,
+		};
+		for (UINT i = 0; i < COUNTOF(rfidList); i++) {
+			LPWSTR pszPath = NULL;
+			if (S_OK == SHGetKnownFolderPath(rfidList[i], KF_FLAG_DEFAULT, NULL, &pszPath)) {
+				lstrcpy(tchBuild, pszPath);
+				CoTaskMemFree(pszPath);
+				PathAppend(tchBuild, WC_NOTEPAD2);
+				PathAppend(tchBuild, tchFileExpanded);
+				if (PathIsFile(tchBuild)) {
+					lstrcpy(lpszFile, tchBuild);
+					return TRUE;
+				}
+			}
+		}
+#else
 		const int csidlList[] = {
 			// %LOCALAPPDATA%
 			// C:\Users\<username>\AppData\Local
@@ -6677,25 +6692,6 @@ BOOL CheckIniFile(LPWSTR lpszFile, LPCWSTR lpszModule) {
 		};
 		for (UINT i = 0; i < COUNTOF(csidlList); i++) {
 			if (S_OK == SHGetFolderPath(NULL, csidlList[i], NULL, SHGFP_TYPE_CURRENT, tchBuild)) {
-				PathAppend(tchBuild, WC_NOTEPAD2);
-				PathAppend(tchBuild, tchFileExpanded);
-				if (PathIsFile(tchBuild)) {
-					lstrcpy(lpszFile, tchBuild);
-					return TRUE;
-				}
-			}
-		}
-#else
-		REFKNOWNFOLDERID rfidList[] = {
-			&FOLDERID_LocalAppData,
-			&FOLDERID_RoamingAppData,
-			&FOLDERID_Profile,
-		};
-		for (UINT i = 0; i < COUNTOF(rfidList); i++) {
-			LPWSTR pszPath = NULL;
-			if (S_OK == SHGetKnownFolderPath(rfidList[i], KF_FLAG_DEFAULT, NULL, &pszPath)) {
-				lstrcpy(tchBuild, pszPath);
-				CoTaskMemFree(pszPath);
 				PathAppend(tchBuild, WC_NOTEPAD2);
 				PathAppend(tchBuild, tchFileExpanded);
 				if (PathIsFile(tchBuild)) {
@@ -6734,14 +6730,15 @@ BOOL CheckIniFileRedirect(LPWSTR lpszFile, LPCWSTR lpszModule, LPCWSTR redirectK
 }
 
 BOOL FindIniFile(void) {
+	if (StrEqualExW(szIniFile, L"*?")) {
+		return FALSE;
+	}
+
 	WCHAR tchTest[MAX_PATH];
 	WCHAR tchModule[MAX_PATH];
-	GetModuleFileName(NULL, tchModule, COUNTOF(tchModule));
+	GetProgramRealPath(tchModule, COUNTOF(tchModule));
 
 	if (StrNotEmpty(szIniFile)) {
-		if (StrEqual(szIniFile, L"*?")) {
-			return FALSE;
-		}
 		if (!CheckIniFile(szIniFile, tchModule)) {
 			ExpandEnvironmentStringsEx(szIniFile, COUNTOF(szIniFile));
 			if (PathIsRelative(szIniFile)) {
@@ -6778,9 +6775,9 @@ BOOL FindIniFile(void) {
 }
 
 BOOL TestIniFile(void) {
-	if (StrEqual(szIniFile, L"*?")) {
-		lstrcpy(szIniFile2, L"");
-		lstrcpy(szIniFile, L"");
+	if (StrEqualExW(szIniFile, L"*?")) {
+		StrCpyExW(szIniFile2, L"");
+		StrCpyExW(szIniFile, L"");
 		return FALSE;
 	}
 
@@ -6789,9 +6786,9 @@ BOOL TestIniFile(void) {
 		return TRUE;
 	}
 
-	if ((dwFileAttributes != INVALID_FILE_ATTRIBUTES) || *CharPrev(szIniFile, StrEnd(szIniFile)) == L'\\') {
+	if ((dwFileAttributes != INVALID_FILE_ATTRIBUTES) || (StrNotEmpty(szIniFile) && szIniFile[lstrlen(szIniFile) - 1] == L'\\')) {
 		WCHAR wchModule[MAX_PATH];
-		GetModuleFileName(NULL, wchModule, COUNTOF(wchModule));
+		GetProgramRealPath(wchModule, COUNTOF(wchModule));
 		PathAppend(szIniFile, PathFindFileName(wchModule));
 		PathRenameExtension(szIniFile, L".ini");
 		dwFileAttributes = GetFileAttributes(szIniFile);
@@ -6808,7 +6805,7 @@ BOOL TestIniFile(void) {
 
 	if ((dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
 		lstrcpy(szIniFile2, szIniFile);
-		lstrcpy(szIniFile, L"");
+		StrCpyExW(szIniFile, L"");
 		return FALSE;
 	}
 
@@ -6833,7 +6830,7 @@ void FindExtraIniFile(LPWSTR lpszIniFile, LPCWSTR defaultName, LPCWSTR redirectK
 		lstrcpy(lpszIniFile, szIniFile);
 	} else {
 		// relative to program exe file
-		GetModuleFileName(NULL, lpszIniFile, MAX_PATH);
+		GetProgramRealPath(lpszIniFile, MAX_PATH);
 	}
 	lstrcpy(PathFindFileName(lpszIniFile), defaultName);
 }
@@ -6972,8 +6969,8 @@ void UpdateStatusbar(void) {
 	const Sci_Position iSelStart = SciCall_GetSelectionStart();
 	const Sci_Position iSelEnd = SciCall_GetSelectionEnd();
 	if (iSelStart == iSelEnd) {
-		lstrcpy(tchSelByte, L"0");
-		lstrcpy(tchSelChar, L"0");
+		StrCpyExW(tchSelByte, L"0");
+		StrCpyExW(tchSelChar, L"0");
 	} else if (!SciCall_IsRectangleSelection()) {
 		Sci_Position iSel = SciCall_GetSelTextLength() - 1;
 		PosToStrW(iSel, tchSelByte);
@@ -6982,21 +6979,21 @@ void UpdateStatusbar(void) {
 		PosToStrW(iSel, tchSelChar);
 		FormatNumberStr(tchSelChar);
 	} else {
-		lstrcpy(tchSelByte, L"--");
-		lstrcpy(tchSelChar, L"--");
+		StrCpyExW(tchSelByte, L"--");
+		StrCpyExW(tchSelChar, L"--");
 	}
 
 	// Print number of selected lines in statusbar
 	WCHAR tchLinesSelected[32];
 	WCHAR tchMatchesCount[32];
 	if (iSelStart == iSelEnd) {
-		lstrcpy(tchLinesSelected, L"0");
+		StrCpyExW(tchLinesSelected, L"0");
 	} else {
 		const Sci_Line iStartLine = SciCall_LineFromPosition(iSelStart);
 		const Sci_Line iEndLine = SciCall_LineFromPosition(iSelEnd);
 		const Sci_Position iStartOfLinePos = SciCall_PositionFromLine(iEndLine);
 		Sci_Line iLinesSelected = iEndLine - iStartLine;
-		if (iSelStart != iSelEnd && iStartOfLinePos != iSelEnd) {
+		if (iStartOfLinePos != iSelEnd) {
 			iLinesSelected += 1;
 		}
 		PosToStrW(iLinesSelected, tchLinesSelected);
@@ -7183,7 +7180,7 @@ BOOL FileLoad(BOOL bDontSave, BOOL bNew, BOOL bReload, BOOL bNoEncDetect, LPCWST
 
 	if (!bNew && StrNotEmpty(lpszFile)) {
 		lstrcpy(tch, lpszFile);
-		if (lpszFile == szCurFile || StrCaseEqual(lpszFile, szCurFile)) {
+		if (lpszFile == szCurFile || PathEqual(lpszFile, szCurFile)) {
 			iCurPos = SciCall_GetCurrentPos();
 			iAnchorPos = SciCall_GetAnchor();
 			iLine = SciCall_LineFromPosition(iCurPos) + 1;
@@ -7204,11 +7201,11 @@ BOOL FileLoad(BOOL bDontSave, BOOL bNew, BOOL bReload, BOOL bNoEncDetect, LPCWST
 	}
 
 	if (bNew) {
-		lstrcpy(szCurFile, L"");
+		StrCpyExW(szCurFile, L"");
 		SetDlgItemText(hwndMain, IDC_FILENAME, szCurFile);
 		SetDlgItemInt(hwndMain, IDC_REUSELOCK, GetTickCount(), FALSE);
 		if (!keepTitleExcerpt) {
-			lstrcpy(szTitleExcerpt, L"");
+			StrCpyExW(szTitleExcerpt, L"");
 		}
 		FileVars_Init(NULL, 0, &fvCurFile);
 		EditSetEmptyText();
@@ -7251,12 +7248,11 @@ BOOL FileLoad(BOOL bDontSave, BOOL bNew, BOOL bReload, BOOL bNoEncDetect, LPCWST
 		lstrcpy(szFileName, tch);
 	}
 
-	PathCanonicalizeEx(szFileName);
-	GetLongPathNameEx(szFileName, COUNTOF(szFileName));
-
-	if (PathIsLnkFile(szFileName)) {
-		PathGetLnkPath(szFileName, szFileName, COUNTOF(szFileName));
+	if (PathCanonicalize(tch, szFileName)) {
+		lstrcpy(szFileName, tch);
 	}
+	GetLongPathName(szFileName, szFileName, COUNTOF(szFileName));
+	PathGetLnkPath(szFileName, szFileName);
 
 #if NP2_USE_DESIGNATED_INITIALIZER
 	EditFileIOStatus status = {
@@ -7312,7 +7308,7 @@ BOOL FileLoad(BOOL bDontSave, BOOL bNew, BOOL bReload, BOOL bNoEncDetect, LPCWST
 		SetDlgItemText(hwndMain, IDC_FILENAME, szCurFile);
 		SetDlgItemInt(hwndMain, IDC_REUSELOCK, GetTickCount(), FALSE);
 		if (!keepTitleExcerpt) {
-			lstrcpy(szTitleExcerpt, L"");
+			StrCpyExW(szTitleExcerpt, L"");
 		}
 		iOriginalEncoding = iEncoding;
 		bModified = FALSE;
@@ -7325,7 +7321,7 @@ BOOL FileLoad(BOOL bDontSave, BOOL bNew, BOOL bReload, BOOL bNoEncDetect, LPCWST
 		if (!keepCurrentLexer) {
 			if (flagLexerSpecified) {
 				if (pLexCurrent->rid == iInitialLexer) {
-					UpdateLineNumberWidth();
+					Style_SetLexer(pLexCurrent, TRUE);
 				} else if (lpSchemeArg) {
 					Style_SetLexerFromName(szCurFile, lpSchemeArg);
 					LocalFree(lpSchemeArg);
@@ -7524,7 +7520,7 @@ BOOL FileSave(BOOL bSaveAlways, BOOL bAsk, BOOL bSaveAs, BOOL bSaveCopy) {
 					SetDlgItemText(hwndMain, IDC_FILENAME, szCurFile);
 					SetDlgItemInt(hwndMain, IDC_REUSELOCK, GetTickCount(), FALSE);
 					if (!fKeepTitleExcerpt) {
-						lstrcpy(szTitleExcerpt, L"");
+						StrCpyExW(szTitleExcerpt, L"");
 					}
 					if (flagLexerSpecified) {
 						if (pLexCurrent->rid == iInitialLexer) {
@@ -7609,7 +7605,7 @@ BOOL OpenFileDlg(HWND hwnd, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialD
 	}
 
 	WCHAR szFile[MAX_PATH];
-	lstrcpy(szFile, L"");
+	StrCpyExW(szFile, L"");
 	int lexers[1 + OPENDLG_MAX_LEXER_COUNT] = {0}; // 1-based filter index
 	LPWSTR szFilter = Style_GetOpenDlgFilterStr(TRUE, szCurFile, lexers);
 
@@ -7708,7 +7704,7 @@ BOOL SaveFileDlg(HWND hwnd, BOOL Untitled, LPWSTR lpstrFile, int cchFile, LPCWST
 *
 *
 ******************************************************************************/
-BOOL CALLBACK EnumWndProc(HWND hwnd, LPARAM lParam) {
+static BOOL CALLBACK EnumWindProcReuseWindow(HWND hwnd, LPARAM lParam) {
 	BOOL bContinue = TRUE;
 	WCHAR szClassName[64];
 
@@ -7726,7 +7722,7 @@ BOOL CALLBACK EnumWndProc(HWND hwnd, LPARAM lParam) {
 	return bContinue;
 }
 
-BOOL CALLBACK EnumWndProc2(HWND hwnd, LPARAM lParam) {
+static BOOL CALLBACK EnumWindProcSingleFileInstance(HWND hwnd, LPARAM lParam) {
 	BOOL bContinue = TRUE;
 	WCHAR szClassName[64];
 
@@ -7740,7 +7736,7 @@ BOOL CALLBACK EnumWndProc2(HWND hwnd, LPARAM lParam) {
 
 				WCHAR tchFileName[MAX_PATH] = L"";
 				GetDlgItemText(hwnd, IDC_FILENAME, tchFileName, COUNTOF(tchFileName));
-				if (StrCaseEqual(tchFileName, lpFileArg)) {
+				if (PathEquivalent(tchFileName, lpFileArg)) {
 					*(HWND *)lParam = hwnd;
 				} else {
 					bContinue = TRUE;
@@ -7766,10 +7762,10 @@ BOOL ActivatePrevInst(void) {
 			lstrcpy(lpFileArg, tchTmp);
 		}
 
-		GetLongPathNameEx(lpFileArg, MAX_PATH);
+		GetLongPathName(lpFileArg, lpFileArg, MAX_PATH);
 
 		HWND hwnd = NULL;
-		EnumWindows(EnumWndProc2, (LPARAM)&hwnd);
+		EnumWindows(EnumWindProcSingleFileInstance, (LPARAM)&hwnd);
 
 		if (hwnd != NULL) {
 			// Enabled
@@ -7837,7 +7833,7 @@ BOOL ActivatePrevInst(void) {
 	}
 
 	HWND hwnd = NULL;
-	EnumWindows(EnumWndProc, (LPARAM)&hwnd);
+	EnumWindows(EnumWindProcReuseWindow, (LPARAM)&hwnd);
 
 	// Found a window
 	if (hwnd != NULL) {
@@ -7940,13 +7936,13 @@ BOOL RelaunchMultiInst(void) {
 		LPWSTR lp2 = (LPWSTR)NP2HeapAlloc(cmdSize);
 
 		StrTab2Space(lpCmdLineNew);
-		lstrcpy(lpCmdLineNew + cchiFileList, L"");
+		StrCpyExW(lpCmdLineNew + cchiFileList, L"");
 
-		LPWSTR pwch = CharPrev(lpCmdLineNew, StrEnd(lpCmdLineNew));
+		LPWSTR pwch = StrEnd(lpCmdLineNew) - 1;
 		int i = 0;
 		while (*pwch == L' ' || *pwch == L'-' || *pwch == L'+') {
 			*pwch = L' ';
-			pwch = CharPrev(lpCmdLineNew, pwch);
+			pwch--;
 			if (i++ > 1) {
 				cchiFileList--;
 			}
@@ -8132,7 +8128,7 @@ BOOL RelaunchElevated(void) {
 				return FALSE;
 			}
 
-			exit = StrCaseEqual(tchFile, szCurFile);
+			exit = PathEqual(tchFile, szCurFile);
 			lpArg1 = (LPWSTR)NP2HeapAlloc(sizeof(WCHAR) * MAX_PATH);
 			GetModuleFileName(NULL, lpArg1, MAX_PATH);
 			lpArg2 = (LPWSTR)NP2HeapAlloc(sizeof(WCHAR) * 1024);
@@ -8271,9 +8267,9 @@ void SetNotifyIconTitle(HWND hwnd) {
 	}
 
 	if (IsDocumentModified()) {
-		lstrcpy(nid.szTip, L"* ");
+		StrCpyExW(nid.szTip, L"* ");
 	} else {
-		lstrcpy(nid.szTip, L"");
+		StrCpyExW(nid.szTip, L"");
 	}
 	lstrcat(nid.szTip, tchTitle);
 

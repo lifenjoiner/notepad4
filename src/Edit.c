@@ -42,6 +42,7 @@
 #include "resource.h"
 
 extern HWND hwndMain;
+extern HWND hwndEdit;
 extern DWORD dwLastIOError;
 extern HWND hDlgFindReplace;
 extern UINT cpLastFind;
@@ -81,10 +82,10 @@ static DStringW wchAppendLines;
 #define NP2_DYNAMIC_LOAD_ELSCORE_DLL	1
 #endif
 #if NP2_DYNAMIC_LOAD_ELSCORE_DLL
-#if _WIN32_WINNT < _WIN32_WINNT_WIN8
-extern DWORD kSystemLibraryLoadFlags;
-#else
+#if _WIN32_WINNT >= _WIN32_WINNT_WIN8
 #define kSystemLibraryLoadFlags		LOAD_LIBRARY_SEARCH_SYSTEM32
+#else
+extern DWORD kSystemLibraryLoadFlags;
 #endif
 static HMODULE hELSCoreDLL = NULL;
 #else
@@ -153,6 +154,7 @@ void EditSetNewText(LPCSTR lpstrText, DWORD cbText, Sci_Line lineCount) {
 	FileVars_Apply(&fvCurFile);
 
 	if (cbText > 0) {
+		SendMessage(hwndEdit, WM_SETREDRAW, FALSE, 0);
 		SciCall_SetModEventMask(SC_MOD_NONE);
 #if 0
 		StopWatch watch;
@@ -165,6 +167,8 @@ void EditSetNewText(LPCSTR lpstrText, DWORD cbText, Sci_Line lineCount) {
 		StopWatch_ShowLog(&watch, "AddText time");
 #endif
 		SciCall_SetModEventMask(SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT);
+		SendMessage(hwndEdit, WM_SETREDRAW, TRUE, 0);
+		RedrawWindow(hwndEdit, NULL, NULL, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
 	}
 
 	SciCall_SetUndoCollection(TRUE);
@@ -211,9 +215,12 @@ BOOL EditConvertText(UINT cpSource, UINT cpDest, BOOL bSetSavePoint) {
 	SciCall_SetCodePage(cpDest);
 
 	if (cbText > 0) {
+		SendMessage(hwndEdit, WM_SETREDRAW, FALSE, 0);
 		SciCall_SetModEventMask(SC_MOD_NONE);
 		SciCall_AppendText(cbText, pchText);
 		SciCall_SetModEventMask(SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT);
+		SendMessage(hwndEdit, WM_SETREDRAW, TRUE, 0);
+		RedrawWindow(hwndEdit, NULL, NULL, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
 	}
 	if (pchText != NULL) {
 		NP2HeapFree(pchText);
@@ -256,9 +263,12 @@ void EditConvertToLargeMode(void) {
 	FileVars_Apply(&fvCurFile);
 
 	if (length > 0) {
+		SendMessage(hwndEdit, WM_SETREDRAW, FALSE, 0);
 		SciCall_SetModEventMask(SC_MOD_NONE);
 		SciCall_AppendText(length, pchText);
 		SciCall_SetModEventMask(SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT);
+		SendMessage(hwndEdit, WM_SETREDRAW, TRUE, 0);
+		RedrawWindow(hwndEdit, NULL, NULL, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
 	}
 	if (pchText != NULL) {
 		NP2HeapFree(pchText);
@@ -1079,28 +1089,7 @@ BOOL EditLoadFile(LPWSTR pszFile, BOOL bSkipEncodingDetection, EditFileIOStatus 
 	}
 
 	// display real path name
-	{
-		WCHAR path[MAX_PATH] = L"";
-		// since Windows Vista
-#if _WIN32_WINNT >= _WIN32_WINNT_VISTA
-		if (GetFinalPathNameByHandleW(hFile, path, MAX_PATH, FILE_NAME_OPENED))
-#else
-		typedef DWORD (WINAPI *GetFinalPathNameByHandleSig)(HANDLE hFile, LPWSTR lpszFilePath, DWORD cchFilePath, DWORD dwFlags);
-		GetFinalPathNameByHandleSig pfnGetFinalPathNameByHandle =
-			DLLFunctionEx(GetFinalPathNameByHandleSig, L"kernel32.dll", "GetFinalPathNameByHandleW");
-		if (pfnGetFinalPathNameByHandle && pfnGetFinalPathNameByHandle(hFile, path, MAX_PATH, FILE_NAME_OPENED))
-#endif
-		{
-			if (StrHasPrefix(path, L"\\\\?\\")) {
-				WCHAR *p = path + CSTRLEN(L"\\\\?\\");
-				if (StrHasPrefix(p, L"UNC\\")) {
-					p += 2;
-					*p = L'\\'; // replace 'C' with backslash
-				}
-				lstrcpy(pszFile, p);
-			}
-		}
-	}
+	PathGetRealPath(hFile, pszFile, pszFile);
 
 	// Check if a warning message should be displayed for large files
 #if defined(_WIN64)
@@ -2152,7 +2141,8 @@ void EditUnescapeXHTMLChars(HWND hwnd) {
 \xHHHH		4			1
 \uHHHHHH	6				1
 */
-#define MAX_ESCAPE_HEX_DIGIT	4
+#define BMP_UNICODE_HEX_DIGIT	4
+#define MAX_UNICODE_HEX_DIGIT	8
 
 void EditChar2Hex(void) {
 	Sci_Position count = SciCall_GetSelTextLength() - 1;
@@ -2164,33 +2154,31 @@ void EditChar2Hex(void) {
 		return;
 	}
 
-	count *= 2 + MAX_ESCAPE_HEX_DIGIT;
+	count *= 2 + BMP_UNICODE_HEX_DIGIT;
+	count += 1;
 	char *ch = (char *)NP2HeapAlloc(count + 10);
-	WCHAR *wch = (WCHAR *)NP2HeapAlloc((count + 1) * sizeof(WCHAR));
+	WCHAR *wch = (WCHAR *)NP2HeapAlloc(count * sizeof(WCHAR));
 	SciCall_GetSelText(ch);
 
-	if (ch[0] == 0) {
+	if (ch[0] == '\0') {
 		strcpy(ch, "\\x00");
 	} else {
 		const UINT cpEdit = SciCall_GetCodePage();
-		char uesc = 'u';
-		if (pLexCurrent->rid == NP2LEX_CSHARP) {
-			uesc = 'x';
-		}
-		count = MultiByteToWideChar(cpEdit, 0, ch, -1, wch, (int)(count + 1)) - 1; // '\0'
+		count = MultiByteToWideChar(cpEdit, 0, ch, -1, wch, (int)count) - 1; // '\0'
 		int j = 0;
 		for (Sci_Position i = 0; i < count; i++) {
-			if (wch[i] <= 0xFF) {
-				sprintf(ch + j, "\\x%02X", wch[i] & 0xFF); // \xhh
+			const WCHAR c = wch[i];
+			if (c <= 0xFF) {
+				sprintf(ch + j, "\\x%02X", c); // \xHH
 				j += 4;
 			} else {
-				sprintf(ch + j, "\\%c%04X", uesc, wch[i]); // \uhhhh \xhhhh
+				sprintf(ch + j, "\\u%04X", c); // \uHHHH
 				j += 6;
 			}
 		}
 		if (count == 2 && IS_SURROGATE_PAIR(wch[0], wch[1])) {
-			const UINT ucc = UTF16_TO_UTF32(wch[0], wch[1]);
-			sprintf(ch + j, " U+%X", ucc);
+			const UINT value = UTF16_TO_UTF32(wch[0], wch[1]);
+			sprintf(ch + j, " U+%X", value);
 		}
 	}
 
@@ -2214,47 +2202,54 @@ void EditHex2Char(void) {
 		return;
 	}
 
-	count *= 2 + MAX_ESCAPE_HEX_DIGIT;
-	char *ch = (char *)NP2HeapAlloc(count + 1);
-	WCHAR *wch = (WCHAR *)NP2HeapAlloc((count + 1) * sizeof(WCHAR));
+	count *= 2 + BMP_UNICODE_HEX_DIGIT;
+	count += 1;
+	char *ch = (char *)NP2HeapAlloc(count);
+	WCHAR *wch = (WCHAR *)NP2HeapAlloc(count * sizeof(WCHAR));
 	const UINT cpEdit = SciCall_GetCodePage();
-	int ci = 0;
-	int cch = 0;
 
 	SciCall_GetSelText(ch);
+	MultiByteToWideChar(cpEdit, 0, ch, -1, wch, (int)count);
 
-	const uint8_t *p = (const uint8_t *)ch;
+	const WCHAR *p = wch;
+	WCHAR *t = wch;
+	BOOL changed = FALSE;
 	while (*p) {
-		if (*p == '\\') {
+		UINT wc = *p++;
+		if ((wc == L'\\' && (*p == L'x' || *p == 'u' || *p == 'U')) || (wc == L'U' && *p == L'+')) {
+			const int digitCount = (wc == L'U' || *p == L'U') ? MAX_UNICODE_HEX_DIGIT : BMP_UNICODE_HEX_DIGIT;
+			UINT value = 0;
+			int ucc = 1;
 			p++;
-			if (*p == 'x' || *p == 'u') {
+			for (; ucc <= digitCount && *p; ucc++) {
+				const int hex = GetHexDigit(*p);
+				if (hex < 0) {
+					break;
+				}
+				value = (value << 4) | hex;
 				p++;
-				ci = 0;
-				int ucc = 0;
-				while (*p && (ucc++ < MAX_ESCAPE_HEX_DIGIT)) {
-					const int hex = GetHexDigit(*p);
-					if (hex < 0) {
-						break;
-					}
-					ci = (ci << 4) | hex;
-					p++;
+			}
+			if (value != 0 && value <= MAX_UNICODE) {
+				changed = TRUE;
+				// see UTF16FromUTF32Character() in UniConversion.h
+				if (value < SUPPLEMENTAL_PLANE_FIRST) {
+					wc = value;
+				} else {
+					*t++ = (WCHAR)(((value - SUPPLEMENTAL_PLANE_FIRST) >> 10) + SURROGATE_LEAD_FIRST);
+					wc = (value & 0x3ff) + SURROGATE_TRAIL_FIRST;
 				}
 			} else {
-				wch[cch++] = L'\\';
-				ci = *p++;
+				p -= ucc;
 			}
-		} else {
-			ci = *p++;
 		}
-		wch[cch++] = (WCHAR)ci;
-		if (ci == 0) {
-			break;
-		}
+		*t++ = (WCHAR)wc;
 	}
 
-	wch[cch] = L'\0';
-	cch = WideCharToMultiByte(cpEdit, 0, wch, -1, ch, (int)(count + 1), NULL, NULL) - 1; // '\0'
-	EditReplaceMainSelection(cch, ch);
+	if (changed) {
+		*t = L'\0';
+		count = WideCharToMultiByte(cpEdit, 0, wch, (int)(t - wch), ch, (int)count, NULL, NULL);
+		EditReplaceMainSelection(count, ch);
+	}
 
 	NP2HeapFree(ch);
 	NP2HeapFree(wch);
@@ -2373,13 +2368,13 @@ void EditConvertNumRadix(int radix) {
 	char *tch = (char *)NP2HeapAlloc(2 + count * 4 + 8 + 1);
 	Sci_Position cch = 0;
 	char *p = ch;
-	uint64_t ci = 0;
+	uint64_t value = 0;
 
 	SciCall_GetSelText(ch);
 
 	while (*p) {
 		if (*p == '0') {
-			ci = 0;
+			value = 0;
 			p++;
 			if ((*p == 'x' || *p == 'X') && radix != 16) {
 				p++;
@@ -2391,33 +2386,33 @@ void EditConvertNumRadix(int radix) {
 						if (hex < 0) {
 							break;
 						}
-						ci = (ci << 4) | hex;
+						value = (value << 4) | hex;
 						p++;
 					}
 				}
-				cch += ConvertNumRadix(tch + cch, ci, radix);
+				cch += ConvertNumRadix(tch + cch, value, radix);
 			} else if ((*p == 'o' || *p == 'O') && radix != 8) {
 				p++;
 				while (*p) {
 					if (*p >= '0' && *p <= '7') {
-						ci <<= 3;
-						ci += (*p++ - '0');
+						value <<= 3;
+						value += (*p++ - '0');
 					} else if (*p == '_') {
 						p++;
 					} else {
 						break;
 					}
 				}
-				cch += ConvertNumRadix(tch + cch, ci, radix);
+				cch += ConvertNumRadix(tch + cch, value, radix);
 			} else if ((*p == 'b' || *p == 'B') && radix != 2) {
 				p++;
 				while (*p) {
 					if (*p == '0') {
-						ci <<= 1;
+						value <<= 1;
 						p++;
 					} else if (*p == '1') {
-						ci <<= 1;
-						ci |= 1;
+						value <<= 1;
+						value |= 1;
 						p++;
 					} else if (*p == '_') {
 						p++;
@@ -2425,36 +2420,36 @@ void EditConvertNumRadix(int radix) {
 						break;
 					}
 				}
-				cch += ConvertNumRadix(tch + cch, ci, radix);
+				cch += ConvertNumRadix(tch + cch, value, radix);
 			} else if ((*p >= '0' && *p <= '9') && radix != 10) {
-				ci = *p++ - '0';
+				value = *p++ - '0';
 				while (*p) {
 					if (*p >= '0' && *p <= '9') {
-						ci *= 10;
-						ci += (*p++ - '0');
+						value *= 10;
+						value += (*p++ - '0');
 					} else if (*p == '_') {
 						p++;
 					} else {
 						break;
 					}
 				}
-				cch += ConvertNumRadix(tch + cch, ci, radix);
+				cch += ConvertNumRadix(tch + cch, value, radix);
 			} else {
 				tch[cch++] = '0';
 			}
 		} else if ((*p >= '1' && *p <= '9') && radix != 10) {
-			ci = *p++ - '0';
+			value = *p++ - '0';
 			while (*p) {
 				if (*p >= '0' && *p <= '9') {
-					ci *= 10;
-					ci += (*p++ - '0');
+					value *= 10;
+					value += (*p++ - '0');
 				} else if (*p == '_') {
 					p++;
 				} else {
 					break;
 				}
 			}
-			cch += ConvertNumRadix(tch + cch, ci, radix);
+			cch += ConvertNumRadix(tch + cch, value, radix);
 		} else if (IsAlphaNumeric(*p) || *p == '_') {
 			// radix and number prefix matches, no conversion
 			tch[cch++] = *p++;
@@ -4488,7 +4483,7 @@ void EditSortLines(int iSortFlags) {
 						if (col + tabs <= iSortColumn) {
 							col += tabs;
 							tabs = tabWidth;
-							pwszLine = CharNext(pwszLine);
+							++pwszLine;
 						} else {
 							break;
 						}
@@ -4497,7 +4492,7 @@ void EditSortLines(int iSortFlags) {
 						if (--tabs == 0) {
 							tabs = tabWidth;
 						}
-						pwszLine = CharNext(pwszLine);
+						pwszLine += 1 + IS_SURROGATE_PAIR(*pwszLine, pwszLine[1]);
 					} else {
 						break;
 					}
@@ -4728,7 +4723,7 @@ void EditEnsureConsistentLineEndings(void) {
 //
 void EditGetExcerpt(LPWSTR lpszExcerpt, DWORD cchExcerpt) {
 	if (SciCall_IsSelectionEmpty() || SciCall_IsRectangleSelection()) {
-		lstrcpy(lpszExcerpt, L"");
+		StrCpyExW(lpszExcerpt, L"");
 		return;
 	}
 
@@ -5568,7 +5563,7 @@ int EditPrepareReplace(HWND hwnd, char *szFind2, char **pszReplace2, BOOL *bRepl
 	}
 
 	*bReplaceRE = (searchFlags & SCFIND_REGEXP);
-	if (StrEqualA(lpefr->szReplace, "^c")) {
+	if (StrEqualExA(lpefr->szReplace, "^c")) {
 		*bReplaceRE = FALSE;
 		*pszReplace2 = EditGetClipboardText(hwnd);
 	} else {
@@ -6090,6 +6085,7 @@ BOOL EditReplaceAll(HWND hwnd, LPCEDITFINDREPLACE lpefr, BOOL bShowInfo) {
 
 	// Show wait cursor...
 	BeginWaitCursor();
+	SendMessage(hwnd, WM_SETREDRAW, FALSE, 0);
 
 	const BOOL bRegexStartOfLine = bReplaceRE && (szFind2[0] == '^');
 	struct Sci_TextToFind ttf = { { 0, SciCall_GetLength() }, szFind2, { 0, 0 } };
@@ -6127,8 +6123,10 @@ BOOL EditReplaceAll(HWND hwnd, LPCEDITFINDREPLACE lpefr, BOOL bShowInfo) {
 		}
 	}
 
+	SendMessage(hwnd, WM_SETREDRAW, TRUE, 0);
 	if (iCount) {
 		SciCall_EndUndoAction();
+		RedrawWindow(hwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
 	}
 
 	// Remove wait cursor
@@ -6162,6 +6160,7 @@ BOOL EditReplaceAllInSelection(HWND hwnd, LPCEDITFINDREPLACE lpefr, BOOL bShowIn
 
 	// Show wait cursor...
 	BeginWaitCursor();
+	SendMessage(hwnd, WM_SETREDRAW, FALSE, 0);
 
 	const BOOL bRegexStartOfLine = bReplaceRE && (szFind2[0] == '^');
 	struct Sci_TextToFind ttf = { { SciCall_GetSelectionStart(), SciCall_GetLength() }, szFind2, { 0, 0 } };
@@ -6204,6 +6203,7 @@ BOOL EditReplaceAllInSelection(HWND hwnd, LPCEDITFINDREPLACE lpefr, BOOL bShowIn
 		}
 	}
 
+	SendMessage(hwnd, WM_SETREDRAW, TRUE, 0);
 	if (iCount) {
 		const Sci_Position iPos = SciCall_GetTargetEnd();
 		if (SciCall_GetSelectionEnd() <	iPos) {
@@ -6220,6 +6220,7 @@ BOOL EditReplaceAllInSelection(HWND hwnd, LPCEDITFINDREPLACE lpefr, BOOL bShowIn
 		}
 
 		SciCall_EndUndoAction();
+		RedrawWindow(hwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
 	}
 
 	// Remove wait cursor
@@ -6745,7 +6746,7 @@ static INT_PTR CALLBACK EditInsertTagDlgProc(HWND hwnd, UINT umsg, WPARAM wParam
 					LPCWSTR pwCur = StrChr(wszOpen.buffer, L'<');
 					if (pwCur != NULL) {
 						LPWSTR wchIns = (LPWSTR)NP2HeapAlloc((len + 5) * sizeof(WCHAR));
-						lstrcpy(wchIns, L"</");
+						StrCpyExW(wchIns, L"</");
 						int	cchIns = 2;
 
 						++pwCur;
@@ -7169,7 +7170,7 @@ void TryBrowseFile(HWND hwnd, LPCWSTR pszFile, BOOL bWarn) {
 		lstrcpy(tchExeFile, L"metapath.exe");
 	}
 	if (PathIsRelative(tchExeFile)) {
-		GetModuleFileName(NULL, tchTemp, COUNTOF(tchTemp));
+		GetProgramRealPath(tchTemp, COUNTOF(tchTemp));
 		PathRemoveFileSpec(tchTemp);
 		PathAppend(tchTemp, tchExeFile);
 		if (PathIsFile(tchTemp)) {
@@ -7951,6 +7952,7 @@ void FoldToggleAll(FOLD_ACTION action) {
 	SciCall_ColouriseAll();
 	const Sci_Line lineCount = SciCall_GetLineCount();
 
+	SendMessage(hwndEdit, WM_SETREDRAW, FALSE, 0);
 	for (Sci_Line line = 0; line < lineCount; ++line) {
 		const int level = SciCall_GetFoldLevel(line);
 		if (level & SC_FOLDLEVELHEADERFLAG) {
@@ -7958,12 +7960,14 @@ void FoldToggleAll(FOLD_ACTION action) {
 		}
 	}
 
+	SendMessage(hwndEdit, WM_SETREDRAW, TRUE, 0);
 	if (fToggled) {
 		SciCall_SetXCaretPolicy(CARET_SLOP | CARET_STRICT | CARET_EVEN, 50);
 		SciCall_SetYCaretPolicy(CARET_SLOP | CARET_STRICT | CARET_EVEN, 5);
 		SciCall_ScrollCaret();
 		SciCall_SetXCaretPolicy(CARET_SLOP | CARET_EVEN, 50);
 		SciCall_SetYCaretPolicy(CARET_EVEN, 0);
+		RedrawWindow(hwndEdit, NULL, NULL, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
 	}
 }
 
@@ -7973,6 +7977,7 @@ void FoldToggleLevel(int lev, FOLD_ACTION action) {
 	const Sci_Line lineCount = SciCall_GetLineCount();
 	Sci_Line line = 0;
 
+	SendMessage(hwndEdit, WM_SETREDRAW, FALSE, 0);
 	if (IsFoldIndentationBased(pLexCurrent->iLexer)) {
 		struct FoldLevelStack levelStack = { 0, { 0 }};
 		++lev;
@@ -8003,12 +8008,14 @@ void FoldToggleLevel(int lev, FOLD_ACTION action) {
 		}
 	}
 
+	SendMessage(hwndEdit, WM_SETREDRAW, TRUE, 0);
 	if (fToggled) {
 		SciCall_SetXCaretPolicy(CARET_SLOP | CARET_STRICT | CARET_EVEN, 50);
 		SciCall_SetYCaretPolicy(CARET_SLOP | CARET_STRICT | CARET_EVEN, 5);
 		SciCall_ScrollCaret();
 		SciCall_SetXCaretPolicy(CARET_SLOP | CARET_EVEN, 50);
 		SciCall_SetYCaretPolicy(CARET_EVEN, 0);
+		RedrawWindow(hwndEdit, NULL, NULL, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
 	}
 }
 
@@ -8071,6 +8078,7 @@ void FoldToggleDefault(FOLD_ACTION action) {
 	const Sci_Line lineCount = SciCall_GetLineCount();
 	Sci_Line line = 0;
 
+	SendMessage(hwndEdit, WM_SETREDRAW, FALSE, 0);
 	if (IsFoldIndentationBased(pLexCurrent->iLexer)) {
 		struct FoldLevelStack levelStack = { 0, { 0 }};
 		while (line < lineCount) {
@@ -8105,12 +8113,14 @@ void FoldToggleDefault(FOLD_ACTION action) {
 		}
 	}
 
+	SendMessage(hwndEdit, WM_SETREDRAW, TRUE, 0);
 	if (fToggled) {
 		SciCall_SetXCaretPolicy(CARET_SLOP | CARET_STRICT | CARET_EVEN, 50);
 		SciCall_SetYCaretPolicy(CARET_SLOP | CARET_STRICT | CARET_EVEN, 5);
 		SciCall_ScrollCaret();
 		SciCall_SetXCaretPolicy(CARET_SLOP | CARET_EVEN, 50);
 		SciCall_SetYCaretPolicy(CARET_EVEN, 0);
+		RedrawWindow(hwndEdit, NULL, NULL, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
 	}
 }
 

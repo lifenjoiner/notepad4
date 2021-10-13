@@ -109,8 +109,7 @@ struct SplitView {
 	const char *segment2 = nullptr;
 	size_t length = 0;
 
-	SplitView() noexcept = default;
-	SplitView(const SplitVector<char> &substance) noexcept;
+	SplitView(const SplitVector<char> &instance) noexcept;
 
 	bool operator==(const SplitView &other) const noexcept {
 		return segment1 == other.segment1 && length1 == other.length1
@@ -140,11 +139,11 @@ class CellBuffer {
 private:
 	bool hasStyles;
 	const bool largeDocument;
-	SplitVector<char> substance;
-	SplitVector<char> style;
 	bool readOnly;
 	bool utf8Substance;
 	Scintilla::LineEndType utf8LineEnds;
+	SplitVector<char> substance;
+	SplitVector<char> style;
 
 	bool collectingUndo;
 	UndoHistory uh;

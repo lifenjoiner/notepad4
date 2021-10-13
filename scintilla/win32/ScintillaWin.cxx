@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdlib>
+#include <cstdint>
 #include <cassert>
 #include <cstring>
 #include <cstdio>
@@ -404,6 +405,7 @@ class ScintillaWin final :
 	UINT dpi;
 	ReverseArrowCursor reverseArrowCursor;
 
+	PRectangle rectangleClient;
 	HRGN hRgnUpdate;
 
 	bool hasOKText;
@@ -563,6 +565,7 @@ class ScintillaWin final :
 	bool IsCompatibleDC(HDC hOtherDC) const noexcept;
 	DWORD EffectFromState(DWORD grfKeyState) const noexcept;
 
+	BOOL IsVisible() const noexcept;
 	int SetScrollInfo(int nBar, LPCSCROLLINFO lpsi, BOOL bRedraw) const noexcept;
 	bool GetScrollInfo(int nBar, LPSCROLLINFO lpsi) const noexcept;
 	void ChangeScrollPos(int barType, Sci::Position pos);
@@ -572,6 +575,9 @@ class ScintillaWin final :
 #if SCI_EnablePopupMenu
 	sptr_t ShowContextMenu(unsigned int iMessage, uptr_t wParam, sptr_t lParam);
 #endif
+	PRectangle GetClientRectangle() const noexcept override {
+		return rectangleClient;
+	}
 	void SizeWindow();
 	sptr_t MouseMessage(unsigned int iMessage, uptr_t wParam, sptr_t lParam);
 	sptr_t KeyMessage(unsigned int iMessage, uptr_t wParam, sptr_t lParam);
@@ -1338,8 +1344,13 @@ bool ScintillaWin::HandleLaTeXTabCompletion() {
 		return false;
 	}
 
-	char buffer[MaxLaTeXInputBufferLength];
 	const Sci::Position main = sel.MainCaret();
+	if (main <= MinLaTeXInputSequenceLength) {
+		return false;
+	}
+
+	char buffer[MaxLaTeXInputBufferLength];
+#if 1
 	Sci::Position pos = main - 1;
 	char *ptr = buffer + sizeof(buffer) - 1;
 	*ptr = '\0';
@@ -1364,6 +1375,37 @@ bool ScintillaWin::HandleLaTeXTabCompletion() {
 	}
 
 	ptrdiff_t wclen = buffer + sizeof(buffer) - 1 - ptr;
+#else
+	Sci::Position pos = std::max<Sci::Position>(0, main - (sizeof(buffer) - 1));
+	Sci::Position wclen = main - pos;
+	pdoc->GetCharRange(buffer, pos, wclen);
+
+	pos = main;
+	char *ptr = buffer + wclen;
+	*ptr = '\0';
+	char ch;
+	do {
+		--pos;
+		--ptr;
+		ch = *ptr;
+		if (!IsLaTeXInputSequenceChar(ch)) {
+			break;
+		}
+	} while (ptr != buffer);
+	if (ch != '\\') {
+		return false;
+	}
+	if (pdoc->dbcsCodePage && pdoc->dbcsCodePage != CpUtf8) {
+		ch = pdoc->CharAt(pos - 1);
+		if (!UTF8IsAscii(ch) && pdoc->IsDBCSLeadByteNoExcept(ch)) {
+			return false;
+		}
+	}
+
+	++ptr;
+	wclen = main - pos - 1;
+#endif
+
 	const uint32_t wch = GetLaTeXInputUnicodeCharacter(ptr, wclen);
 	if (wch == 0) {
 		return false;
@@ -1620,6 +1662,7 @@ void ScintillaWin::SizeWindow() {
 	}
 #endif
 	//Platform::DebugPrintf("Scintilla WM_SIZE %d %d\n", LOWORD(lParam), HIWORD(lParam));
+	rectangleClient = wMain.GetClientPosition();
 	ChangeSize();
 }
 
@@ -2294,6 +2337,15 @@ sptr_t ScintillaWin::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		case WM_ERASEBKGND:
 			return 1;   // Avoid any background erasure as whole window painted.
 
+		case WM_SETREDRAW:
+			::DefWindowProc(MainHWND(), msg, wParam, lParam);
+			if (wParam) {
+				SetScrollBars();
+				SetVerticalScrollPos();
+				SetHorizontalScrollPos();
+			}
+			return 0;
+
 		case WM_CAPTURECHANGED:
 			capturedMouse = false;
 			return 0;
@@ -2419,15 +2471,15 @@ void ScintillaWin::FineTickerStart(TickReason reason, int millis, int tolerance)
 	FineTickerCancel(reason);
 	const UINT_PTR reasonIndex = static_cast<UINT_PTR>(reason);
 	const UINT_PTR eventID = static_cast<UINT_PTR>(fineTimerStart) + reasonIndex;
-#if _WIN32_WINNT < _WIN32_WINNT_WIN8
-	if (SetCoalescableTimerFn && tolerance) {
-		timers[reasonIndex] = SetCoalescableTimerFn(MainHWND(), eventID, millis, nullptr, tolerance);
+#if _WIN32_WINNT >= _WIN32_WINNT_WIN8
+	if (tolerance) {
+		timers[reasonIndex] = ::SetCoalescableTimer(MainHWND(), eventID, millis, nullptr, tolerance);
 	} else {
 		timers[reasonIndex] = ::SetTimer(MainHWND(), eventID, millis, nullptr);
 	}
 #else
-	if (tolerance) {
-		timers[reasonIndex] = ::SetCoalescableTimer(MainHWND(), eventID, millis, nullptr, tolerance);
+	if (SetCoalescableTimerFn && tolerance) {
+		timers[reasonIndex] = SetCoalescableTimerFn(MainHWND(), eventID, millis, nullptr, tolerance);
 	} else {
 		timers[reasonIndex] = ::SetTimer(MainHWND(), eventID, millis, nullptr);
 	}
@@ -2555,6 +2607,10 @@ void ScintillaWin::UpdateSystemCaret() {
 	}
 }
 
+BOOL ScintillaWin::IsVisible() const noexcept {
+	return GetWindowStyle(MainHWND()) & WS_VISIBLE;
+}
+
 int ScintillaWin::SetScrollInfo(int nBar, LPCSCROLLINFO lpsi, BOOL bRedraw) const noexcept {
 	return ::SetScrollInfo(MainHWND(), nBar, lpsi, bRedraw);
 }
@@ -2565,6 +2621,10 @@ bool ScintillaWin::GetScrollInfo(int nBar, LPSCROLLINFO lpsi) const noexcept {
 
 // Change the scroll position but avoid repaint if changing to same value
 void ScintillaWin::ChangeScrollPos(int barType, Sci::Position pos) {
+	if (!IsVisible()) {
+		return;
+	}
+
 	SCROLLINFO sci {};
  	sci.cbSize = sizeof(sci);
 	sci.fMask = SIF_POS;
@@ -2585,6 +2645,10 @@ void ScintillaWin::SetHorizontalScrollPos() {
 }
 
 bool ScintillaWin::ModifyScrollBars(Sci::Line nMax, Sci::Line nPage) {
+	if (!IsVisible()) {
+		return false;
+	}
+
 	bool modified = false;
 	SCROLLINFO sci {};
 	sci.cbSize = sizeof(sci);

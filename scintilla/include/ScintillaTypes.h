@@ -108,14 +108,16 @@ enum class MarginType {
 };
 
 enum class StylesCommon {
-	Default = 32,
-	LineNumber = 33,
+	Default = 0,
+	LineNumber = 32,
+	HotSpot = 33,
 	BraceLight = 34,
 	BraceBad = 35,
 	ControlChar = 36,
 	IndentGuide = 37,
 	CallTip = 38,
 	FoldDisplayText = 39,
+	FirstPredefined = 32,
 	LastPredefined = 39,
 	Max = 255,
 };
@@ -178,6 +180,8 @@ enum class Element {
 	WhiteSpaceBack = 61,
 	HotSpotActive = 70,
 	HotSpotActiveBack = 71,
+	FoldLine = 80,
+	HiddenLine = 81,
 };
 
 enum class Layer {
@@ -226,6 +230,11 @@ enum class IndicValue {
 enum class IndicFlag {
 	None = 0,
 	ValueFore = 1,
+};
+
+enum class AutoCompleteOption {
+	Normal = 0,
+	FixedSize = 1,
 };
 
 enum class IndentView {
