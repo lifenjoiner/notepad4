@@ -1,6 +1,6 @@
 # Notepad2 and metapath
 
-> *Notepad2* is a modified version (fork) of [Notepad2-mod](https://xhmikosr.github.io/notepad2-mod/). *metapath* is a bug-fixed version of original [metapath](http://www.flos-freeware.ch/archive.html).
+> *Notepad2-zufuliu* is a modified version (fork) of [Notepad2-mod](https://xhmikosr.github.io/notepad2-mod/). *metapath* is a bug-fixed version of original [metapath](http://www.flos-freeware.ch/archive.html).
 
 [![License](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](../main/License.txt) [![Latest release](https://img.shields.io/github/release/zufuliu/notepad2.svg)](https://github.com/zufuliu/notepad2/releases) [![Downloads](https://img.shields.io/github/downloads/zufuliu/notepad2/total.svg)](https://github.com/zufuliu/notepad2/releases)
 
@@ -27,36 +27,37 @@ Latest development builds (artifacts in Release configuration for each compiler 
 	* [ABAQUS](../main/tools/lang/ABAQUS.inp)
 	* [ActionScript](../main/tools/lang/ActionScript.as) for ActionScript 3 and 4.
 	* Android Smali, [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#android-smali)
-		* javap
-		* Jasmin
+		* [javap](https://docs.oracle.com/en/java/javase/17/docs/specs/man/javap.html)
+		* [Jasmin](http://jasmin.sourceforge.net/)
 	* ANSI Art
 	* [ANSYS](../main/tools/lang/APDL.cdb) Parametric Design Language
 	* Assembler, [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#assembler)
 		* MASM
 		* GNU Assembler
-		* NASM
+		* [NASM](https://nasm.us/)
 	* [Asymptote Vector Graphics Language](../main/tools/lang/Asymptote.asy), up to Asymptote 2.70.
 	* [AutoHotkey_L](../main/tools/lang/AutoHotkey_L.ahk) and  [AutoHotkey_H](../main/tools/lang/AutoHotkey_H.ahk) Script, up to v2.
 	* AutoIt Script
 	* [AviSynth Script](../main/tools/lang/AviSynth.avs), up to AviSynth 2.6, AviSynth+ 3.6, GScript 1.1.
 	* [AWK](../main/tools/lang/Awk.awk), up to GNU AWK 5.1.
 	* [Batch Script](../main/tools/lang/Batch.bat), [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#batch)
+	* [blockdiag](../main/tools/lang/blockdiag.diag), seqdiag, actdiag and nwdiag
 	* [C#](../main/tools/lang/CSharp.cs), up to C# 10.0. [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#c)
 		* [Vala](https://wiki.gnome.org/Projects/Vala) 0.54
 	* C/C++, [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#cc)
 		* Objective-C/C++, [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#objective-cc)
 		* [C Standard Library](../main/tools/lang/C.c), up to C2x.
 		* [C++ STL](../main/tools/lang/CPP.cpp), up to C++20.
-	* CSS Style Sheet
-		* Sassy CSS
-		* Less CSS
-		* HSS
+	* [CSS Style Sheet](../main/tools/lang/CSS.css), up to 2021 snapshot.
+		* [Sassy CSS](https://sass-lang.com/)
+		* [Less CSS](https://lesscss.org/)
+		* [HSS](https://github.com/ncannasse/hss)
 	* [CMake](../main/tools/lang/CMake.cmake), up to CMake 3.20. [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#cmake)
 	* [CoffeeScript](../main/tools/lang/CoffeeScript.coffee), CoffeeScript 2.5.
 	* Common Intermediate Language
 	* Configuration / Properties File
 		* Apache Configuration File
-	* D
+	* [D](../main/tools/lang/D.), up to D language 2.0.
 	* [Dart](../main/tools/lang/Dart.dart), up to Dart 2.12.
 	* Diff/Patch File
 	* Doxygen
@@ -64,13 +65,12 @@ Latest development builds (artifacts in Release configuration for each compiler 
 	* Fortran, GNU Fortran
 	* [GN Build](../main/tools/lang/GN.gn), up to GN 2019-03-13.
 	* [Go](../main/tools/lang/Go.go), up to Go 1.14.
-		* Go+ (GoPlus) and the Q language
+		* [Go+ (GoPlus)](https://goplus.org/) and the Q language
 	* [Gradle](../main/tools/lang/Gradle.gradle), up to Gradle 6.8, [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#gradle)
-	* GraphViz Dot, [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#graphviz)
-		* blockdiag, seqdiag, actdiag and nwdiag
+	* [GraphViz Dot](../main/tools/lang/GraphViz.dot), up to GraphViz 2.49, [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#graphviz)
 	* [Groovy](../main/tools/lang/Groovy.groovy), up to Groovy 4.0.
 	* [Haxe](../main/tools/lang/Haxe.hx), up to Haxe 4.1
-	* [HTML](../main/tools/lang/html.html), up to [WHATWG](https://html.spec.whatwg.org/multipage/) 2021-09-08. [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#html)
+	* [HTML](../main/tools/lang/html.html), up to [WHATWG](https://html.spec.whatwg.org/multipage/) 2021-12-21. [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#html)
 		* ASP
 		* ASP.NET
 		* JSP

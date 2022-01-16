@@ -46,15 +46,16 @@ class LineLayout final {
 private:
 	friend class LineLayoutCache;
 	std::unique_ptr<int[]> lineStarts;
-	int lenLineStarts;
 	/// Drawing is only performed for @a maxLineLength characters on each line.
-	Sci::Line lineNumber;
+	const Sci::Line lineNumber;
+	int lenLineStarts;
 public:
 	enum {
 		wrapWidthInfinite = 0x7ffffff
 	};
 
 	int maxLineLength;
+	int lastSegmentEnd;
 	int numCharsInLine;
 	int numCharsBeforeEOL;
 	enum class ValidLevel {
@@ -65,6 +66,7 @@ public:
 	bool containsCaret;
 	unsigned char bracePreviousStyles[2];
 	int edgeColumn;
+	int caretPosition;
 	std::unique_ptr<char[]> chars;
 	std::unique_ptr<unsigned char[]> styles;
 	std::unique_ptr<XYPOSITION[]> positions;
@@ -87,7 +89,12 @@ public:
 	void EnsureBidiData();
 	void Free() noexcept;
 	void Invalidate(ValidLevel validity_) noexcept;
-	Sci::Line LineNumber() const noexcept;
+	Sci::Line LineNumber() const noexcept {
+		return lineNumber;
+	}
+	bool PartialPosition() const noexcept {
+		return lastSegmentEnd < numCharsInLine;
+	}
 	bool CanHold(Sci::Line lineDoc, int lineLength_) const noexcept;
 	int LineStart(int line) const noexcept;
 	int LineLength(int line) const noexcept;
@@ -142,14 +149,15 @@ struct ScreenLine : public IScreenLine {
  */
 class LineLayoutCache final {
 private:
-	std::vector<std::unique_ptr<LineLayout>> cache;
+	std::vector<std::unique_ptr<LineLayout>> shortCache;
+	std::vector<std::unique_ptr<LineLayout>> longCache;
 	size_t lastCaretSlot;
 	Scintilla::LineCache level;
 	bool allInvalidated;
 	int styleClock;
 	void AllocateForLevel(Sci::Line linesOnScreen, Sci::Line linesInDoc);
 public:
-	LineLayoutCache();
+	LineLayoutCache() noexcept;
 	// Deleted so LineLayoutCache objects can not be copied.
 	LineLayoutCache(const LineLayoutCache &) = delete;
 	LineLayoutCache(LineLayoutCache &&) = delete;
@@ -190,29 +198,38 @@ public:
 
 class Representation {
 public:
-	static constexpr size_t maxLength = 200;
-	std::string stringRep;
-	RepresentationAppearance appearance;
+	// for Unicode control or format characters in hex code form
+	static constexpr size_t maxLength = 7;
+	char stringRep[maxLength + 1]{};
+	size_t length;
+	RepresentationAppearance appearance = RepresentationAppearance::Blob;
 	ColourRGBA colour;
-	explicit Representation(std::string_view value="", RepresentationAppearance appearance_= RepresentationAppearance::Blob) :
-		stringRep(value), appearance(appearance_) {}
+	explicit Representation(std::string_view value) noexcept {
+		memcpy(stringRep, value.data(), value.length());
+		length = value.length();
+	}
+	std::string_view GetStringRep() const noexcept {
+		return {stringRep, length};
+	}
 };
 
-typedef std::map<unsigned int, Representation> MapRepresentation;
-
 class SpecialRepresentations {
-	MapRepresentation mapReprs;
+	std::map<unsigned int, Representation> mapReprs;
 	unsigned char startByteHasReprs[0x100] {};
+	unsigned int maxKey = 0;
 	bool crlf = false;
 public:
-	SpecialRepresentations() noexcept {}
+#if !defined(_MSC_VER) || (_MSC_VER >= 1920)
+	SpecialRepresentations() noexcept = default;
+#else
+	SpecialRepresentations() noexcept {} // for Visual C++ 2017
+#endif
 	void SetRepresentation(std::string_view charBytes, std::string_view value);
 	void SetRepresentationAppearance(std::string_view charBytes, RepresentationAppearance appearance);
 	void SetRepresentationColour(std::string_view charBytes, ColourRGBA colour);
 	void ClearRepresentation(std::string_view charBytes);
 	const Representation *GetRepresentation(std::string_view charBytes) const;
 	const Representation *RepresentationFromCharacter(std::string_view charBytes) const;
-	bool Contains(std::string_view charBytes) const;
 	bool ContainsCrLf() const noexcept {
 		return crlf;
 	}
@@ -223,11 +240,9 @@ public:
 };
 
 struct TextSegment {
-	int start;
-	int length;
-	const Representation *representation;
-	TextSegment(int start_ = 0, int length_ = 0, const Representation *representation_ = nullptr) noexcept :
-		start(start_), length(length_), representation(representation_) {}
+	const int start;
+	const int length;
+	const Representation * const representation;
 	int end() const noexcept {
 		return start + length;
 	}
@@ -236,29 +251,34 @@ struct TextSegment {
 // Class to break a line of text into shorter runs at sensible places.
 class BreakFinder {
 	const LineLayout *ll;
-	Range lineRange;
-	Sci::Position posLineStart;
+	const Range lineRange;
 	int nextBreak;
+	int subBreak;
 	std::vector<int> selAndEdge;
 	unsigned int saeCurrentPos;
 	int saeNext;
-	int subBreak;
 	const Document *pdoc;
-	EncodingFamily encodingFamily;
-	const SpecialRepresentations *preprs;
+	const EncodingFamily encodingFamily;
+	const SpecialRepresentations * const preprs;
 	void Insert(Sci::Position val);
 public:
 	// If a whole run is longer than lengthStartSubdivision then subdivide
 	// into smaller runs at spaces or punctuation.
 	enum {
-		lengthStartSubdivision = 300
+		lengthStartSubdivision = 4096
 	};
 	// Try to make each subdivided run lengthEachSubdivision or shorter.
 	enum {
-		lengthEachSubdivision = 100
+		lengthEachSubdivision = 1024
 	};
-	BreakFinder(const LineLayout *ll_, const Selection *psel, Range lineRange_, Sci::Position posLineStart_,
-		XYPOSITION xStart, bool breakForSelection, const Document *pdoc_, const SpecialRepresentations *preprs_, const ViewStyle *pvsDraw);
+	enum class BreakFor {
+		Text = 0,
+		Selection = 1,
+		Foreground = 2,
+		ForegroundAndSelection = 3,
+	};
+	BreakFinder(const LineLayout *ll_, const Selection *psel, Range lineRange_, Sci::Position posLineStart,
+		XYPOSITION xStart, BreakFor breakFor, const Document *pdoc_, const SpecialRepresentations *preprs_, const ViewStyle *pvsDraw);
 	// Deleted so BreakFinder objects can not be copied.
 	BreakFinder(const BreakFinder &) = delete;
 	BreakFinder(BreakFinder &&) = delete;
@@ -278,7 +298,7 @@ public:
 	void Clear() noexcept;
 	void SetSize(size_t size_);
 	size_t GetSize() const noexcept;
-	void MeasureWidths(Surface *surface, const ViewStyle &vstyle, uint16_t styleNumber,
+	void MeasureWidths(Surface *surface, const Style &style, uint16_t styleNumber,
 		std::string_view sv, XYPOSITION *positions);
 };
 

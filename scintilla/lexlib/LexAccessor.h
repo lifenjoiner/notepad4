@@ -160,6 +160,13 @@ public:
 	constexpr Sci_Position Length() const noexcept {
 		return lenDoc;
 	}
+	Sci_PositionU StyleEndPos(Sci_PositionU startPos_, Sci_PositionU length) const noexcept {
+		length += startPos_;
+		if (length == static_cast<Sci_PositionU>(lenDoc)) {
+			++length;
+		}
+		return length;
+	}
 	void Flush() {
 		if (validLen > 0) {
 			pAccess->SetStyles(validLen, styleBuf);
@@ -311,7 +318,7 @@ inline unsigned char LexGetNextChar(Sci_Position startPos, Sci_Position endPos, 
 }
 
 void BacktrackToStart(const LexAccessor &styler, int stateMask, Sci_PositionU &startPos, Sci_Position &lengthDoc, int &initStyle) noexcept;
-void LookbackNonWhite(LexAccessor &styler, Sci_PositionU startPos, int maxSpaceStyle, int &chPrevNonWhite, int &stylePrevNonWhite) noexcept;
+Sci_PositionU LookbackNonWhite(LexAccessor &styler, Sci_PositionU startPos, int maxSpaceStyle, int &chPrevNonWhite, int &stylePrevNonWhite) noexcept;
 Sci_PositionU CheckBraceOnNextLine(LexAccessor &styler, Sci_Line line, int operatorStyle, int maxSpaceStyle, int ignoreStyle = 0) noexcept;
 
 }

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from KeywordCore import *
 
 def update_all_keyword():
@@ -13,8 +12,12 @@ def update_all_keyword():
 		('NP2LEX_BATCH', 'stlBatch.c', 'Batch.bat', 0, parse_batch_api_file),
 		('NP2LEX_CMAKE', 'stlCMake.c', 'CMake.cmake', 0, parse_cmake_api_file),
 		('NP2LEX_CSHARP', 'stlCSharp.c', 'CSharp.cs', 1, parse_csharp_api_file),
+		('NP2LEX_D', 'stlD.c', 'D.d', 1, parse_dlang_api_file),
 		('NP2LEX_DART', 'stlDart.c', 'Dart.dart', 0, parse_dart_api_file),
 		('NP2LEX_GN', 'stlGN.c', 'GN.gn', 0, parse_gn_api_file),
+		('NP2LEX_GRAPHVIZ', 'stlGraphViz.c', 'GraphViz.dot', 0, parse_graphviz_api_file),
+			('NP2LEX_BLOCKDIAG', 'stlBlockdiag.c', 'blockdiag.diag', 0, parse_graphviz_api_file),
+			('NP2LEX_CSS', 'stlCSS.c', ['CSS.css'], 0, parse_css_api_file),
 		('NP2LEX_GO', 'stlGO.c', 'Go.go', 0, parse_go_api_file),
 		('NP2LEX_HAXE', 'stlHaxe.c', 'Haxe.hx', 1, parse_haxe_api_file),
 		('NP2LEX_INNO', 'stlInno.c', 'InnoSetup.iss', 0, parse_inno_setup_api_file),

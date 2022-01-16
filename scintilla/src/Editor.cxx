@@ -260,7 +260,7 @@ void Editor::DropGraphics() noexcept {
 	view.DropGraphics();
 }
 
-void Editor::InvalidateStyleData() {
+void Editor::InvalidateStyleData() noexcept {
 	stylesValid = false;
 	vs.technology = technology;
 	DropGraphics();
@@ -774,9 +774,9 @@ void Editor::MultipleSelectAdd(AddNumber addNumber) {
 			searchRanges.push_back(rangeTarget);
 		}
 
-		for (const auto & searchRange : searchRanges) {
-			Sci::Position searchStart = searchRange.start;
-			const Sci::Position searchEnd = searchRange.end;
+		for (const auto & range : searchRanges) {
+			Sci::Position searchStart = range.start;
+			const Sci::Position searchEnd = range.end;
 			for (;;) {
 				Sci::Position lengthFound = selectedText.length();
 				const Sci::Position pos = pdoc->FindText(searchStart, searchEnd,
@@ -1487,9 +1487,9 @@ bool Editor::Wrapping() const noexcept {
 	return vs.wrap.state != Wrap::None;
 }
 
-void Editor::NeedWrapping(Sci::Line docLineStart, Sci::Line docLineEnd) noexcept {
+void Editor::NeedWrapping(Sci::Line docLineStart, Sci::Line docLineEnd, bool invalidate) noexcept {
 	//Platform::DebugPrintf("\nNeedWrapping: %0d..%0d\n", docLineStart, docLineEnd);
-	if (wrapPending.AddRange(docLineStart, docLineEnd)) {
+	if (wrapPending.AddRange(docLineStart, docLineEnd) && invalidate) {
 		view.llc.Invalidate(LineLayout::ValidLevel::positions);
 	}
 	// Wrap lines during idle.
@@ -1498,15 +1498,30 @@ void Editor::NeedWrapping(Sci::Line docLineStart, Sci::Line docLineEnd) noexcept
 	}
 }
 
-bool Editor::WrapOneLine(Surface *surface, Sci::Line lineToWrap) {
-	LineLayout *ll = view.RetrieveLineLayout(lineToWrap, *this);
-	int linesWrapped = 1;
-	if (ll) {
-		view.LayoutLine(*this, surface, vs, ll, wrapWidth);
-		linesWrapped = ll->lines;
+bool Editor::WrapOneLine(Surface *surface, Sci::Position positionInsert) {
+	const Sci::Line lineToWrap = pdoc->SciLineFromPosition(positionInsert);
+	const int posInLine = static_cast<int>(positionInsert - pdoc->LineStart(lineToWrap));
+	LineLayout * const ll = view.RetrieveLineLayout(lineToWrap, *this);
+	view.LayoutLine(*this, surface, vs, ll, wrapWidth, LayoutLineOption::ManualUpdate, posInLine);
+	int linesWrapped = ll->lines;
+	if (vs.annotationVisible != AnnotationVisible::Hidden) {
+		linesWrapped += pdoc->AnnotationLines(lineToWrap);
 	}
-	return pcs->SetHeight(lineToWrap, linesWrapped +
-		((vs.annotationVisible != AnnotationVisible::Hidden) ? pdoc->AnnotationLines(lineToWrap) : 0));
+	return pcs->SetHeight(lineToWrap, linesWrapped);
+}
+
+void Editor::OnLineWrapped(Sci::Line lineDoc, int linesWrapped) {
+	if (Wrapping()) {
+		//printf("%s(%zd, %d)\n", __func__, lineDoc, linesWrapped);
+		if (vs.annotationVisible != AnnotationVisible::Hidden) {
+			linesWrapped += pdoc->AnnotationLines(lineDoc);
+		}
+		if (pcs->SetHeight(lineDoc, linesWrapped)) {
+			NeedWrapping(lineDoc, lineDoc + 1, false);
+			SetScrollBars();
+			SetVerticalScrollPos();
+		}
+	}
 }
 
 // Perform  wrapping for a subset of the lines needing wrapping.
@@ -1515,42 +1530,17 @@ bool Editor::WrapOneLine(Surface *surface, Sci::Line lineToWrap) {
 // wsIdle: wrap one page + 100 lines
 // Return true if wrapping occurred.
 bool Editor::WrapLines(WrapScope ws) {
-//#define WRAP_LINES_TIMING
-#ifdef WRAP_LINES_TIMING
-	struct WrapTiming {
-		size_t totalBytes;
-		size_t totalRuns;
-		double totalDuration;
-		using Clock = std::chrono::steady_clock;
-		Clock::time_point startTime;
-
-		void Reset() noexcept {
-			totalBytes = 0;
-			totalRuns = 0;
-			totalDuration = 0;
-		}
-		void Add(size_t bytes, double duration) noexcept {
-			totalBytes += bytes;
-			++totalRuns;
-			totalDuration += duration;
-		}
-		double TotalTime() const noexcept {
-			const auto tpNow = Clock::now();
-			const auto duration = std::chrono::duration_cast<std::chrono::duration<double>>(tpNow - startTime);
-			return duration.count();
-		}
-	};
-
-	static WrapTiming wrapTiming;
-#endif
 	Sci::Line goodTopLine = topLine;
 	bool wrapOccurred = false;
 	if (!Wrapping()) {
 		if (wrapWidth != LineLayout::wrapWidthInfinite) {
 			wrapWidth = LineLayout::wrapWidthInfinite;
 			for (Sci::Line lineDoc = 0; lineDoc < pdoc->LinesTotal(); lineDoc++) {
-				pcs->SetHeight(lineDoc, 1 +
-					((vs.annotationVisible != AnnotationVisible::Hidden) ? pdoc->AnnotationLines(lineDoc) : 0));
+				int linesWrapped = 1;
+				if (vs.annotationVisible != AnnotationVisible::Hidden) {
+					linesWrapped += pdoc->AnnotationLines(lineDoc);
+				}
+				pcs->SetHeight(lineDoc, linesWrapped);
 			}
 			wrapOccurred = true;
 		}
@@ -1563,13 +1553,6 @@ bool Editor::WrapLines(WrapScope ws) {
 		}
 		// Decide where to start wrapping
 		Sci::Line lineToWrap = wrapPending.start;
-#ifdef WRAP_LINES_TIMING
-		if (lineToWrap == 0) {
-			printf("%s wrap start ws=%d, modEventMask=%x\n", __func__, ws, modEventMask);
-			wrapTiming.Reset();
-			wrapTiming.startTime = WrapTiming::Clock::now();
-		}
-#endif
 		Sci::Line lineToWrapEnd = std::min(wrapPending.end, pdoc->LinesTotal());
 		const Sci::Line lineDocTop = pcs->DocFromDisplay(topLine);
 		const Sci::Line subLineTop = topLine - pcs->DisplayFromDoc(lineDocTop);
@@ -1598,9 +1581,10 @@ bool Editor::WrapLines(WrapScope ws) {
 			const Sci::Position actionsInAllowedTime = durationWrapOneUnit.ActionsInAllowedTime(secondsAllowed);
 			lineToWrapEnd = pdoc->LineFromPositionAfter(lineToWrap, actionsInAllowedTime);
 		}
+
 		const Sci::Line lineEndNeedWrap = std::min(wrapPending.end, pdoc->LinesTotal());
 		lineToWrapEnd = std::min(lineToWrapEnd, lineEndNeedWrap);
-
+		bool partialLine = false;
 		// Ensure all lines being wrapped are styled.
 		pdoc->EnsureStyledTo(pdoc->LineStart(lineToWrapEnd));
 
@@ -1614,20 +1598,32 @@ bool Editor::WrapLines(WrapScope ws) {
 			AutoSurface surface(this);
 			if (surface) {
 				//Platform::DebugPrintf("Wraplines: scope=%0d need=%0d..%0d perform=%0d..%0d\n", ws, wrapPending.start, wrapPending.end, lineToWrap, lineToWrapEnd);
-				const Sci::Position bytesBeingWrapped = pdoc->LineStart(lineToWrapEnd) - pdoc->LineStart(lineToWrap);
 				const ElapsedPeriod epWrapping;
+				SetIdleTaskTime(IdleLineWrapTime);
+				uint32_t wrappedBytesAllThread = 0;
+				uint32_t wrappedBytesOneThread = 0;
 				while (lineToWrap < lineToWrapEnd) {
-					if (WrapOneLine(surface, lineToWrap)) {
+					LineLayout * const ll = view.RetrieveLineLayout(lineToWrap, *this);
+					const uint64_t wrappedBytes = view.LayoutLine(*this, surface, vs, ll, wrapWidth, LayoutLineOption::ManualUpdate);
+					wrappedBytesAllThread += wrappedBytes & UINT32_MAX;
+					wrappedBytesOneThread += wrappedBytes >> 32;
+					int linesWrapped = ll->lines;
+					if (vs.annotationVisible != AnnotationVisible::Hidden) {
+						linesWrapped += pdoc->AnnotationLines(lineToWrap);
+					}
+					if (pcs->SetHeight(lineToWrap, linesWrapped)) {
 						wrapOccurred = true;
+					}
+					if (ll->PartialPosition()) {
+						partialLine = true;
+						break;
 					}
 					wrapPending.Wrapped(lineToWrap);
 					lineToWrap++;
 				}
 				const double duration = epWrapping.Duration();
-#ifdef WRAP_LINES_TIMING
-				wrapTiming.Add(bytesBeingWrapped, duration);
-#endif
-				durationWrapOneUnit.AddSample(bytesBeingWrapped, duration);
+				durationWrapOneUnit.AddSample(wrappedBytesAllThread, duration);
+				durationWrapOneThread.AddSample(wrappedBytesOneThread, duration);
 
 				goodTopLine = pcs->DisplayFromDoc(lineDocTop) + std::min(
 					subLineTop, static_cast<Sci::Line>(pcs->GetHeight(lineDocTop) - 1));
@@ -1635,16 +1631,12 @@ bool Editor::WrapLines(WrapScope ws) {
 		}
 
 		// If wrapping is done, bring it to resting position
-		if (wrapPending.start >= lineEndNeedWrap) {
+		if (!partialLine && wrapPending.start >= lineEndNeedWrap) {
+			//constexpr double scale = 1e3; // 1 KiB in millisecond
+			//printf("%s idle style duration: %f, wrap duration: %f, %f\n", __func__,
+			//	pdoc->durationStyleOneUnit.Duration()*scale,
+			//	durationWrapOneUnit.Duration()*scale, durationWrapOneThread.Duration()*scale);
 			wrapPending.Reset();
-#ifdef WRAP_LINES_TIMING
-			const double totalTime = wrapTiming.TotalTime();
-			printf("%s bytes=%zu / %zu, time=%.6f / %.6f, level=%d,\n"
-				"\tLinesOnScreen=%zd, idleStyling=%d, modEventMask=%x, technology=%d, dbcsCodePage=%d\n",
-				__func__, wrapTiming.totalBytes, wrapTiming.totalRuns, wrapTiming.totalDuration, totalTime,
-				view.llc.GetLevel(), LinesOnScreen(), idleStyling, modEventMask, technology, pdoc->dbcsCodePage);
-			wrapTiming.Reset();
-#endif
 		}
 	}
 
@@ -1699,10 +1691,10 @@ void Editor::LinesSplit(int pixelWidth) {
 		UndoGroup ug(pdoc);
 		for (Sci::Line line = lineStart; line <= lineEnd; line++) {
 			AutoSurface surface(this);
-			LineLayout *ll = view.RetrieveLineLayout(line, *this);
-			if (surface && ll) {
+			if (surface) {
 				const Sci::Position posLineStart = pdoc->LineStart(line);
-				view.LayoutLine(*this, surface, vs, ll, pixelWidth);
+				LineLayout * const ll = view.RetrieveLineLayout(line, *this);
+				view.LayoutLine(*this, surface, vs, ll, pixelWidth, LayoutLineOption::AutoUpdate, ll->maxLineLength);
 				Sci::Position lengthInsertedTotal = 0;
 				for (int subLine = 1; subLine < ll->lines; subLine++) {
 					const Sci::Position lengthInserted = pdoc->InsertString(
@@ -1994,6 +1986,7 @@ void Editor::InsertCharacter(std::string_view sv, CharacterSource charSource) {
 	}
 	FilterSelections();
 	bool handled = false;
+	bool wrapOccurred = false;
 	{
 		UndoGroup ug(pdoc, (sel.Count() > 1) || !sel.Empty() || inOverstrike);
 		// enclose selection on typing punctuation, empty selection will be handled in Notification::CharAdded.
@@ -2066,18 +2059,18 @@ void Editor::InsertCharacter(std::string_view sv, CharacterSource charSource) {
 				if (Wrapping()) {
 					AutoSurface surface(this);
 					if (surface) {
-						if (WrapOneLine(surface, pdoc->SciLineFromPosition(positionInsert))) {
-							SetScrollBars();
-							SetVerticalScrollPos();
-							Redraw();
+						if (WrapOneLine(surface, positionInsert)) {
+							wrapOccurred = true;
 						}
 					}
 				}
 			}
 		}
 	}
-	if (Wrapping()) {
+	if (wrapOccurred) {
 		SetScrollBars();
+		SetVerticalScrollPos();
+		Redraw();
 	}
 	ThinRectangularRange();
 	// If in wrap mode rewrap current line so EnsureCaretVisible has accurate information
@@ -2192,7 +2185,7 @@ void Editor::InsertPasteShape(const char *text, Sci::Position len, PasteShape sh
 				pdoc->LineStart(pdoc->LineFromPosition(sel.MainCaret()));
 			Sci::Position lengthInserted = pdoc->InsertString(insertPos, text, len);
 			// add the newline if necessary
-			if ((len > 0) && !IsEOLChar(text[len - 1])) {
+			if ((len > 0) && !IsEOLCharacter(text[len - 1])) {
 				const char *endline = StringFromEOLMode(pdoc->eolMode);
 				const Sci::Position length = strlen(endline);
 				lengthInserted += pdoc->InsertString(insertPos + lengthInserted, endline, length);
@@ -2292,11 +2285,11 @@ void Editor::PasteRectangular(SelectionPosition pos, const char *ptr, Sci::Posit
 	sel.RangeMain().caret = RealizeVirtualSpace(sel.RangeMain().caret);
 	const int xInsert = XFromPosition(sel.RangeMain().caret);
 	bool prevCr = false;
-	while ((len > 0) && IsEOLChar(ptr[len - 1])) {
+	while ((len > 0) && IsEOLCharacter(ptr[len - 1])) {
 		len--;
 	}
 	for (Sci::Position i = 0; i < len; i++) {
-		if (IsEOLChar(ptr[i])) {
+		if (IsEOLCharacter(ptr[i])) {
 			if ((ptr[i] == '\r') || (!prevCr))
 				line++;
 			if (line >= pdoc->LinesTotal()) {
@@ -2726,8 +2719,7 @@ void Editor::NotifyModified(Document *, DocModification mh, void *) {
 	if (FlagSet(mh.modificationType, ModificationFlags::ChangeLineState)) {
 		if (paintState == PaintState::painting) {
 			CheckForChangeOutsidePaint(
-				Range(pdoc->LineStart(mh.line),
-					pdoc->LineStart(mh.line + 1)));
+				Range(mh.position, pdoc->LineStart(mh.line + 1)));
 		} else {
 			// Could check that change is before last visible line.
 			Redraw();
@@ -3033,6 +3025,8 @@ void Editor::NotifyMacroRecord(Message iMessage, uptr_t wParam, sptr_t lParam) n
 // Something has changed that the container should know about
 void Editor::ContainerNeedsUpdate(Update flags) noexcept {
 	needUpdateUI = needUpdateUI | flags;
+	// layout as much as possible inside LayoutLine() to avoid unexpected scrolling
+	SetIdleTaskTime(ActiveLineWrapTime);
 }
 
 /**
@@ -3076,8 +3070,8 @@ void Editor::PageMove(int direction, Selection::SelTypes selt, bool stuttered) {
 	if (topLineNew != topLine) {
 		SetTopLine(topLineNew);
 		MovePositionTo(newPos, selt);
-		Redraw();
 		SetVerticalScrollPos();
+		Redraw();
 	} else {
 		MovePositionTo(newPos, selt);
 	}
@@ -4244,7 +4238,7 @@ Sci::Position Editor::SearchText(
 	///< @c FindOption::WordStart, @c FindOption::RegExp or @c FindOption::Posix.
 	sptr_t lParam) {			///< The text to search for.
 
-	const char *txt = CharPtrFromSPtr(lParam);
+	const char *txt = ConstCharPtrFromSPtr(lParam);
 	Sci::Position pos = Sci::invalidPosition;
 	Sci::Position lengthFound = strlen(txt);
 	if (!pdoc->HasCaseFolder())
@@ -5364,9 +5358,9 @@ void Editor::SetAnnotationHeights(Sci::Line start, Sci::Line end) {
 			int linesWrapped = 1;
 			if (Wrapping()) {
 				AutoSurface surface(this);
-				LineLayout *ll = view.RetrieveLineLayout(line, *this);
-				if (surface && ll) {
-					view.LayoutLine(*this, surface, vs, ll, wrapWidth);
+				if (surface) {
+					LineLayout * const ll = view.RetrieveLineLayout(line, *this);
+					view.LayoutLine(*this, surface, vs, ll, wrapWidth, LayoutLineOption::ManualUpdate);
 					linesWrapped = ll->lines;
 				}
 			}
@@ -5374,6 +5368,8 @@ void Editor::SetAnnotationHeights(Sci::Line start, Sci::Line end) {
 				changedHeight = true;
 		}
 		if (changedHeight) {
+			SetScrollBars();
+			SetVerticalScrollPos();
 			Redraw();
 		}
 	}
@@ -5765,10 +5761,10 @@ int Editor::CodePage() const noexcept {
 
 Sci::Line Editor::WrapCount(Sci::Line line) {
 	AutoSurface surface(this);
-	LineLayout *ll = view.RetrieveLineLayout(line, *this);
 
-	if (surface && ll) {
-		view.LayoutLine(*this, surface, vs, ll, wrapWidth);
+	if (surface) {
+		LineLayout * const ll = view.RetrieveLineLayout(line, *this);
+		view.LayoutLine(*this, surface, vs, ll, wrapWidth, LayoutLineOption::AutoUpdate);
 		return ll->lines;
 	} else {
 		return 1;
@@ -5830,7 +5826,7 @@ void Editor::StyleSetMessage(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		break;
 	case Message::StyleSetFont:
 		if (lParam != 0) {
-			vs.SetStyleFontName(static_cast<int>(wParam), CharPtrFromSPtr(lParam));
+			vs.SetStyleFontName(static_cast<int>(wParam), ConstCharPtrFromSPtr(lParam));
 		}
 		break;
 	case Message::StyleSetUnderline:
@@ -5980,11 +5976,11 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 
 	case Message::GetText: {
 			if (lParam == 0)
-				return pdoc->Length() + 1;
+				return pdoc->Length();
 			if (wParam == 0)
 				return 0;
 			char *ptr = CharPtrFromSPtr(lParam);
-			const Sci_Position len = std::min<Sci_Position>(wParam - 1, pdoc->Length());
+			const Sci_Position len = std::min<Sci_Position>(wParam, pdoc->Length());
 			pdoc->GetCharRange(ptr, 0, len);
 			ptr[len] = '\0';
 			return len;
@@ -5996,7 +5992,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 			UndoGroup ug(pdoc);
 			pdoc->DeleteChars(0, pdoc->Length());
 			SetEmptySelection(0);
-			const char *text = CharPtrFromSPtr(lParam);
+			const char *text = ConstCharPtrFromSPtr(lParam);
 			pdoc->InsertString(0, text, strlen(text));
 			return 1;
 		}
@@ -6034,7 +6030,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		break;
 
 	case Message::CopyText:
-		CopyText(wParam, CharPtrFromSPtr(lParam));
+		CopyText(wParam, ConstCharPtrFromSPtr(lParam));
 		break;
 
 	case Message::Paste:
@@ -6050,7 +6046,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		if (!sel.Empty()) {
 			ClearSelection(); // want to replace rectangular selection contents
 		}
-		InsertPasteShape(CharPtrFromSPtr(lParam), PositionFromUPtr(wParam), PasteShape::rectangular);
+		InsertPasteShape(ConstCharPtrFromSPtr(lParam), PositionFromUPtr(wParam), PasteShape::rectangular);
 		break;
 	}
 
@@ -6126,15 +6122,13 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 	case Message::GetSelText: {
 			SelectionText selectedText;
 			CopySelectionRange(&selectedText);
-			if (lParam == 0) {
-				return selectedText.LengthWithTerminator();
-			} else {
+			const size_t iChar = selectedText.Length();
+			if (lParam) {
 				char *ptr = CharPtrFromSPtr(lParam);
-				const size_t iChar = selectedText.Length();
 				memcpy(ptr, selectedText.Data(), iChar);
 				ptr[iChar] = '\0';
-				return iChar;
 			}
+			return iChar;
 		}
 
 	case Message::LineFromPosition:
@@ -6165,7 +6159,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 				return 0;
 			UndoGroup ug(pdoc);
 			ClearSelection();
-			const char *replacement = CharPtrFromSPtr(lParam);
+			const char *replacement = ConstCharPtrFromSPtr(lParam);
 			const Sci::Position lengthInserted = pdoc->InsertString(
 				sel.MainCaret(), replacement, strlen(replacement));
 			SetEmptySelection(sel.MainCaret() + lengthInserted);
@@ -6224,15 +6218,15 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 
 	case Message::ReplaceTarget:
 		PLATFORM_ASSERT(lParam);
-		return ReplaceTarget(false, CharPtrFromSPtr(lParam), PositionFromUPtr(wParam));
+		return ReplaceTarget(false, ConstCharPtrFromSPtr(lParam), PositionFromUPtr(wParam));
 
 	case Message::ReplaceTargetRE:
 		PLATFORM_ASSERT(lParam);
-		return ReplaceTarget(true, CharPtrFromSPtr(lParam), PositionFromUPtr(wParam));
+		return ReplaceTarget(true, ConstCharPtrFromSPtr(lParam), PositionFromUPtr(wParam));
 
 	case Message::SearchInTarget:
 		PLATFORM_ASSERT(lParam);
-		return SearchInTarget(CharPtrFromSPtr(lParam), PositionFromUPtr(wParam));
+		return SearchInTarget(ConstCharPtrFromSPtr(lParam), PositionFromUPtr(wParam));
 
 	case Message::SetSearchFlags:
 		searchFlags = static_cast<FindOption>(wParam);
@@ -6359,14 +6353,14 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 			if (lParam == 0)
 				return 0;
 			const Sci::Position lengthInserted = pdoc->InsertString(
-				CurrentPosition(), CharPtrFromSPtr(lParam), PositionFromUPtr(wParam));
+				CurrentPosition(), ConstCharPtrFromSPtr(lParam), PositionFromUPtr(wParam));
 			SetEmptySelection(sel.MainCaret() + lengthInserted);
 			return 0;
 		}
 
 	case Message::AddStyledText:
 		if (lParam)
-			AddStyledText(CharPtrFromSPtr(lParam), PositionFromUPtr(wParam));
+			AddStyledText(ConstCharPtrFromSPtr(lParam), PositionFromUPtr(wParam));
 		return 0;
 
 	case Message::InsertText: {
@@ -6376,7 +6370,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 			if (insertPos == -1)
 				insertPos = CurrentPosition();
 			Sci::Position newCurrent = CurrentPosition();
-			const char *sz = CharPtrFromSPtr(lParam);
+			const char *sz = ConstCharPtrFromSPtr(lParam);
 			const Sci::Position lengthInserted = pdoc->InsertString(insertPos, sz, strlen(sz));
 			if (newCurrent > insertPos)
 				newCurrent += lengthInserted;
@@ -6386,12 +6380,12 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 
 	case Message::ChangeInsertion:
 		PLATFORM_ASSERT(lParam);
-		pdoc->ChangeInsertion(CharPtrFromSPtr(lParam), PositionFromUPtr(wParam));
+		pdoc->ChangeInsertion(ConstCharPtrFromSPtr(lParam), PositionFromUPtr(wParam));
 		return 0;
 
 	case Message::AppendText:
 		pdoc->InsertString(pdoc->Length(),
-			CharPtrFromSPtr(lParam), PositionFromUPtr(wParam));
+			ConstCharPtrFromSPtr(lParam), PositionFromUPtr(wParam));
 		return 0;
 
 	case Message::ClearAll:
@@ -6655,11 +6649,10 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 			const Sci::Position lineStart = pdoc->LineStart(lineCurrentPos);
 			const Sci::Position lineEnd = pdoc->LineStart(lineCurrentPos + 1);
 			if (lParam == 0) {
-				return 1 + lineEnd - lineStart;
+				return lineEnd - lineStart;
 			}
-			PLATFORM_ASSERT(wParam > 0);
 			char *ptr = CharPtrFromSPtr(lParam);
-			const Sci::Position len = std::min<uptr_t>(lineEnd - lineStart, wParam - 1);
+			const Sci::Position len = std::min<Sci::Position>(lineEnd - lineStart, wParam);
 			pdoc->GetCharRange(ptr, lineStart, len);
 			ptr[len] = '\0';
 			return sel.MainCaret() - lineStart;
@@ -6704,7 +6697,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 	case Message::SetStylingEx:             // Specify a complete styling buffer
 		if (lParam == 0)
 			return 0;
-		pdoc->SetStyles(PositionFromUPtr(wParam), UCharPtrFromSPtr(lParam));
+		pdoc->SetStyles(PositionFromUPtr(wParam), ConstUCharPtrFromSPtr(lParam));
 		break;
 
 	case Message::SetBufferedDraw:
@@ -6934,7 +6927,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 	case Message::TextWidth:
 		PLATFORM_ASSERT(wParam < vs.styles.size());
 		PLATFORM_ASSERT(lParam);
-		return TextWidth(wParam, CharPtrFromSPtr(lParam));
+		return TextWidth(wParam, ConstCharPtrFromSPtr(lParam));
 
 	case Message::TextHeight:
 		RefreshStyleData();
@@ -7152,7 +7145,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 
 	case Message::MarkerDefinePixmap:
 		if (wParam <= MarkerMax) {
-			vs.markers[wParam].SetXPM(CharPtrFromSPtr(lParam));
+			vs.markers[wParam].SetXPM(ConstCharPtrFromSPtr(lParam));
 			vs.CalcLargestMarkerHeight();
 		}
 		InvalidateStyleData();
@@ -7347,7 +7340,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 
 	case Message::SetFontLocale:
 		if (lParam != 0) {
-			vs.SetFontLocaleName(CharPtrFromSPtr(lParam));
+			vs.SetFontLocaleName(ConstCharPtrFromSPtr(lParam));
 		}
 		break;
 
@@ -7461,7 +7454,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 
 	case Message::ToggleFoldShowText:
 #if EnablePerLineFoldDisplayText
-		pcs->SetFoldDisplayText(LineFromUPtr(wParam), CharPtrFromSPtr(lParam));
+		pcs->SetFoldDisplayText(LineFromUPtr(wParam), ConstCharPtrFromSPtr(lParam));
 #endif
 		FoldLine(LineFromUPtr(wParam), FoldAction::Toggle);
 		break;
@@ -7475,7 +7468,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		return static_cast<sptr_t>(foldDisplayTextStyle);
 
 	case Message::SetDefaultFoldDisplayText:
-		SetDefaultFoldDisplayText(CharPtrFromSPtr(lParam));
+		SetDefaultFoldDisplayText(ConstCharPtrFromSPtr(lParam));
 		Redraw();
 		break;
 
@@ -7565,7 +7558,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		return static_cast<sptr_t>(vs.selection.layer);
 
 	case Message::SetCaretStyle:
-		if (static_cast<CaretStyle>(wParam) <= (CaretStyle::Block | CaretStyle::OverstrikeBlock | CaretStyle::BlockAfter))
+		if (static_cast<CaretStyle>(wParam) <= (CaretStyle::Block | CaretStyle::OverstrikeBlock | CaretStyle::Curses | CaretStyle::BlockAfter))
 			vs.caret.style = static_cast<CaretStyle>(wParam);
 		else
 			/* Default to the line caret */
@@ -8120,7 +8113,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 			const Representation *repr = reprs.RepresentationFromCharacter(
 				ConstCharPtrFromUPtr(wParam));
 			if (repr) {
-				return StringResult(lParam, repr->stringRep.c_str());
+				return StringResult(lParam, repr->stringRep);
 			}
 			return 0;
 		}
@@ -8243,7 +8236,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		return static_cast<sptr_t>(marginOptions);
 
 	case Message::MarginSetText:
-		pdoc->MarginSetText(LineFromUPtr(wParam), CharPtrFromSPtr(lParam));
+		pdoc->MarginSetText(LineFromUPtr(wParam), ConstCharPtrFromSPtr(lParam));
 		break;
 
 	case Message::MarginGetText: {
@@ -8274,7 +8267,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		break;
 
 	case Message::AnnotationSetText:
-		pdoc->AnnotationSetText(LineFromUPtr(wParam), CharPtrFromSPtr(lParam));
+		pdoc->AnnotationSetText(LineFromUPtr(wParam), ConstCharPtrFromSPtr(lParam));
 		break;
 
 	case Message::AnnotationGetText: {
@@ -8323,7 +8316,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		return vs.annotationStyleOffset;
 
 	case Message::EOLAnnotationSetText:
-		pdoc->EOLAnnotationSetText(LineFromUPtr(wParam), CharPtrFromSPtr(lParam));
+		pdoc->EOLAnnotationSetText(LineFromUPtr(wParam), ConstCharPtrFromSPtr(lParam));
 		break;
 
 	case Message::EOLAnnotationGetText: {

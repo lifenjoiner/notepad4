@@ -92,10 +92,11 @@ BEGIN
 			MENUITEM "UTF-8 として(&8)\tShift+F8",			CMD_RELOADUTF8
 			MENUITEM "ANSI として(&A)\tCtrl+Shift+A",		CMD_RELOADANSI
 			MENUITEM "OEM として(&O)\tCtrl+Shift+O",		CMD_RELOADOEM
+			MENUITEM SEPARATOR
+			MENUITEM "&Default Encoding(&D)\tCtrl+Alt+F",CMD_RECODEDEFAULT
 			MENUITEM "文字コードを指定(&W)...\tF8",		IDM_RECODE_SELECT
 			MENUITEM SEPARATOR
 			MENUITEM "文字コード解析をパス(&N)\tAlt+F8",	CMD_RELOADNOFILEVARS
-			MENUITEM "デフォルト(&D)\tCtrl+Alt+F",		CMD_RECODEDEFAULT
 #if defined(_WIN64)
 			MENUITEM "巨大ファイルモード(&L)",			IDM_FILE_LARGE_FILE_MODE_RELOAD
 #endif
@@ -248,6 +249,7 @@ BEGIN
 				MENUITEM "カタカナをひらがなに(&H)",		IDM_EDIT_MAP_HIRAGANA
 				MENUITEM "ひらがなをカタカナに(&K)",		IDM_EDIT_MAP_KATAKANA
 				MENUITEM SEPARATOR
+				MENUITEM "Korean Han&ja to Hangul",		        IDM_EDIT_MAP_HANJA_HANGUL
 				MENUITEM "ハングル語を分解(&G)",		IDM_EDIT_MAP_HANGUL_DECOMPOSITION
 				MENUITEM SEPARATOR
 				MENUITEM "ベンガル語をラテンに(&B)",					IDM_EDIT_MAP_BENGALI_LATIN
@@ -294,6 +296,7 @@ BEGIN
 				MENUITEM "ISS\tInhibit s&ymmetric swapping",		IDM_INSERT_UNICODE_ISS
 				MENUITEM "AAFS\tActivate Arabic &form shaping",		IDM_INSERT_UNICODE_AAFS
 				MENUITEM "IAFS\tInhibit Arabic form s&haping",		IDM_INSERT_UNICODE_IAFS
+				MENUITEM "ALM\t&Arabic letter mark",		        IDM_INSERT_UNICODE_ALM
 				MENUITEM "RS\tRecord Separator (&Block separator)", IDM_INSERT_UNICODE_RS
 				MENUITEM "US\tUnit Separator (&Segment separator)", IDM_INSERT_UNICODE_US
 				MENUITEM "LS\tL&ine Separator",						IDM_INSERT_UNICODE_LS
@@ -638,6 +641,7 @@ BEGIN
 		MENUITEM SEPARATOR
 		MENUITEM "単一インスタンスでファイルを開く(&F)",			IDM_VIEW_SINGLEFILEINSTANCE
 		MENUITEM "ファイルの変更を通知(&C)...\tAlt+F5",	IDM_VIEW_CHANGENOTIFY
+		MENUITEM "A&utoSave Settings...",			IDM_SET_FILE_AUTOSAVE
 		POPUP "Escキーの動作(&K)"
 		BEGIN
 			MENUITEM "なし(&N)",						IDM_VIEW_NOESCFUNC
@@ -980,7 +984,8 @@ STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | DS_NOFAILCREATE | WS_POPUP | WS
 CAPTION "Notepad2"
 FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
-    DEFPUSHBUTTON   "OK",IDOK,198,123,50,14
+    DEFPUSHBUTTON   "OK",IDOK,142,123,50,14
+    PUSHBUTTON      "コピー",IDC_COPY_BUILD_INFO,198,123,50,14
     ICON            IDR_MAINWND,IDC_STATIC,7,7,20,20
     LTEXT           "",IDC_VERSION,45,7,200,8
     LTEXT           "",IDC_BUILD_INFO,45,18,200,16
@@ -990,15 +995,15 @@ BEGIN
     LTEXT           "Copyright © 2010-2017 XhmikosR and all contributors.",IDC_STATIC,45,60,200,8
     LTEXT           "",IDC_MOD_PAGE_TEXT,45,68,200,8,NOT WS_VISIBLE | WS_DISABLED
     CONTROL         "",IDC_MOD_PAGE_LINK,"SysLink",WS_TABSTOP,45,68,200,10
-    LTEXT           "Copyright © 2011-2021 Zufu Liu and all contributors.",IDC_STATIC,45,80,200,8
+    LTEXT           "Copyright © 2011-2022 Zufu Liu and all contributors.",IDC_STATIC,45,80,200,8
     LTEXT           "",IDC_NEW_PAGE_TEXT,45,80,200,8,NOT WS_VISIBLE | WS_DISABLED
     CONTROL         "",IDC_NEW_PAGE_LINK,"SysLink",WS_TABSTOP,45,88,200,10
-    LTEXT           "Florian Balmer の連絡先:",IDC_STATIC,45,100,140,8
-    LTEXT           "",IDC_EMAIL_TEXT,45,108,140,8,NOT WS_VISIBLE | WS_DISABLED
-    CONTROL         "",IDC_EMAIL_LINK,"SysLink",WS_TABSTOP,45,108,140,10
-    LTEXT           "Scintilla のサイトにアクセス:",IDC_STATIC,45,120,140,8
-    LTEXT           "",IDC_SCI_PAGE_TEXT,45,128,140,8,NOT WS_VISIBLE | WS_DISABLED
-    CONTROL         "",IDC_SCI_PAGE_LINK,"SysLink",WS_TABSTOP,45,128,140,10
+    LTEXT           "Florian Balmer の連絡先:",IDC_STATIC,45,100,94,8
+    LTEXT           "",IDC_EMAIL_TEXT,45,108,94,8,NOT WS_VISIBLE | WS_DISABLED
+    CONTROL         "",IDC_EMAIL_LINK,"SysLink",WS_TABSTOP,45,108,94,10
+    LTEXT           "Scintilla のサイトにアクセス:",IDC_STATIC,45,120,94,8
+    LTEXT           "",IDC_SCI_PAGE_TEXT,45,128,94,8,NOT WS_VISIBLE | WS_DISABLED
+    CONTROL         "",IDC_SCI_PAGE_LINK,"SysLink",WS_TABSTOP,45,128,94,10
 END
 
 IDD_FIND DIALOGEX 0, 0, 290, 112
@@ -1467,7 +1472,7 @@ BEGIN
     AUTOCHECKBOX    "このメッセージを再び表示しない(&D)",IDC_INFOBOXCHECK,7,55,120,10,WS_TABSTOP
 END
 
-IDD_SORT DIALOGEX 0, 0, 184, 140
+IDD_SORT DIALOGEX 0, 0, 184, 152
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "行の並べ替え"
 FONT 8, "MS Shell Dlg", 0, 0, 0x0
@@ -1480,7 +1485,8 @@ BEGIN
     AUTOCHECKBOX    "それしかない行を削除(&U)",IDC_SORT_REMOVE_UNIQUE,7,74,100,10,WS_TABSTOP
     AUTOCHECKBOX    "大文字/小文字を区別しない(&C)",IDC_SORT_IGNORE_CASE,7,92,81,10,WS_TABSTOP
     AUTOCHECKBOX    "論理番号で比較(&N)",IDC_SORT_LOGICAL_NUMBER,7,104,130,10,WS_TABSTOP
-    AUTOCHECKBOX    "列でソート (Altで矩形選択) (&S)",IDC_SORT_COLUMN,7,122,150,10,WS_TABSTOP
+    AUTOCHECKBOX    "Group by file &type.",IDC_SORT_GROUPBY_FILE_TYPE,7,116,130,10,WS_TABSTOP
+    AUTOCHECKBOX    "列でソート (Altで矩形選択) (&S)",IDC_SORT_COLUMN,7,135,150,10,WS_TABSTOP
     DEFPUSHBUTTON   "OK",IDOK,127,7,50,14
     PUSHBUTTON     "キャンセル",IDCANCEL,127,24,50,14
 END
@@ -1577,6 +1583,21 @@ BEGIN
     AUTORADIOBUTTON "@",IDC_ASM_LINE_COMMENT_AT,408,123,22,10,WS_TABSTOP
     DEFPUSHBUTTON   "確定",IDOK,343,145,50,14
     PUSHBUTTON      "キャンセル",IDCANCEL,399,145,50,14
+END
+
+IDD_AUTOSAVE DIALOGEX 0, 0, 184, 81
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "AutoSave Settings"
+FONT 8, "MS Shell Dlg", 0, 0, 0x0
+BEGIN
+    AUTOCHECKBOX    "Enable AutoSave.",IDC_AUTOSAVE_ENABLE,7,7,170,10,WS_GROUP | WS_TABSTOP
+    LTEXT           "AutoSave period (in second):",IDC_STATIC,14,19,120,10,SS_RIGHT
+    EDITTEXT        IDC_AUTOSAVE_PERIOD,140,17,30,12,ES_AUTOHSCROLL
+    AUTOCHECKBOX    "Save backup on system suspend.",IDC_AUTOSAVE_SUSPEND,7,31,170,10,WS_GROUP | WS_TABSTOP
+    AUTOCHECKBOX    "Save backup on system shutdown.",IDC_AUTOSAVE_SHUTDOWN,7,43,170,10,WS_TABSTOP
+    PUSHBUTTON      "Open Folder",IDC_AUTOSAVE_OPENFOLDER,7,60,60,14
+    DEFPUSHBUTTON   "OK",IDOK,71,60,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,127,60,50,14
 END
 
 
@@ -2133,7 +2154,7 @@ BEGIN
 \r\n\
 設定書式: 各指定は省略可能\r\n\
 \tfont:Name; size:[+|-]nn.mm; weight:nnn; bold; italic; underline; strike;\r\n\
-\tcharset:dd; locale:Name; case:[Upper|Lower|Camel];\r\n\
+\tcharset:dd; locale:Name;\r\n\
 \tfore:#RRGGBB; back:#RRGGBB; alpha:aa; outline:aa; eolfilled;\r\n\
 \r\n\
 コピーペーストやドラッグドロップでも指定を変更できます。\r\n\

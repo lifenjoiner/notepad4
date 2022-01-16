@@ -502,13 +502,26 @@ void ColouriseBatchDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initS
 		}
 	}
 	if (startPos != 0 && initStyle == SCE_BAT_DEFAULT) {
-		LookbackNonWhite(styler, startPos, SCE_BAT_DEFAULT, chPrevNonWhite, stylePrevNonWhite);
+		// can't use LookbackNonWhite() as SCE_BAT_DEFAULT also used for non-space text.
+		do {
+			--startPos;
+			const unsigned char ch = styler[startPos];
+			if (!isspacechar(ch)) {
+				const int style = styler.StyleAt(startPos);
+				if (style != SCE_BAT_LINE_CONTINUATION) {
+					stylePrevNonWhite = style;
+					chPrevNonWhite = ch;
+					break;
+				}
+			}
+		} while (startPos != 0);
 	}
 
 	int levelNext = levelCurrent;
 	int parenBefore = parenCount;
 	bool labelLine = false;
 	BatchVariable batchVar;
+	bool lineContinuation = false;
 
 	while (sc.More()) {
 		switch (sc.state) {
@@ -821,14 +834,16 @@ void ColouriseBatchDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initS
 		if (!isspacechar(sc.ch)) {
 			logicalVisibleChars++;
 			lineVisibleChars++;
-			if (sc.state != SCE_BAT_DEFAULT) {
+			if (sc.state == SCE_BAT_LINE_CONTINUATION) {
+				lineContinuation = true;
+			} else if (sc.state != SCE_BAT_DEFAULT) {
 				chPrevNonWhite = sc.ch;
 				stylePrevNonWhite = sc.state;
 			}
 		}
 		if (sc.atLineEnd) {
 			int lineState = parenCount << 8;
-			if (stylePrevNonWhite == SCE_BAT_LINE_CONTINUATION) {
+			if (lineContinuation) {
 				lineState |= BatchLineStateLineContinuation;
 				lineState |= static_cast<int>(command) << 4;
 				sc.SetState(outerStyle);
@@ -842,7 +857,7 @@ void ColouriseBatchDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initS
 				logicalVisibleChars = 0;
 			}
 			if (IsStringStyle(sc.state)) {
-				if (stylePrevNonWhite != SCE_BAT_LINE_CONTINUATION && (sc.state == SCE_BAT_STRINGDQ || sc.state == SCE_BAT_STRINGNQ)) {
+				if (!lineContinuation && (sc.state == SCE_BAT_STRINGDQ || sc.state == SCE_BAT_STRINGNQ)) {
 					const int state = TryTakeAndPop(nestedState);
 					sc.SetState(state);
 				}
@@ -855,6 +870,7 @@ void ColouriseBatchDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initS
 			batchVar.varQuoteChar = '\0';
 			outerStyle = SCE_BAT_DEFAULT;
 			lineVisibleChars = 0;
+			lineContinuation = false;
 
 			if (fold) {
 				if (labelLine) {

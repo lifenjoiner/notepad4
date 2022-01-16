@@ -33,8 +33,11 @@ enum class DrawPhase {
 	all = 0x1FF
 };
 
-// from DrawPhase::back to DrawPhase::carets
-constexpr int MaxDrawPhaseCount = 9;
+enum class LayoutLineOption {
+	AutoUpdate,
+	ManualUpdate,
+	KeepPosition,
+};
 
 bool ValidStyledText(const ViewStyle &vs, size_t styleOffset, const StyledText &st) noexcept;
 int WidestLineWidth(Surface *surface, const ViewStyle &vs, int styleOffset, const StyledText &st);
@@ -115,8 +118,8 @@ public:
 	void RefreshPixMaps(Surface *surfaceWindow, const ViewStyle &vsDraw);
 
 	LineLayout *RetrieveLineLayout(Sci::Line lineNumber, const EditModel &model);
-	void LayoutLine(const EditModel &model, Surface *surface, const ViewStyle &vstyle,
-		LineLayout *ll, int width = LineLayout::wrapWidthInfinite);
+	uint64_t LayoutLine(const EditModel &model, Surface *surface, const ViewStyle &vstyle,
+		LineLayout *ll, int width, LayoutLineOption option, int posInLine = 0);
 
 	static void UpdateBidiData(const EditModel &model, const ViewStyle &vstyle, LineLayout *ll);
 

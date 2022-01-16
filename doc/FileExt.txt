@@ -47,9 +47,10 @@ C# Source
 
 CSS Style Sheet
 	css
-	scss			Sassy CSS
-	less			Less CSS
-	hss				HSS
+	scss			Sassy CSS, https://sass-lang.com/
+	less			Less CSS, https://lesscss.org/
+	hss				HSS, https://github.com/ncannasse/hss
+	wxss			WeChat Mini Program, https://developers.weixin.qq.com/miniprogram/dev/framework/view/wxss.html
 
 Java Source
 	java
@@ -157,6 +158,7 @@ XML Document
 	mm				FreeMind Mind Map
 	xrc				wxWidgets XML Resource
 	fbp				wxFormBuilder Project
+	wxml			WeChat Mini Program
 
 	web.config		ASP.NET Web Configuration
 
@@ -205,6 +207,9 @@ Awk Script
 Batch File
 	bat
 	cmd
+
+blockdiag
+	diag
 
 
 CIL Assembly
@@ -299,8 +304,6 @@ Gradle Build Script
 GraphViz Dot
 	dot
 	gv
-
-	diag			blockdiag
 
 Groovy Script
 	groovy
@@ -498,6 +501,7 @@ TOML File
 	toml			https://github.com/toml-lang/toml
 
 	Cargo.lock		Rust Cargo
+	.pylintrc		Pylint Configuration File
 
 TypeScript
 	ts

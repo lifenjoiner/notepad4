@@ -1,16 +1,19 @@
 import sys
-sys.path.append('../scintilla/scripts')
 import os.path
 import re
-from collections import Counter
+#from collections import Counter
 from enum import IntFlag
+import string
 
+sys.path.append('../scintilla/scripts')
 from FileGenerator import Regenerate
 
 AllKeywordAttrList = {}
+# X11 and SVG color names
+ColorNameList = set()
 JavaKeywordMap = {}
-GroovyKeyword = []
 JavaScriptKeywordMap = {}
+GroovyKeyword = []
 
 # see EditLexer.h
 class KeywordAttr(IntFlag):
@@ -107,7 +110,7 @@ def BuildKeywordContent(rid, keywordList, keywordCount=16):
 		comment, items, attr = item
 		lines = MakeKeywordLines(set(items))
 		if index != 0:
-			output.append(", // %d %s" % (index, comment))
+			output.append(f", // {index} {comment}")
 		if lines:
 			output.extend('"' + line + ' "' for line in lines)
 		else:
@@ -486,8 +489,7 @@ def parse_cmake_api_file(path):
 					break
 				items.append(item)
 			return items
-		else:
-			return [name]
+		return [name]
 
 	def get_prefix(name):
 		if '<' in name:
@@ -495,8 +497,7 @@ def parse_cmake_api_file(path):
 			if name.count('<') == 1 and name[-1] == '>':
 				# ignore suffix
 				name = name[:name.index('<')].strip('_')
-			else:
-				return '', False
+			return '', False
 		return name, is_long_name(name)
 
 	sections = read_api_file(path, '#')
@@ -629,6 +630,102 @@ def parse_csharp_api_file(path):
 		('comment tag', keywordMap['comment tag'], KeywordAttr.NoLexer | KeywordAttr.NoAutoComp),
 	]
 
+def parse_css_api_file(pathList):
+	# https://developer.mozilla.org/en-US/docs/Glossary/Vendor_Prefix
+	# custom property https://www.w3.org/TR/css-variables-1/
+	vendor = '^-moz- ^-ms- ^-o- ^-webkit-'.split()
+	keywordMap = {
+		'properties': vendor + ['^--'],
+		'at rules': [],
+		'pseudo classes': vendor[:],
+		'pseudo elements': vendor,
+	}
+
+	values = []
+	for path in pathList:
+		for line in read_file(path).splitlines():
+			line = line.strip()
+			if not line or line.startswith('//'):
+				continue
+			if line[0] == '@':
+				rule = line.split()[0][1:]
+				keywordMap['at rules'].append(rule)
+			elif line[0] == ':':
+				line = line.rstrip(')')
+				if line[1] == ':':
+					keywordMap['pseudo elements'].append(line[2:])
+				else:
+					keywordMap['pseudo classes'].append(line[1:])
+			elif line[0].isalpha():
+				index = line.find(':')
+				if index > 0:
+					name = line[:index].strip()
+					line = line[index+1:]
+					keywordMap['properties'].append(name)
+				line = line.replace(';', ' ').replace(',', ' ').replace('|', ' ').replace('[',  ' ').replace(']', ' ')
+				items = [item.strip(')') for item in line.split()]
+				values.extend(items)
+
+	keywordMap['values'] = set(values) - ColorNameList
+	RemoveDuplicateKeyword(keywordMap, [
+		'properties',
+		'values',
+	])
+	return [
+		('properties', keywordMap['properties'], KeywordAttr.Default),
+		('at rules', keywordMap['at rules'], KeywordAttr.NoLexer),
+		('pseudo classes', keywordMap['pseudo classes'], KeywordAttr.Default),
+		('pseudo elements', keywordMap['pseudo elements'], KeywordAttr.Default),
+		('color names', ColorNameList, KeywordAttr.NoLexer),
+		('values', keywordMap['values'], KeywordAttr.NoLexer),
+	]
+
+def parse_dlang_api_file(path):
+	sections = read_api_file(path, '//')
+	keywordMap = {}
+	for key, doc in sections:
+		if key == 'library':
+			keywordMap['class'] = re.findall(r'class\s+(\w+)', doc)
+			keywordMap['struct'] = re.findall(r'struct\s+(\w+)', doc)
+			keywordMap['union'] = re.findall(r'union\s+(\w+)', doc)
+			keywordMap['interface'] = re.findall(r'interface\s+(\w+)', doc)
+			keywordMap['enumeration'] = re.findall(r'enum\s+(\w+)', doc)
+		else:
+			items = doc.split()
+			if key in ('preprocessor', 'attribute'):
+				items = [item[1:] for item in items]
+			keywordMap[key] = items
+
+	RemoveDuplicateKeyword(keywordMap, [
+		'keywords',
+		'types',
+		'class',
+		'struct',
+		'union',
+		'interface',
+		'trait',
+		'enumeration',
+		'constant',
+	])
+
+	return [
+		('keywords', keywordMap['keywords'], KeywordAttr.Default),
+		('types', keywordMap['types'], KeywordAttr.Default),
+		('preprocessor', keywordMap['preprocessor'], KeywordAttr.NoLexer | KeywordAttr.NoAutoComp),
+		('attribute', keywordMap['attribute'], KeywordAttr.NoLexer | KeywordAttr.NoAutoComp),
+		('class', keywordMap['class'], KeywordAttr.Default),
+		('struct', keywordMap['struct'], KeywordAttr.Default),
+		('union', keywordMap['union'], KeywordAttr.Default),
+		('interface', keywordMap['interface'], KeywordAttr.Default),
+		('trait', keywordMap['trait'], KeywordAttr.Default),
+		('enumeration', keywordMap['enumeration'], KeywordAttr.Default),
+		('constant', keywordMap['constant'], KeywordAttr.Default),
+		('asm keywords', keywordMap['asm keywords'], KeywordAttr.NoAutoComp),
+		('asm register', keywordMap['asm register'], KeywordAttr.NoAutoComp),
+		('asm instruction', keywordMap['asm instruction'], KeywordAttr.NoAutoComp),
+		('function', [], KeywordAttr.NoLexer),
+	]
+
 def parse_dart_api_file(path):
 	sections = read_api_file(path, '//')
 	keywordMap = {}
@@ -702,7 +799,7 @@ def parse_go_api_file(path):
 				keywordMap[key] = items
 		else:
 			items = re.findall(r'^\s*(func\s+)?(?P<name>\w+\()', doc, re.MULTILINE)
-			items = set([item[1] for item in items])
+			items = set(item[1] for item in items)
 			if key == 'builtin':
 				keywordMap['builtin functions'] = items
 			else:
@@ -795,6 +892,60 @@ def parse_gradle_api_file(path):
 		('annotation', JavaKeywordMap['annotation'], KeywordAttr.NoLexer | KeywordAttr.NoAutoComp),
 		('function', functions, KeywordAttr.NoLexer),
 		('GroovyDoc', JavaKeywordMap['javadoc'], KeywordAttr.NoLexer | KeywordAttr.NoAutoComp),
+	]
+
+def parse_graphviz_api_file(path):
+	sections = read_api_file(path, '//')
+	keywordMap = {
+		'attributes': [],
+		'values': [],
+		'labels': [],
+	}
+	for key, doc in sections:
+		if key in ('keywords', 'node shapes'):
+			keywordMap[key] = doc.split()
+		elif key == 'attributes':
+			attributes = []
+			values = []
+			doc = doc.replace('[', '').replace(']', '')
+			for line in doc.splitlines():
+				line = line.strip()
+				if not line:
+					continue
+				items = line.split('=', 2)
+				attributes.append(items[0].strip())
+				if len(items) > 1:
+					items = [item for item in items[1].replace(',', ' ').split() if item]
+					values.extend(items)
+			keywordMap['attributes'].extend(attributes)
+			keywordMap['values'].extend(values)
+		elif key == 'color names':
+			items = [item for item in doc.split() if not item[-1] in string.digits]
+			ColorNameList.update(items)
+		elif key == 'labels':
+			labels = re.findall(r'<(\w+)', doc)
+			keywordMap[key].extend(labels)
+			attributes = re.findall(r'([\w\-]+)=', doc)
+			keywordMap['attributes'].extend(attributes)
+			values = re.findall(r'\W([A-Z]+)', doc)
+			values = set(values) - set(labels) - set(attributes)
+			keywordMap['values'].extend(values)
+
+	keywordMap['color names'] = ColorNameList
+	RemoveDuplicateKeyword(keywordMap, [
+		'keywords',
+		'color names',
+		'attributes',
+		'node shapes',
+		'values',
+	])
+	return [
+		('keywords', keywordMap['keywords'], KeywordAttr.Default),
+		('labels', keywordMap['labels'], KeywordAttr.NoLexer),
+		('attributes', keywordMap['attributes'], KeywordAttr.NoLexer),
+		('node shapes', keywordMap['node shapes'], KeywordAttr.NoLexer),
+		('color names', ColorNameList, KeywordAttr.NoLexer),
+		('values', keywordMap['values'], KeywordAttr.NoLexer),
 	]
 
 def parse_groovy_api_file(path):
@@ -1816,7 +1967,6 @@ def parse_wasm_lexer_keywords(path):
 		('instruction', keywordMap['instruction'], KeywordAttr.Default),
 		('full instruction', keywordMap['full instruction'], KeywordAttr.NoLexer),
 	]
-	return keywordList
 
 # Style_UpdateLexerKeywordAttr()
 def update_lexer_keyword_attr(path):

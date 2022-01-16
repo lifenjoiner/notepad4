@@ -133,9 +133,6 @@ ViewStyle::ViewStyle(size_t stylesSize_):
 		Element::SelectionBack,
 		Element::SelectionInactiveBack,
 	});
-	selection.layer = Layer::Base;
-	selection.eolFilled = false;
-	selection.eolSelectedWidth = 100;
 
 	foldmarginColour.reset();
 	foldmarginHighlightColour.reset();
@@ -153,15 +150,9 @@ ViewStyle::ViewStyle(size_t stylesSize_):
 		Element::Caret,
 		Element::CaretAdditional,
 	});
-	caret.style = CaretStyle::Line;
-	caret.width = 1;
 
 	elementColours.erase(Element::CaretLineBack);
 	elementAllowsTranslucent.insert(Element::CaretLineBack);
-	caretLine.alwaysShow = false;
-	caretLine.subLine = false;
-	caretLine.layer = Layer::Base;
-	caretLine.frame = 0;
 
 	elementColours.erase(Element::HotSpotActive);
 	elementAllowsTranslucent.insert(Element::HotSpotActive);
@@ -207,12 +198,6 @@ ViewStyle::ViewStyle(size_t stylesSize_):
 	marginNumberPadding = 3;
 	ctrlCharPadding = 3; // +3 For a blank on front and rounded edge each side
 	lastSegItalicsOffset = 2;
-
-	wrap.state = Wrap::None;
-	wrap.visualFlags = WrapVisualFlag::None;
-	wrap.visualFlagsLocation = WrapVisualLocation::Default;
-	wrap.visualStartIndent = 0;
-	wrap.indentMode = WrapIndentMode::Fixed;
 
 	localeName = localeNameDefault;
 }
@@ -374,14 +359,15 @@ void ViewStyle::Refresh(Surface &surface, int tabInChars) {
 	lineOverlap = std::clamp(lineHeight / 10, 2, lineHeight);
 
 	bool flagProtected = false;
-	bool flagForceCase = false;
+	constexpr bool flagForceCase = false;
 	for (const auto &style : styles) {
 		if (style.IsProtected()) {
 			flagProtected = true;
+			break;
 		}
-		if (style.caseForce != Style::CaseForce::mixed) {
-			flagForceCase = true;
-		}
+		//if (style.caseForce != Style::CaseForce::mixed) {
+		//	flagForceCase = true;
+		//}
 	}
 	someStylesProtected = flagProtected;
 	someStylesForceCase = flagForceCase;
@@ -681,11 +667,14 @@ bool ViewStyle::SetWrapIndentMode(WrapIndentMode wrapIndentMode_) noexcept {
 
 bool ViewStyle::IsBlockCaretStyle() const noexcept {
 	return ((caret.style & CaretStyle::InsMask) == CaretStyle::Block) ||
-		FlagSet(caret.style, CaretStyle::OverstrikeBlock);
+		FlagSet(caret.style, CaretStyle::OverstrikeBlock) ||
+		FlagSet(caret.style, CaretStyle::Curses);
 }
 
-bool ViewStyle::IsCaretVisible() const noexcept {
-	return caret.width > 0 && caret.style != CaretStyle::Invisible;
+bool ViewStyle::IsCaretVisible(bool isMainSelection) const noexcept {
+	return caret.width > 0 &&
+		((caret.style & CaretStyle::InsMask) != CaretStyle::Invisible ||
+		(FlagSet(caret.style, CaretStyle::Curses) && !isMainSelection)); // only draw additional selections in curses mode
 }
 
 bool ViewStyle::DrawCaretInsideSelection(bool inOverstrike, bool imeCaretBlockOverride) const noexcept {
@@ -694,10 +683,11 @@ bool ViewStyle::DrawCaretInsideSelection(bool inOverstrike, bool imeCaretBlockOv
 	}
 	return ((caret.style & CaretStyle::InsMask) == CaretStyle::Block) ||
 		(inOverstrike && FlagSet(caret.style, CaretStyle::OverstrikeBlock)) ||
-		imeCaretBlockOverride;
+		imeCaretBlockOverride ||
+		FlagSet(caret.style, CaretStyle::Curses);
 }
 
-ViewStyle::CaretShape ViewStyle::CaretShapeForMode(bool inOverstrike, bool drawDrag, bool drawOverstrikeCaret, bool imeCaretBlockOverride) const noexcept {
+ViewStyle::CaretShape ViewStyle::CaretShapeForMode(bool inOverstrike, bool isMainSelection, bool drawDrag, bool drawOverstrikeCaret, bool imeCaretBlockOverride) const noexcept {
 	if (drawDrag) {
 		// Dragging text, use a line caret
 		return CaretShape::line;
@@ -710,7 +700,7 @@ ViewStyle::CaretShape ViewStyle::CaretShapeForMode(bool inOverstrike, bool drawD
 			return CaretShape::bar;
 		}
 	}
-	if (imeCaretBlockOverride) {
+	if (imeCaretBlockOverride || (FlagSet(caret.style, CaretStyle::Curses) && !isMainSelection)) {
 		return CaretShape::block;
 	}
 	const CaretStyle style = caret.style & CaretStyle::InsMask;

@@ -1,8 +1,8 @@
-#!/usr/bin/env python3
 import unicodedata
 
 from FileGenerator import Regenerate
-from GenerateCharacterCategory import dumpArray
+import MultiStageTable
+import UnicodeData
 
 def GenerateUTF8Table():
 	# for UTF8ClassifyTable in UniConversion.cxx
@@ -88,20 +88,14 @@ def GenerateUTF8Table():
 
 	lines = []
 	for i in range(0, 255, 16):
-		line = ', '.join('0x%02X' % ch for ch in UTF8ClassifyTable[i:i + 16]) + ','
-		line += ' // %02X - %02X' % (i, i + 15)
+		line = ', '.join(f'0x{ch:02X}' for ch in UTF8ClassifyTable[i:i + 16]) + ','
+		line += f' // {i:02X} - {i+15:02X}'
 		lines.append(line)
 
 	print('UTF8ClassifyTable:', len(UTF8ClassifyTable), len(lines))
 	print('\n'.join(lines))
-	print('UTF8_3ByteMask: 0x%016x' % UTF8_3ByteMask)
-	print('UTF8_4ByteMask: 0x%016x' % UTF8_4ByteMask)
-
-def GetCharName(ch):
-	try:
-		return unicodedata.name(ch).title()
-	except ValueError:
-		return ''
+	print(f'UTF8_3ByteMask: 0x{UTF8_3ByteMask:016x}')
+	print(f'UTF8_4ByteMask: 0x{UTF8_4ByteMask:016x}')
 
 def GenerateUnicodeControlCharacters():
 	# for kUnicodeControlCharacterTable in Edit.c
@@ -131,13 +125,14 @@ def GenerateUnicodeControlCharacters():
 		"\u2067", # U+2067	RLI		Right-to-left isolate
 		"\u2068", # U+2068	FSI		First strong isolate
 		"\u2069", # U+2069	PDI		Pop directional isolate
+		"\u061C", # U+061C	ALM		Arabic letter mark
 	]
 
 	print('UnicodeControlCharacters:')
 	for ucc in ucc_table:
 		utf8bytes = ucc.encode('utf-8')
-		utf8str = ''.join('\\x%02x' % b for b in utf8bytes)
-		print(utf8str, 'U+%04X' % ord(ucc), unicodedata.category(ucc), GetCharName(ucc))
+		utf8str = ''.join(f'\\x{b:02x}' for b in utf8bytes)
+		print(utf8str, f'U+{ord(ucc):04X}', unicodedata.category(ucc), UnicodeData.getCharacterName(ucc))
 
 def GenerateJsonCharClass():
 	keywords = ["false", "null", "true", "Infinity", "NaN"]
@@ -212,10 +207,10 @@ def GenerateJsonCharClass():
 
 	nonAscii = (SCE_JSON_IDENTIFIER << 5) | JsonMask_Identifier | JsonChar_Ignore
 	table.extend([nonAscii]*128)
-	lines = dumpArray(table, 16)
+	lines = MultiStageTable.dumpArray(table, 16)
 	Regenerate("../lexers/LexJSON.cxx", "//", lines)
 
 if __name__ == '__main__':
 	#GenerateUTF8Table()
-	GenerateUnicodeControlCharacters();
+	GenerateUnicodeControlCharacters()
 	GenerateJsonCharClass()

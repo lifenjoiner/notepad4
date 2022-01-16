@@ -166,11 +166,9 @@ public:
 
 struct LexerReleaser {
 	// Called by unique_ptr to destroy/free the Resource
-	void operator()(Scintilla::ILexer5 *pLexer) noexcept {
-		if (pLexer) {
-			// ILexer5::Release must not throw, ignore if it does.
-			pLexer->Release();
-		}
+	void operator()(Scintilla::ILexer5 *pLexer) const noexcept {
+		// ILexer5::Release must not throw, ignore if it does.
+		pLexer->Release();
 	}
 };
 
@@ -211,15 +209,18 @@ struct RegexError : public std::runtime_error {
  */
 
 class ActionDuration {
-	double duration = 1e-6;
+	double duration;
 	static constexpr double minDuration = 1e-7;
 	static constexpr double maxDuration = 1e-4;
 	// measure time in KiB instead of byte.
 	static constexpr int unitBytes = 1024;
 public:
 	static constexpr int InitialBytes = 1024*1024;
+	ActionDuration(double initial) noexcept : duration{initial} {}
 	void AddSample(Sci::Position numberActions, double durationOfActions) noexcept;
-	double Duration() const noexcept;
+	double Duration() const noexcept {
+		return duration;
+	}
 	Sci::Position ActionsInAllowedTime(double secondsAllowed) const noexcept;
 };
 
@@ -363,7 +364,7 @@ public:
 	}
 	bool IsDBCSDualByteAt(Sci::Position pos) const noexcept;
 	int DBCSDrawBytes(const char *text, size_t length) const noexcept;
-	int SafeSegment(const char *text, int lengthSegment) const noexcept;
+	size_t SafeSegment(const char *text, size_t lengthSegment, EncodingFamily encodingFamily) const noexcept;
 	EncodingFamily CodePageFamily() const noexcept;
 
 	// Gateways to modifying document

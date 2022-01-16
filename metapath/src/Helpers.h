@@ -395,6 +395,7 @@ HDWP DeferCtlPos(HDWP hdwp, HWND hwndDlg, int nCtlId, int dx, int dy, UINT uFlag
 void ResizeDlgCtl(HWND hwndDlg, int nCtlId, int dx, int dy);
 void MakeBitmapButton(HWND hwnd, int nCtlId, HINSTANCE hInstance, WORD wBmpId);
 void DeleteBitmapButton(HWND hwnd, int nCtlId);
+void SetClipData(HWND hwnd, LPCWSTR pszData);
 void SetWindowTransparentMode(HWND hwnd, BOOL bTransparentMode, int iOpacityLevel);
 void SetWindowLayoutRTL(HWND hwnd, BOOL bRTL);
 
@@ -464,9 +465,10 @@ NP2_inline BOOL PathIsSymbolicLink(LPCWSTR pszPath) {
 // https://docs.microsoft.com/en-us/windows/win32/intl/handling-sorting-in-your-applications#sort-strings-ordinally
 NP2_inline BOOL PathEqual(LPCWSTR pszPath1, LPCWSTR pszPath2) {
 #if _WIN32_WINNT >= _WIN32_WINNT_VISTA
+	// the function maps case using the operating system uppercasing table
 	return CompareStringOrdinal(pszPath1, -1, pszPath2, -1, TRUE) == CSTR_EQUAL;
 #else
-	return CompareString(LOCALE_INVARIANT, NORM_IGNORECASE, pszPath1, -1, pszPath2, -1) == CSTR_EQUAL;
+	return CompareString(LOCALE_SYSTEM_DEFAULT, NORM_IGNORECASE, pszPath1, -1, pszPath2, -1) == CSTR_EQUAL;
 #endif
 }
 
@@ -480,11 +482,23 @@ NP2_inline void GetProgramRealPath(LPWSTR tchModule, DWORD nSize) {
 	}
 }
 
-void PathRelativeToApp(LPCWSTR lpszSrc, LPWSTR lpszDest, BOOL bSrcIsFile, BOOL bUnexpandEnv, BOOL bUnexpandMyDocs);
+void PathRelativeToApp(LPCWSTR lpszSrc, LPWSTR lpszDest, DWORD dwAttrTo, BOOL bUnexpandEnv, BOOL bUnexpandMyDocs);
 void PathAbsoluteFromApp(LPCWSTR lpszSrc, LPWSTR lpszDest, BOOL bExpandEnv);
 BOOL PathGetLnkPath(LPCWSTR pszLnkFile, LPWSTR pszResPath);
 BOOL PathCreateLnk(LPCWSTR pszLnkDir, LPCWSTR pszPath);
 void OpenContainingFolder(HWND hwnd, LPCWSTR pszFile, BOOL bSelect);
+
+#if _WIN32_WINNT >= _WIN32_WINNT_VISTA
+#if defined(__cplusplus)
+#define KnownFolderId_Desktop			FOLDERID_Desktop
+#define KnownFolderId_Documents			FOLDERID_Documents
+#define KnownFolderId_ComputerFolder	FOLDERID_ComputerFolder
+#else
+#define KnownFolderId_Desktop			(&FOLDERID_Desktop)
+#define KnownFolderId_Documents			(&FOLDERID_Documents)
+#define KnownFolderId_ComputerFolder	(&FOLDERID_ComputerFolder)
+#endif
+#endif
 
 NP2_inline void TrimString(LPWSTR lpString) {
 	StrTrim(lpString, L" ");

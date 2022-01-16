@@ -87,21 +87,20 @@ ifeq ($(ARCH), x64)
 			export LDFLAGS += -Wl,--subsystem,windows:6.01
 		endif
 	else
-		# Windows XP 64-bit, Windows Server 2003
-		export CPPFLAGS += -D_WIN64 -D_WIN32_WINNT=0x0502 -DWINVER=0x0502
-		export LDFLAGS += -Wl,--major-os-version,5 -Wl,--minor-os-version,2
+		# Windows Vista, Windows Server 2008
+		export CPPFLAGS += -D_WIN64 -D_WIN32_WINNT=0x0600 -DWINVER=0x0600
+		export LDFLAGS += -Wl,--major-os-version,6 -Wl,--minor-os-version,0
 		ifndef LLD
-			export LDFLAGS += -Wl,--subsystem,windows:5.02
+			export LDFLAGS += -Wl,--subsystem,windows:6.00
 		endif
 	endif
 else ifeq ($(ARCH), AVX2)
 	# Windows 7 SP1, Windows Server 2008 R2 SP1, 64-bit only
-	# TODO: use -march=x86-64-v3 for GCC 11+ or Clang 12+
-	export CFLAGS += -mavx2 -mpopcnt -mbmi -mbmi2 -mlzcnt -mmovbe
-	export CXXFLAGS += -mavx2 -mpopcnt -mbmi -mbmi2 -mlzcnt -mmovbe
+	export CFLAGS += -march=x86-64-v3
+	export CXXFLAGS += -march=x86-64-v3
 	export RCFLAGS += -D_WIN64
 	export CPPFLAGS += -D_WIN64 -D_WIN32_WINNT=0x0601 -DWINVER=0x0601
-	export LDFLAGS += -mavx2 -mpopcnt -mbmi -mbmi2 -mlzcnt -mmovbe -Wl,--major-os-version,6 -Wl,--minor-os-version,1
+	export LDFLAGS += -march=x86-64-v3 -Wl,--major-os-version,6 -Wl,--minor-os-version,1
 	ifndef LLD
 		export LDFLAGS += -Wl,--subsystem,windows:6.01
 	endif

@@ -37,8 +37,7 @@
 #include "GraphicUtils.h"
 #include "resource.h"
 
-LPCSTR GetCurrentLogTime(void) {
-	static char buf[16];
+LPCSTR GetCurrentLogTime(char buf[16]) {
 	SYSTEMTIME lt;
 	GetLocalTime(&lt);
 	sprintf(buf, "%02d:%02d:%02d.%03d", lt.wHour, lt.wMinute, lt.wSecond, lt.wMilliseconds);
@@ -1681,17 +1680,11 @@ typedef struct FILE_ID_INFO {
 } FILE_ID_INFO;
 #endif
 
-static inline BOOL PathGetFileId(LPCWSTR pszPath, FILE_ID_INFO *fileId) {
-	HANDLE hFile = CreateFile(pszPath, FILE_READ_ATTRIBUTES,
-		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-		NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-	if (hFile == INVALID_HANDLE_VALUE) {
-		return FALSE;
-	}
-	BOOL success;
+static inline BOOL PathGetFileId(HANDLE hFile, FILE_ID_INFO *fileId) {
+	BOOL success = FALSE;
 	if (IsWin8AndAbove()) {
 #if _WIN32_WINNT >= _WIN32_WINNT_VISTA
-		success = GetFileInformationByHandleEx(hFile, FileIdInfo, fileId, sizeof(FILE_ID_INFO));
+		success = GetFileInformationByHandleEx(hFile, (FILE_INFO_BY_HANDLE_CLASS)FileIdInfo, fileId, sizeof(FILE_ID_INFO));
 #else
 		typedef BOOL (WINAPI *GetFileInformationByHandleExSig)(HANDLE hFile, int FileInformationClass, LPVOID lpFileInformation, DWORD dwBufferSize);
 		static GetFileInformationByHandleExSig pfnGetFileInformationByHandleEx = NULL;
@@ -1700,7 +1693,9 @@ static inline BOOL PathGetFileId(LPCWSTR pszPath, FILE_ID_INFO *fileId) {
 		}
 		success = pfnGetFileInformationByHandleEx(hFile, FileIdInfo, fileId, sizeof(FILE_ID_INFO));
 #endif
-	} else {
+		// failed on samba: GetLastError() => ERROR_INVALID_PARAMETER
+	}
+	if (!success) {
 		BY_HANDLE_FILE_INFORMATION info;
 		success = GetFileInformationByHandle(hFile, &info);
 		if (success) {
@@ -1710,16 +1705,38 @@ static inline BOOL PathGetFileId(LPCWSTR pszPath, FILE_ID_INFO *fileId) {
 		}
 	}
 
-	CloseHandle(hFile);
 	return success;
 }
 
 BOOL PathEquivalent(LPCWSTR pszPath1, LPCWSTR pszPath2) {
+	if (PathEqual(pszPath1, pszPath2)) {
+		// TODO: support WSL case sensitive path created by FILE_FLAG_POSIX_SEMANTICS
+		// https://devblogs.microsoft.com/commandline/per-directory-case-sensitivity-and-wsl/
+		return TRUE;
+	}
+
 	BOOL same = FALSE;
-	FILE_ID_INFO info1;
-	FILE_ID_INFO info2;
-	if (PathGetFileId(pszPath1, &info1) && PathGetFileId(pszPath2, &info2)) {
-		same = memcmp(&info1, &info2, sizeof(FILE_ID_INFO)) == 0;
+	// https://docs.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_id_info
+	// To determine whether two open handles represent the same file,
+	// combine the identifier and the volume serial number for each file and compare them.
+	HANDLE hFile1 = CreateFile(pszPath1, FILE_READ_ATTRIBUTES,
+						FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+						NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+	if (hFile1 != INVALID_HANDLE_VALUE) {
+		FILE_ID_INFO info1;
+		if (PathGetFileId(hFile1, &info1)) {
+			HANDLE hFile2 = CreateFile(pszPath2, FILE_READ_ATTRIBUTES,
+								FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+								NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+			if (hFile2 != INVALID_HANDLE_VALUE) {
+				FILE_ID_INFO info2;
+				if (PathGetFileId(hFile2, &info2)) {
+					same = memcmp(&info1, &info2, sizeof(FILE_ID_INFO)) == 0;
+				}
+				CloseHandle(hFile2);
+			}
+		}
+		CloseHandle(hFile1);
 	}
 	return same;
 }
@@ -1728,42 +1745,47 @@ BOOL PathEquivalent(LPCWSTR pszPath1, LPCWSTR pszPath2) {
 //
 // PathRelativeToApp()
 //
-void PathRelativeToApp(LPCWSTR lpszSrc, LPWSTR lpszDest, BOOL bSrcIsFile, BOOL bUnexpandEnv, BOOL bUnexpandMyDocs) {
-	WCHAR wchUserFiles[MAX_PATH];
+void PathRelativeToApp(LPCWSTR lpszSrc, LPWSTR lpszDest, DWORD dwAttrTo, BOOL bUnexpandEnv, BOOL bUnexpandMyDocs) {
 	WCHAR wchPath[MAX_PATH];
-	const DWORD dwAttrTo = bSrcIsFile ? 0 : FILE_ATTRIBUTE_DIRECTORY;
 
+	if (!PathIsRelative(lpszSrc)) {
+		WCHAR wchAppPath[MAX_PATH];
+		WCHAR wchWinDir[MAX_PATH];
+		GetModuleFileName(NULL, wchAppPath, COUNTOF(wchAppPath));
+		PathRemoveFileSpec(wchAppPath);
+
+		if (bUnexpandMyDocs) {
 #if _WIN32_WINNT >= _WIN32_WINNT_VISTA
-	LPWSTR pszPath = NULL;
-	if (S_OK != SHGetKnownFolderPath(&FOLDERID_Documents, KF_FLAG_DEFAULT, NULL, &pszPath)) {
-		return;
-	}
-	lstrcpy(wchUserFiles, pszPath);
-	CoTaskMemFree(pszPath);
+			LPWSTR wchUserFiles = NULL;
+			if (S_OK != SHGetKnownFolderPath(KnownFolderId_Documents, KF_FLAG_DEFAULT, NULL, &wchUserFiles)) {
+				return;
+			}
 #else
-	if (S_OK != SHGetFolderPath(NULL, CSIDL_PERSONAL, NULL, SHGFP_TYPE_CURRENT, wchUserFiles)) {
-		return;
-	}
+			WCHAR wchUserFiles[MAX_PATH];
+			if (S_OK != SHGetFolderPath(NULL, CSIDL_PERSONAL, NULL, SHGFP_TYPE_CURRENT, wchUserFiles)) {
+				return;
+			}
 #endif
-
-	WCHAR wchAppPath[MAX_PATH];
-	WCHAR wchWinDir[MAX_PATH];
-	GetModuleFileName(NULL, wchAppPath, COUNTOF(wchAppPath));
-	PathRemoveFileSpec(wchAppPath);
-	GetWindowsDirectory(wchWinDir, COUNTOF(wchWinDir));
-
-	if (bUnexpandMyDocs && !PathIsRelative(lpszSrc) && !PathIsPrefix(wchUserFiles, wchAppPath) && PathIsPrefix(wchUserFiles, lpszSrc)
-		&& PathRelativePathTo(wchPath, wchUserFiles, FILE_ATTRIBUTE_DIRECTORY, lpszSrc, dwAttrTo)) {
-		lstrcpy(wchUserFiles, L"%CSIDL:MYDOCUMENTS%");
-		PathAppend(wchUserFiles, wchPath);
-		lstrcpy(wchPath, wchUserFiles);
-	} else if (PathIsRelative(lpszSrc) || PathCommonPrefix(wchAppPath, wchWinDir, NULL)
-		|| !PathRelativePathTo(wchPath, wchAppPath, FILE_ATTRIBUTE_DIRECTORY, lpszSrc, dwAttrTo)) {
-		lstrcpyn(wchPath, lpszSrc, COUNTOF(wchPath));
+			if (!PathIsPrefix(wchUserFiles, wchAppPath) && PathIsPrefix(wchUserFiles, lpszSrc)
+				&& PathRelativePathTo(wchWinDir, wchUserFiles, FILE_ATTRIBUTE_DIRECTORY, lpszSrc, dwAttrTo)) {
+				PathCombine(wchPath, L"%CSIDL:MYDOCUMENTS%", wchWinDir);
+				lpszSrc = wchPath;
+			}
+#if _WIN32_WINNT >= _WIN32_WINNT_VISTA
+			CoTaskMemFree(wchUserFiles);
+#endif
+		}
+		if (lpszSrc != wchPath) {
+			GetWindowsDirectory(wchWinDir, COUNTOF(wchWinDir));
+			if (!PathCommonPrefix(wchAppPath, wchWinDir, NULL)
+				&& PathRelativePathTo(wchPath, wchAppPath, FILE_ATTRIBUTE_DIRECTORY, lpszSrc, dwAttrTo)) {
+				lpszSrc = wchPath;
+			}
+		}
 	}
 
-	if (!bUnexpandEnv || !PathUnExpandEnvStrings(wchPath, lpszDest, MAX_PATH)) {
-		lstrcpy(lpszDest, wchPath);
+	if (!bUnexpandEnv || !PathUnExpandEnvStrings(lpszSrc, lpszDest, MAX_PATH)) {
+		lstrcpy(lpszDest, lpszSrc);
 	}
 }
 
@@ -1777,17 +1799,17 @@ void PathAbsoluteFromApp(LPCWSTR lpszSrc, LPWSTR lpszDest, BOOL bExpandEnv) {
 	if (StrHasPrefix(lpszSrc, L"%CSIDL:MYDOCUMENTS%")) {
 #if _WIN32_WINNT >= _WIN32_WINNT_VISTA
 		LPWSTR pszPath = NULL;
-		if (S_OK != SHGetKnownFolderPath(&FOLDERID_Documents, KF_FLAG_DEFAULT, NULL, &pszPath)) {
+		if (S_OK != SHGetKnownFolderPath(KnownFolderId_Documents, KF_FLAG_DEFAULT, NULL, &pszPath)) {
 			return;
 		}
-		lstrcpy(wchPath, pszPath);
+		PathCombine(wchPath, pszPath, lpszSrc + CSTRLEN("%CSIDL:MYDOCUMENTS%"));
 		CoTaskMemFree(pszPath);
 #else
 		if (S_OK != SHGetFolderPath(NULL, CSIDL_PERSONAL, NULL, SHGFP_TYPE_CURRENT, wchPath)) {
 			return;
 		}
-#endif
 		PathAppend(wchPath, lpszSrc + CSTRLEN("%CSIDL:MYDOCUMENTS%"));
+#endif
 	} else {
 		lstrcpyn(wchPath, lpszSrc, COUNTOF(wchPath));
 	}
@@ -1897,7 +1919,7 @@ BOOL PathCreateDeskLnk(LPCWSTR pszDocument) {
 
 #if _WIN32_WINNT >= _WIN32_WINNT_VISTA
 	LPWSTR tchLinkDir = NULL;
-	if (S_OK != SHGetKnownFolderPath(&FOLDERID_Desktop, KF_FLAG_DEFAULT, NULL, &tchLinkDir)) {
+	if (S_OK != SHGetKnownFolderPath(KnownFolderId_Desktop, KF_FLAG_DEFAULT, NULL, &tchLinkDir)) {
 		return FALSE;
 	}
 #else
@@ -1981,8 +2003,7 @@ BOOL PathCreateFavLnk(LPCWSTR pszName, LPCWSTR pszTarget, LPCWSTR pszDir) {
 	}
 
 	WCHAR tchLnkFileName[MAX_PATH];
-	lstrcpy(tchLnkFileName, pszDir);
-	PathAppend(tchLnkFileName, pszName);
+	PathCombine(tchLnkFileName, pszDir, pszName);
 	lstrcat(tchLnkFileName, L".lnk");
 
 	if (PathIsFile(tchLnkFileName)) {
@@ -2047,12 +2068,12 @@ void OpenContainingFolder(HWND hwnd, LPCWSTR pszFile, BOOL bSelect) {
 		return;
 	}
 
-	LPITEMIDLIST pidl = ILCreateFromPath(wchDirectory);
+	PIDLIST_ABSOLUTE pidl = ILCreateFromPath(wchDirectory);
 	if (pidl) {
 		HRESULT hr;
-		LPITEMIDLIST pidlEntry = path ? ILCreateFromPath(path) : NULL;
+		PIDLIST_ABSOLUTE pidlEntry = path ? ILCreateFromPath(path) : NULL;
 		if (pidlEntry) {
-			hr = SHOpenFolderAndSelectItems(pidl, 1, (LPCITEMIDLIST *)(&pidlEntry), 0);
+			hr = SHOpenFolderAndSelectItems(pidl, 1, (PCUITEMID_CHILD_ARRAY)(&pidlEntry), 0);
 			CoTaskMemFree((LPVOID)pidlEntry);
 		} else if (!bSelect) {
 #if 0
@@ -2273,7 +2294,11 @@ void FormatNumberStr(LPWSTR lpNumberStr) {
 	// https://docs.microsoft.com/en-us/windows/desktop/Intl/locale-sthousand
 	// https://docs.microsoft.com/en-us/windows/desktop/Intl/locale-sgrouping
 	WCHAR szSep[4];
-	const WCHAR sep = GetLocaleInfo(LOCALE_USER_DEFAULT, LOCALE_STHOUSAND, szSep, COUNTOF(szSep))? szSep[0] : L',';
+#if _WIN32_WINNT >= _WIN32_WINNT_VISTA
+	const WCHAR sep = GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_STHOUSAND, szSep, COUNTOF(szSep))? szSep[0] : L',';
+#else
+	const WCHAR sep = GetLocaleInfoW(LOCALE_USER_DEFAULT, LOCALE_STHOUSAND, szSep, COUNTOF(szSep))? szSep[0] : L',';
+#endif
 
 	WCHAR *c = lpNumberStr + i;
 	WCHAR *end = c;
@@ -2334,18 +2359,6 @@ void ComboBox_AddStringA2W(UINT uCP, HWND hwnd, LPCSTR lpString) {
 		ComboBox_AddString(hwnd, wsz);
 		NP2HeapFree(wsz);
 	}
-}
-
-//=============================================================================
-//
-// CodePageFromCharSet()
-//
-UINT CodePageFromCharSet(UINT uCharSet) {
-	CHARSETINFO ci;
-	if (TranslateCharsetInfo((DWORD *)(UINT_PTR)uCharSet, &ci, TCI_SRCCHARSET)) {
-		return ci.ciACP;
-	}
-	return GetACP();
 }
 
 //=============================================================================
@@ -2436,7 +2449,7 @@ BOOL MRU_AddFile(LPMRULIST pmru, LPCWSTR pszFile, BOOL bRelativePath, BOOL bUnex
 
 	if (bRelativePath) {
 		WCHAR wchFile[MAX_PATH];
-		PathRelativeToApp(pszFile, wchFile, TRUE, TRUE, bUnexpandMyDocs);
+		PathRelativeToApp(pszFile, wchFile, 0, TRUE, bUnexpandMyDocs);
 		pmru->pszItems[0] = StrDup(wchFile);
 	} else {
 		pmru->pszItems[0] = StrDup(pszFile);

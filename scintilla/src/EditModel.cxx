@@ -22,6 +22,8 @@
 #include <algorithm>
 #include <memory>
 
+#include <windows.h>
+
 #include "ScintillaTypes.h"
 #include "ILoader.h"
 #include "ILexer.h"
@@ -58,7 +60,7 @@ using namespace Scintilla::Internal;
 Caret::Caret() noexcept :
 	active(false), on(false), period(500) {}
 
-EditModel::EditModel() : braces{} {
+EditModel::EditModel() : durationWrapOneUnit(1e-6), durationWrapOneThread(0.01 / 32) {
 	inOverstrike = false;
 	trackLineWidth = false;
 	xOffset = 0;
@@ -81,11 +83,16 @@ EditModel::EditModel() : braces{} {
 	pdoc = new Document(DocumentOption::StylesNone);
 	pdoc->AddRef();
 	pcs = ContractionStateCreate(pdoc->IsLarge());
+	SYSTEM_INFO info;
+	GetNativeSystemInfo(&info);
+	hardwareConcurrency = info.dwNumberOfProcessors;
+	idleTaskTimer = CreateWaitableTimer(nullptr, true, nullptr);
 }
 
 EditModel::~EditModel() {
 	pdoc->Release();
 	pdoc = nullptr;
+	CloseHandle(idleTaskTimer);
 }
 
 bool EditModel::BidirectionalEnabled() const noexcept {
@@ -105,8 +112,8 @@ const char *EditModel::GetDefaultFoldDisplayText() const noexcept {
 	return defaultFoldDisplayText.get();
 }
 
-const char *EditModel::GetFoldDisplayText(Sci::Line lineDoc) const noexcept {
-	if (foldDisplayTextStyle == FoldDisplayTextStyle::Hidden || pcs->GetExpanded(lineDoc)) {
+const char *EditModel::GetFoldDisplayText(Sci::Line lineDoc, bool partialLine) const noexcept {
+	if (!partialLine && (foldDisplayTextStyle == FoldDisplayTextStyle::Hidden || pcs->GetExpanded(lineDoc))) {
 		return nullptr;
 	}
 
@@ -121,4 +128,24 @@ const char *EditModel::GetFoldDisplayText(Sci::Line lineDoc) const noexcept {
 InSelection EditModel::LineEndInSelection(Sci::Line lineDoc) const noexcept {
 	const Sci::Position posAfterLineEnd = pdoc->LineStart(lineDoc + 1);
 	return sel.InSelectionForEOL(posAfterLineEnd);
+}
+
+void EditModel::SetIdleTaskTime(uint32_t milliseconds) const noexcept {
+	LARGE_INTEGER dueTime;
+	dueTime.QuadPart = -INT64_C(10*1000)*milliseconds; // convert to 100ns
+	SetWaitableTimer(idleTaskTimer, &dueTime, 0, nullptr, nullptr, false);
+}
+
+bool EditModel::IdleTaskTimeExpired() const noexcept {
+	return WaitForSingleObject(idleTaskTimer, 0) == WAIT_OBJECT_0;
+}
+
+bool EditModel::UseParallelLayout(int length) const noexcept {
+	if (hardwareConcurrency < 2) {
+		return false;
+	}
+
+	constexpr double secondsAllowed = 0.01;
+	const Sci::Position actionsInAllowedTime = durationWrapOneThread.ActionsInAllowedTime(secondsAllowed);
+	return length >= actionsInAllowedTime;
 }

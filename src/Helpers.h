@@ -230,7 +230,7 @@ NP2_inline BOOL HexStrToInt(LPCWSTR str, int *value) {
 
 int ParseCommaList(LPCWSTR str, int result[], int count);
 int ParseCommaList64(LPCWSTR str, int64_t result[], int count);
-LPCSTR GetCurrentLogTime(void);
+LPCSTR GetCurrentLogTime(char buf[16]);
 
 typedef struct StopWatch {
 	LARGE_INTEGER freq; // not changed after system boot
@@ -802,9 +802,10 @@ NP2_inline BOOL PathIsSymbolicLink(LPCWSTR pszPath) {
 // https://docs.microsoft.com/en-us/windows/win32/intl/handling-sorting-in-your-applications#sort-strings-ordinally
 NP2_inline BOOL PathEqual(LPCWSTR pszPath1, LPCWSTR pszPath2) {
 #if _WIN32_WINNT >= _WIN32_WINNT_VISTA
+	// the function maps case using the operating system uppercasing table
 	return CompareStringOrdinal(pszPath1, -1, pszPath2, -1, TRUE) == CSTR_EQUAL;
 #else
-	return CompareString(LOCALE_INVARIANT, NORM_IGNORECASE, pszPath1, -1, pszPath2, -1) == CSTR_EQUAL;
+	return CompareString(LOCALE_SYSTEM_DEFAULT, NORM_IGNORECASE, pszPath1, -1, pszPath2, -1) == CSTR_EQUAL;
 #endif
 }
 
@@ -820,12 +821,26 @@ NP2_inline void GetProgramRealPath(LPWSTR tchModule, DWORD nSize) {
 
 // similar to std::filesystem::equivalent()
 BOOL PathEquivalent(LPCWSTR pszPath1, LPCWSTR pszPath2);
-void PathRelativeToApp(LPCWSTR lpszSrc, LPWSTR lpszDest, BOOL bSrcIsFile, BOOL bUnexpandEnv, BOOL bUnexpandMyDocs);
+void PathRelativeToApp(LPCWSTR lpszSrc, LPWSTR lpszDest, DWORD dwAttrTo, BOOL bUnexpandEnv, BOOL bUnexpandMyDocs);
 void PathAbsoluteFromApp(LPCWSTR lpszSrc, LPWSTR lpszDest, BOOL bExpandEnv);
 BOOL PathGetLnkPath(LPCWSTR pszLnkFile, LPWSTR pszResPath);
 BOOL PathCreateDeskLnk(LPCWSTR pszDocument);
 BOOL PathCreateFavLnk(LPCWSTR pszName, LPCWSTR pszTarget, LPCWSTR pszDir);
 void OpenContainingFolder(HWND hwnd, LPCWSTR pszFile, BOOL bSelect);
+
+#if _WIN32_WINNT >= _WIN32_WINNT_VISTA
+#if defined(__cplusplus)
+#define KnownFolderId_Desktop			FOLDERID_Desktop
+#define KnownFolderId_Documents			FOLDERID_Documents
+#define KnownFolderId_LocalAppData		FOLDERID_LocalAppData
+#define KnownFolderId_ComputerFolder	FOLDERID_ComputerFolder
+#else
+#define KnownFolderId_Desktop			(&FOLDERID_Desktop)
+#define KnownFolderId_Documents			(&FOLDERID_Documents)
+#define KnownFolderId_LocalAppData		(&FOLDERID_LocalAppData)
+#define KnownFolderId_ComputerFolder	(&FOLDERID_ComputerFolder)
+#endif
+#endif
 
 NP2_inline void TrimString(LPWSTR lpString) {
 	StrTrim(lpString, L" ");
@@ -851,8 +866,6 @@ BOOL	SetDlgItemIntEx(HWND hwnd, int nIdItem, UINT uValue);
 UINT	GetDlgItemTextA2W(UINT uCP, HWND hDlg, int nIDDlgItem, LPSTR lpString, int nMaxCount);
 void	SetDlgItemTextA2W(UINT uCP, HWND hDlg, int nIDDlgItem, LPCSTR lpString);
 void ComboBox_AddStringA2W(UINT uCP, HWND hwnd, LPCSTR lpString);
-
-UINT CodePageFromCharSet(UINT uCharSet);
 
 //==== MRU Functions ==========================================================
 #define MRU_MAXITEMS	32

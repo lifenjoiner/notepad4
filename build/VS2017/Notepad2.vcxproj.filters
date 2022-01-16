@@ -84,6 +84,9 @@
     <ClCompile Include="..\..\scintilla\lexers\LexCSS.cxx">
       <Filter>Scintilla\lexers</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\scintilla\lexers\LexD.cxx">
+      <Filter>Scintilla\lexers</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\scintilla\lexers\LexDart.cxx">
       <Filter>Scintilla\lexers</Filter>
     </ClCompile>
@@ -406,6 +409,9 @@
       <Filter>Source Files\EditLexers</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\EditLexers\stlBatch.c">
+      <Filter>Source Files\EditLexers</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\EditLexers\stlBlockdiag.c">
       <Filter>Source Files\EditLexers</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\EditLexers\stlCIL.c">
@@ -771,6 +777,9 @@
       <Filter>Scintilla\win32</Filter>
     </ClInclude>
     <ClInclude Include="..\..\scintilla\win32\PlatWin.h">
+      <Filter>Scintilla\win32</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\scintilla\win32\WinTypes.h">
       <Filter>Scintilla\win32</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\compiler.h">

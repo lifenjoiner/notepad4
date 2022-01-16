@@ -116,7 +116,7 @@ BOOL GetDirectory(HWND hwndParent, int iTitle, LPWSTR pszFolder, LPCWSTR pszBase
 	bi.lParam = (LPARAM)szBase;
 	bi.iImage = 0;
 
-	LPITEMIDLIST pidl = SHBrowseForFolder(&bi);
+	PIDLIST_ABSOLUTE pidl = SHBrowseForFolder(&bi);
 	if (pidl) {
 		SHGetPathFromIDList(pidl, pszFolder);
 		CoTaskMemFree((LPVOID)pidl);
@@ -140,7 +140,7 @@ BOOL GetDirectory2(HWND hwndParent, int iTitle, LPWSTR pszFolder, int iBase)
 	StrCpyExW(szTitle, L"");
 	GetString(iTitle, szTitle, COUNTOF(szTitle));
 
-	LPITEMIDLIST pidlRoot;
+	PIDLIST_ABSOLUTE pidlRoot;
 #if _WIN32_WINNT >= _WIN32_WINNT_VISTA
 	if (S_OK != SHGetKnownFolderIDList(iBase, KF_FLAG_DEFAULT, NULL, &pidlRoot))
 #else
@@ -160,7 +160,7 @@ BOOL GetDirectory2(HWND hwndParent, int iTitle, LPWSTR pszFolder, int iBase)
 	bi.lParam = 0;
 	bi.iImage = 0;
 
-	LPITEMIDLIST pidl = SHBrowseForFolder(&bi);
+	PIDLIST_ABSOLUTE pidl = SHBrowseForFolder(&bi);
 	const BOOL fOk = pidl != NULL;
 	if (fOk) {
 		SHGetPathFromIDList(pidl, pszFolder);
@@ -471,6 +471,28 @@ void OpenHelpLink(HWND hwnd, int cmd) {
 	}
 }
 
+static inline LPCWSTR GetProcessorArchitecture(void) {
+	SYSTEM_INFO info;
+	GetNativeSystemInfo(&info);
+#ifndef PROCESSOR_ARCHITECTURE_ARM64
+#define PROCESSOR_ARCHITECTURE_ARM64	12
+#endif
+	switch (info.wProcessorArchitecture) {
+	case PROCESSOR_ARCHITECTURE_AMD64:
+		return L"x64";
+	case PROCESSOR_ARCHITECTURE_ARM:
+		return L"ARM";
+	case PROCESSOR_ARCHITECTURE_ARM64:
+		return L"ARM64";
+	case PROCESSOR_ARCHITECTURE_IA64:
+		return L"IA64";
+	case PROCESSOR_ARCHITECTURE_INTEL:
+		return L"x86";
+	default:
+		return L"Unknown";
+	}
+}
+
 //=============================================================================
 //
 //  AboutDlgProc()
@@ -478,7 +500,7 @@ void OpenHelpLink(HWND hwnd, int cmd) {
 INT_PTR CALLBACK AboutDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam) {
 	switch (umsg) {
 	case WM_INITDIALOG: {
-		WCHAR wch[256];
+		WCHAR wch[128];
 #if defined(VERSION_BUILD_TOOL_BUILD)
 		wsprintf(wch, VERSION_BUILD_INFO_FORMAT, VERSION_BUILD_TOOL_NAME,
 			VERSION_BUILD_TOOL_MAJOR, VERSION_BUILD_TOOL_MINOR, VERSION_BUILD_TOOL_PATCH, VERSION_BUILD_TOOL_BUILD);
@@ -545,6 +567,26 @@ INT_PTR CALLBACK AboutDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam
 		switch (LOWORD(wParam)) {
 		case IDOK:
 		case IDCANCEL:
+		case IDC_COPY_BUILD_INFO:
+			if (LOWORD(wParam) == IDC_COPY_BUILD_INFO) {
+				OSVERSIONINFOW version;
+				ZeroMemory(&version, sizeof(version));
+				version.dwOSVersionInfoSize = sizeof(version);
+				NP2_COMPILER_WARNING_PUSH
+				NP2_IGNORE_WARNING_DEPRECATED_DECLARATIONS
+				GetVersionEx(&version);
+				NP2_COMPILER_WARNING_POP
+
+				WCHAR wch[128];
+				WCHAR tch[256];
+				LPCWSTR arch = GetProcessorArchitecture();
+				GetDlgItemText(hwnd, IDC_BUILD_INFO, wch, COUNTOF(wch));
+				wsprintf(tch, L"%s\n%s\nSystem: %u.%u.%u %s %s\n",
+					VERSION_FILEVERSION_LONG, wch,
+					version.dwMajorVersion, version.dwMinorVersion, version.dwBuildNumber,
+					version.szCSDVersion, arch);
+				SetClipData(hwnd, tch);
+			}
 			EndDialog(hwnd, IDOK);
 			break;
 		}
@@ -1276,7 +1318,7 @@ INT_PTR OptionsPropSheet(HWND hwnd, HINSTANCE hInstance) {
 	psh.dwFlags     = PSH_PROPSHEETPAGE | PSH_NOAPPLYNOW | PSH_PROPTITLE;
 	psh.hwndParent  = hwnd;
 	psh.hInstance   = hInstance;
-	psh.pszCaption  = L"metapath";
+	psh.pszCaption  = WC_METAPATH;
 	psh.nPages      = 4;
 	psh.nStartPage  = 0;
 	psh.ppsp        = psp;
@@ -2216,7 +2258,7 @@ static INT_PTR CALLBACK FindWinDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPAR
 		case IDOK: {
 			WCHAR tch[MAX_PATH] = L"";
 			if (GetDlgItemText(hwnd, IDC_WINMODULE, tch, COUNTOF(tch))) {
-				PathRelativeToApp(tch, tch, TRUE, TRUE, flagPortableMyDocs);
+				PathRelativeToApp(tch, tch, 0, TRUE, flagPortableMyDocs);
 				PathQuoteSpaces(tch);
 				SetDlgItemText(GetParent(hwnd), IDC_TARGETPATH, tch);
 			}
@@ -2413,7 +2455,7 @@ INT_PTR CALLBACK FindTargetDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM l
 			// execute file open dlg
 			if (GetOpenFileName(&ofn)) {
 				lstrcpy(tchBuf, szFile);
-				PathRelativeToApp(tchBuf, tchBuf, TRUE, TRUE, flagPortableMyDocs);
+				PathRelativeToApp(tchBuf, tchBuf, 0, TRUE, flagPortableMyDocs);
 				PathQuoteSpaces(tchBuf);
 				if (StrNotEmpty(szParams)) {
 					StrCatBuff(tchBuf, L" ", COUNTOF(tchBuf));

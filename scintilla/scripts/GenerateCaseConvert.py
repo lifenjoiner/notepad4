@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Script to generate CaseConvert.cxx from Python's Unicode data
 # Should be run rarely when a Python with a new version of Unicode data is available.
 
@@ -15,7 +14,6 @@
 # strings with original, folded, upper, and lower separated by '|'.
 # There are 126 complex cases.
 
-import sys
 import platform
 import unicodedata
 import io
@@ -24,15 +22,8 @@ import string
 from pprint import pprint
 
 from FileGenerator import Regenerate
-from GenerateCharacterCategory import compressIndexTable
-
-UnicodeCharacterCount = sys.maxunicode + 1
-
-def getCharName(ch):
-	try:
-		return unicodedata.name(ch).title()
-	except ValueError:
-		return ''
+from MultiStageTable import *
+from UnicodeData import *
 
 def isCaseSensitive(ch):
 	return ch != ch.upper() or ch != ch.lower() or ch != ch.casefold()
@@ -120,7 +111,7 @@ def groupRanges(symmetrics):
 	return rangeGroups, nonRanges
 
 def escape(s):
-	return "".join((chr(c) if chr(c) in string.ascii_letters else "\\x%x" % c) for c in s.encode('utf-8'))
+	return "".join((chr(c) if chr(c) in string.ascii_letters else f"\\x{c:02x}") for c in s.encode('utf-8'))
 
 def updateCaseConvert():
 	symmetrics, complexes = conversionSets()
@@ -235,7 +226,7 @@ def checkUnicodeCaseSensitivity(filename=None):
 	for ch in range(UnicodeCharacterCount):
 		uch = chr(ch)
 		if isCaseSensitive(uch):
-			caseList.append((ch, hex(ch), uch, getCharName(uch)))
+			caseList.append((ch, hex(ch), uch, getCharacterName(uch)))
 			caseTable[ch] = '1'
 
 	print(len(caseList), caseList[-1])
@@ -260,10 +251,9 @@ def checkUnicodeCaseSensitivity(filename=None):
 		mask = int(''.join(reversed(caseTable[i:i+32])), 2)
 		maskTable.append(mask)
 
-	output = ["// Created with Python %s, Unicode %s" % (
-		platform.python_version(), unicodedata.unidata_version)]
-	output.append('#define kUnicodeCaseSensitiveFirst\t0x%04xU' % first)
-	output.append('#define kUnicodeCaseSensitiveMax\t0x%04xU' % maxCh)
+	output = [f"// Created with Python {platform.python_version()}, Unicode {unicodedata.unidata_version}"]
+	output.append(f'#define kUnicodeCaseSensitiveFirst\t0x{first:04x}U')
+	output.append(f'#define kUnicodeCaseSensitiveMax\t0x{maxCh:04x}U')
 	output.append('')
 
 	output.append('static const UnicodeCaseSensitivityRange UnicodeCaseSensitivityRangeList[] = {')
@@ -271,9 +261,9 @@ def checkUnicodeCaseSensitivity(filename=None):
 		minCh = group['min']
 		maxCh = group['max']
 		if len(group['ranges']) == 1:
-			output.append('\t{ 0x%04x, 0x%04x, 0 },' % (minCh, maxCh))
+			output.append(f'\t{{ 0x{minCh:04x}, 0x{maxCh:04x}, 0 }},')
 		else:
-			output.append('\t{ 0x%04x, 0x%04x, %d },' % (minCh, maxCh, len(maskTable)))
+			output.append(f'\t{{ 0x{minCh:04x}, 0x{maxCh:04x}, {len(maskTable)} }},')
 			for i in range(minCh, maxCh, 32):
 				mask = int(''.join(reversed(caseTable[i:i+32])), 2)
 				maskTable.append(mask)
@@ -282,7 +272,7 @@ def checkUnicodeCaseSensitivity(filename=None):
 
 	output.append('static const uint32_t UnicodeCaseSensitivityMask[] = {')
 	for i in range(0, len(maskTable), 8):
-		line = ', '.join('0x%08xU' % mask for mask in maskTable[i:i+8])
+		line = ', '.join(f'0x{mask:08x}U' for mask in maskTable[i:i+8])
 		output.append(line + ',')
 	output.append('};')
 	output.append('')
@@ -349,40 +339,33 @@ def updateCaseSensitivity(filename, test=False):
 
 	print('Unicode Case Sensitivity maskList:', len(maskList), 'indexTable:', len(indexTable), maskCount, maxCh)
 
-	args = {
-		'table': 'UnicodeCaseSensitivityIndex',
-		'with_function': False,
+	config = {
+		'tableName': 'UnicodeCaseSensitivityIndex',
+		'function': """static inline int IsCharacterCaseSensitiveSecond(uint32_t ch) {
+	const uint32_t lower = ch & 31;
+	ch = (ch - kUnicodeCaseSensitiveFirst) >> 5;""",
 	}
 
-	table, function = compressIndexTable('Unicode Case Sensitivity', indexTable, args)
-	table = 'static ' + table
+	table, function = buildMultiStageTable('Unicode Case Sensitivity', indexTable, config)
+	table[0] = 'static ' + table[0]
+	function.append('\treturn bittest(UnicodeCaseSensitivityMask + ch, lower);')
+	function.append('}')
 
-	output = ["// Created with Python %s, Unicode %s" % (
-		platform.python_version(), unicodedata.unidata_version)]
-	output.append('#define kUnicodeCaseSensitiveFirst\t0x%04xU' % first)
-	output.append('#define kUnicodeCaseSensitiveMax\t0x%04xU' % maxCh)
+	output = [f"// Created with Python {platform.python_version()}, Unicode {unicodedata.unidata_version}"]
+	output.append(f'#define kUnicodeCaseSensitiveFirst\t0x{first:04x}U')
+	output.append(f'#define kUnicodeCaseSensitiveMax\t0x{maxCh:04x}U')
 	output.append('')
-	output.extend(table.splitlines())
+	output.extend(table)
 	output.append('')
 
 	output.append('static const uint32_t UnicodeCaseSensitivityMask[] = {')
 	for i in range(0, len(maskList), 8):
-		line = ', '.join('0x%08xU' % mask for mask in maskList[i:i+8])
+		line = ', '.join(f'0x{mask:08x}U' for mask in maskList[i:i+8])
 		output.append(line + ',')
 	output.append('};')
 
-	function = """
-// case sensitivity for ch in [kUnicodeCaseSensitiveFirst, kUnicodeCaseSensitiveMax]
-static inline int IsCharacterCaseSensitiveSecond(uint32_t ch) {{
-	const uint32_t lower = ch & 31;
-	ch = (ch - kUnicodeCaseSensitiveFirst) >> 5;
-	ch = ({table}[ch >> {shiftA}] << {shiftA2}) | (ch & {maskA});
-	ch = ({table}[{offsetC} + (ch >> {shiftC})] << {shiftC2}) | (ch & {maskC});
-	ch = {table}[{offsetD} + ch];
-	return bittest(UnicodeCaseSensitivityMask + ch, lower);
-}}
-""".format(**args)
-	output.extend(function.splitlines())
+	output.append('// case sensitivity for ch in [kUnicodeCaseSensitiveFirst, kUnicodeCaseSensitiveMax]')
+	output.extend(function)
 
 	if not test:
 		Regenerate(filename, "//case", output)
@@ -410,9 +393,6 @@ int IsCharacterCaseSensitive(uint32_t ch)	{
 		addCaseSensitivityTest(fd, caseTable, maskCount*32)
 
 def updateCaseSensitivityBlock(filename, test=False):
-	def getBitCount(value):
-		return len(bin(value)) - 2
-
 	caseTable = ['0']*UnicodeCharacterCount
 	maskTable = [0] * (UnicodeCharacterCount >> 5)
 	first = 0x600
@@ -438,7 +418,7 @@ def updateCaseSensitivityBlock(filename, test=False):
 	blockData = [(0, 0)] * blockIndexCount
 	blockIndex = [0] * blockIndexCount
 	maxBlockId = (maskCount // blockSize - 1) >> blockIndexValueBit
-	blockBitCount = getBitCount(maxBlockId)
+	blockBitCount = maxBlockId.bit_length()
 	indexBitCount = 8 - blockBitCount
 	maxIndex = 1 << indexBitCount
 	overlapped = False
@@ -487,10 +467,9 @@ def updateCaseSensitivityBlock(filename, test=False):
 	size = len(blockIndex) + len(indexTable) + len(maskList)*4
 	print('caseBlock', blockSize, len(maskList), len(blockIndex), len(indexTable), size)
 
-	output = ["// Created with Python %s, Unicode %s" % (
-		platform.python_version(), unicodedata.unidata_version)]
-	output.append('#define kUnicodeCaseSensitiveFirst\t0x%04xU' % first)
-	output.append('#define kUnicodeCaseSensitiveMax\t0x%04xU' % maxCh)
+	output = [f"// Created with Python {platform.python_version()}, Unicode {unicodedata.unidata_version}"]
+	output.append(f'#define kUnicodeCaseSensitiveFirst\t0x{first:04x}U')
+	output.append(f'#define kUnicodeCaseSensitiveMax\t0x{maxCh:04x}U')
 	output.append('')
 
 	output.append('static const uint8_t UnicodeCaseSensitivityIndex[] = {')
@@ -507,7 +486,7 @@ def updateCaseSensitivityBlock(filename, test=False):
 	output.append('')
 	output.append('static const uint32_t UnicodeCaseSensitivityMask[] = {')
 	for i in range(0, len(maskList), 8):
-		line = ', '.join('0x%08xU' % mask for mask in maskList[i:i+8])
+		line = ', '.join(f'0x{mask:08x}U' for mask in maskList[i:i+8])
 		output.append(line + ',')
 	output.append('};')
 

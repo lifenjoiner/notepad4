@@ -491,6 +491,10 @@ NP2_inline Sci_Line SciCall_GetFirstVisibleLine(void) {
 	return SciCall(SCI_GETFIRSTVISIBLELINE, 0, 0);
 }
 
+NP2_inline Sci_Line SciCall_SetFirstVisibleLine(Sci_Line displayLine) {
+	return SciCall(SCI_SETFIRSTVISIBLELINE, displayLine, 0);
+}
+
 NP2_inline void SciCall_SetXOffset(int xOffset) {
 	SciCall(SCI_SETXOFFSET, xOffset, 0);
 }
@@ -672,10 +676,6 @@ NP2_inline void SciCall_StyleSetEOLFilled(int style, BOOL eolFilled) {
 
 NP2_inline void SciCall_StyleSetCharacterSet(int style, int characterSet) {
 	SciCall(SCI_STYLESETCHARACTERSET, style, characterSet);
-}
-
-NP2_inline void SciCall_StyleSetCase(int style, int caseVisible) {
-	SciCall(SCI_STYLESETCASE, style, caseVisible);
 }
 
 NP2_inline void SciCall_StyleSetCheckMonospaced(int style, BOOL checkMonospaced) {

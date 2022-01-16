@@ -39,6 +39,7 @@
 
 extern HWND		hwndMain;
 extern DWORD	dwLastIOError;
+extern int		iCurrentEncoding;
 extern BOOL		bSkipUnicodeDetection;
 extern BOOL		bLoadANSIasUTF8;
 extern BOOL		bLoadASCIIasUTF8;
@@ -192,6 +193,28 @@ void OpenHelpLink(HWND hwnd, int cmd) {
 	}
 }
 
+static inline LPCWSTR GetProcessorArchitecture(void) {
+	SYSTEM_INFO info;
+	GetNativeSystemInfo(&info);
+#ifndef PROCESSOR_ARCHITECTURE_ARM64
+#define PROCESSOR_ARCHITECTURE_ARM64	12
+#endif
+	switch (info.wProcessorArchitecture) {
+	case PROCESSOR_ARCHITECTURE_AMD64:
+		return L"x64";
+	case PROCESSOR_ARCHITECTURE_ARM:
+		return L"ARM";
+	case PROCESSOR_ARCHITECTURE_ARM64:
+		return L"ARM64";
+	case PROCESSOR_ARCHITECTURE_IA64:
+		return L"IA64";
+	case PROCESSOR_ARCHITECTURE_INTEL:
+		return L"x86";
+	default:
+		return L"Unknown";
+	}
+}
+
 //=============================================================================
 //
 // BFFCallBack()
@@ -232,7 +255,7 @@ BOOL GetDirectory(HWND hwndParent, int iTitle, LPWSTR pszFolder, LPCWSTR pszBase
 	bi.lParam = (LPARAM)szBase;
 	bi.iImage = 0;
 
-	LPITEMIDLIST pidl = SHBrowseForFolder(&bi);
+	PIDLIST_ABSOLUTE pidl = SHBrowseForFolder(&bi);
 	if (pidl) {
 		SHGetPathFromIDList(pidl, pszFolder);
 		CoTaskMemFree((LPVOID)pidl);
@@ -249,7 +272,7 @@ BOOL GetDirectory(HWND hwndParent, int iTitle, LPWSTR pszFolder, LPCWSTR pszBase
 INT_PTR CALLBACK AboutDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam) {
 	switch (umsg) {
 	case WM_INITDIALOG: {
-		WCHAR wch[256];
+		WCHAR wch[128];
 #if defined(VERSION_BUILD_TOOL_BUILD)
 		wsprintf(wch, VERSION_BUILD_INFO_FORMAT, VERSION_BUILD_TOOL_NAME,
 			VERSION_BUILD_TOOL_MAJOR, VERSION_BUILD_TOOL_MINOR, VERSION_BUILD_TOOL_PATCH, VERSION_BUILD_TOOL_BUILD);
@@ -332,6 +355,30 @@ INT_PTR CALLBACK AboutDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam
 		switch (LOWORD(wParam)) {
 		case IDOK:
 		case IDCANCEL:
+		case IDC_COPY_BUILD_INFO:
+			if (LOWORD(wParam) == IDC_COPY_BUILD_INFO) {
+				OSVERSIONINFOW version;
+				ZeroMemory(&version, sizeof(version));
+				version.dwOSVersionInfoSize = sizeof(version);
+				NP2_COMPILER_WARNING_PUSH
+				NP2_IGNORE_WARNING_DEPRECATED_DECLARATIONS
+				GetVersionEx(&version);
+				NP2_COMPILER_WARNING_POP
+
+				WCHAR wch[128];
+				WCHAR tch[512];
+				LPCWSTR arch = GetProcessorArchitecture();
+				const int iEncoding = Encoding_GetIndex(mEncoding[CPI_DEFAULT].uCodePage);
+				Encoding_GetLabel(iEncoding);
+				GetDlgItemText(hwnd, IDC_BUILD_INFO, wch, COUNTOF(wch));
+				wsprintf(tch, L"%s\n%s\nEncoding: %s, %s\nScheme: %s, %s\nSystem: %u.%u.%u %s %s\n",
+					VERSION_FILEVERSION_LONG, wch,
+					mEncoding[iCurrentEncoding].wchLabel, mEncoding[iEncoding].wchLabel,
+					PathFindExtension(szCurFile), pLexCurrent->pszName,
+					version.dwMajorVersion, version.dwMinorVersion, version.dwBuildNumber,
+					version.szCSDVersion, arch);
+				SetClipData(hwnd, tch);
+			}
 			EndDialog(hwnd, IDOK);
 			break;
 		}
@@ -2227,7 +2274,6 @@ void ZoomLevelDlg(HWND hwnd, BOOL bBottom) {
 extern EditAutoCompletionConfig autoCompletionConfig;
 
 static INT_PTR CALLBACK AutoCompletionSettingsDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam) {
-	UNREFERENCED_PARAMETER(wParam);
 	UNREFERENCED_PARAMETER(lParam);
 
 	switch (umsg) {
@@ -2406,6 +2452,81 @@ BOOL AutoCompletionSettingsDlg(HWND hwnd) {
 	return iResult == IDOK;
 }
 
+extern int iAutoSaveOption;
+extern DWORD dwAutoSavePeriod;
+
+static INT_PTR CALLBACK AutoSaveSettingsDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam) {
+	UNREFERENCED_PARAMETER(lParam);
+
+	switch (umsg) {
+	case WM_INITDIALOG: {
+		if (iAutoSaveOption & AutoSaveOption_Periodic) {
+			CheckDlgButton(hwnd, IDC_AUTOSAVE_ENABLE, BST_CHECKED);
+		}
+		if (iAutoSaveOption & AutoSaveOption_Suspend) {
+			CheckDlgButton(hwnd, IDC_AUTOSAVE_SUSPEND, BST_CHECKED);
+		}
+		if (iAutoSaveOption & AutoSaveOption_Shutdown) {
+			CheckDlgButton(hwnd, IDC_AUTOSAVE_SHUTDOWN, BST_CHECKED);
+		}
+
+		WCHAR tch[32];
+		const UINT seconds = dwAutoSavePeriod / 1000;
+		const UINT milliseconds = dwAutoSavePeriod % 1000;
+		if (milliseconds) {
+			wsprintf(tch, L"%u.%03u", seconds, milliseconds);
+		} else {
+			wsprintf(tch, L"%u.0", seconds);
+		}
+		SetDlgItemText(hwnd, IDC_AUTOSAVE_PERIOD, tch);
+
+		CenterDlgInParent(hwnd);
+	};
+	return TRUE;
+
+	case WM_COMMAND:
+		switch (LOWORD(wParam)) {
+		case IDOK: {
+			int option = 0;
+			if (IsButtonChecked(hwnd, IDC_AUTOSAVE_ENABLE)) {
+				option |= AutoSaveOption_Periodic;
+			}
+			if (IsButtonChecked(hwnd, IDC_AUTOSAVE_SUSPEND)) {
+				option |= AutoSaveOption_Suspend;
+			}
+			if (IsButtonChecked(hwnd, IDC_AUTOSAVE_SHUTDOWN)) {
+				option |= AutoSaveOption_Shutdown;
+			}
+			iAutoSaveOption = option;
+
+			WCHAR tch[32] = L"";
+			GetDlgItemText(hwnd, IDC_AUTOSAVE_PERIOD, tch, COUNTOF(tch));
+			float period = 0;
+			StrToFloat(tch, &period);
+			dwAutoSavePeriod = (DWORD)(period * 1000);
+			EndDialog(hwnd, IDOK);
+		}
+		break;
+
+		case IDC_AUTOSAVE_OPENFOLDER: {
+			LPCWSTR szFolder = AutoSave_GetDefaultFolder();
+			OpenContainingFolder(hwnd, szFolder, FALSE);
+		} break;
+
+		case IDCANCEL:
+			EndDialog(hwnd, IDCANCEL);
+			break;
+		}
+		return TRUE;
+	}
+	return FALSE;
+}
+
+BOOL AutoSaveSettingsDlg(HWND hwnd) {
+	const INT_PTR iResult = ThemedDialogBoxParam(g_hInstance, MAKEINTRESOURCE(IDD_AUTOSAVE), hwnd, AutoSaveSettingsDlgProc, 0);
+	return iResult == IDOK;
+}
+
 //=============================================================================
 //
 // InfoBoxDlgProc()
@@ -2519,20 +2640,9 @@ HKEY_CLASSES_ROOT\Applications\Notepad2.exe
 		(Default)			REG_SZ		"Notepad2.exe" "%1"
 
 HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\notepad.exe
+	(Default)				REG_SZ			Notepad2.exe
 	Debugger								REG_SZ		"Notepad2.exe" /z
 	UseFilter								REG_DWORD	0
-	0
-		AppExecutionAliasRedirect			REG_DWORD	1
-		AppExecutionAliasRedirectPackages	REG_SZ		*
-		FilterFullPath						REG_SZ		"Notepad2.exe"
-	1
-		AppExecutionAliasRedirect			REG_DWORD	1
-		AppExecutionAliasRedirectPackages	REG_SZ		*
-		FilterFullPath						REG_SZ		"Notepad2.exe"
-	2
-		AppExecutionAliasRedirect			REG_DWORD	1
-		AppExecutionAliasRedirectPackages	REG_SZ		*
-		FilterFullPath						REG_SZ		"Notepad2.exe"
 */
 extern BOOL fIsElevated;
 extern int flagUseSystemMRU;
@@ -2669,10 +2779,14 @@ void UpdateSystemIntegrationStatus(int mask, LPCWSTR lpszText, LPCWSTR lpszName)
 		LSTATUS status = Registry_CreateKey(HKEY_LOCAL_MACHINE, NP2RegSubKey_ReplaceNotepad, &hKey);
 		if (status == ERROR_SUCCESS) {
 			wsprintf(command, L"\"%s\" /z", tchModule);
+			Registry_SetDefaultString(hKey, tchModule);
 			Registry_SetString(hKey, L"Debugger", command);
 			Registry_SetInt(hKey, L"UseFilter", 0);
 			WCHAR num[2] = { L'0', L'\0' };
 			for (int index = 0; index < 3; index++, num[0]++) {
+#if 1
+				Registry_DeleteTree(hKey, num);
+#else
 				HKEY hSubKey;
 				status = Registry_CreateKey(hKey, num, &hSubKey);
 				if (status == ERROR_SUCCESS) {
@@ -2681,14 +2795,19 @@ void UpdateSystemIntegrationStatus(int mask, LPCWSTR lpszText, LPCWSTR lpszName)
 					Registry_SetString(hSubKey, L"FilterFullPath", tchModule);
 					RegCloseKey(hSubKey);
 				}
+#endif
 			}
 			RegCloseKey(hKey);
 		}
 	} else if (mask & SystemIntegration_RestoreNotepad) {
+#if 1
+		Registry_DeleteTree(HKEY_LOCAL_MACHINE, NP2RegSubKey_ReplaceNotepad);
+#else
 		// on Windows 11, all keys were created by the system, we should not delete them.
 		HKEY hKey;
 		LSTATUS status = RegOpenKeyEx(HKEY_LOCAL_MACHINE, NP2RegSubKey_ReplaceNotepad, 0, KEY_WRITE, &hKey);
 		if (status == ERROR_SUCCESS) {
+			RegDeleteValue(hKey, NULL);
 			RegDeleteValue(hKey, L"Debugger");
 			RegDeleteValue(hKey, L"UseFilter");
 			GetWindowsDirectory(tchModule, COUNTOF(tchModule));
@@ -2709,6 +2828,7 @@ void UpdateSystemIntegrationStatus(int mask, LPCWSTR lpszText, LPCWSTR lpszName)
 			}
 			RegCloseKey(hKey);
 		}
+#endif
 	}
 }
 

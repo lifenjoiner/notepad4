@@ -70,6 +70,7 @@ extern EDITLEXER lexAVS;
 extern EDITLEXER lexAwk;
 
 extern EDITLEXER lexBatch;
+extern EDITLEXER lexBlockdiag;
 
 extern EDITLEXER lexCIL;
 extern EDITLEXER lexCMake;
@@ -86,7 +87,7 @@ extern EDITLEXER lexFortran;
 extern EDITLEXER lexGN;
 extern EDITLEXER lexGo;
 extern EDITLEXER lexGradle;
-extern EDITLEXER lexDOT;
+extern EDITLEXER lexGraphViz;
 extern EDITLEXER lexGroovy;
 
 extern EDITLEXER lexHaxe;
@@ -171,6 +172,7 @@ static PEDITLEXER pLexArray[] = {
 	&lexAwk,
 
 	&lexBatch,
+	&lexBlockdiag,
 
 	&lexCIL,
 	&lexCMake,
@@ -187,7 +189,7 @@ static PEDITLEXER pLexArray[] = {
 	&lexGN,
 	&lexGo,
 	&lexGradle,
-	&lexDOT,
+	&lexGraphViz,
 	&lexGroovy,
 
 	&lexHaxe,
@@ -331,7 +333,7 @@ static LPWSTR g_AllFileExtensions = NULL;
 
 // Notepad2.c
 extern HWND hwndMain;
-extern int	iEncoding;
+extern int	iCurrentEncoding;
 extern int	g_DOSEncoding;
 extern int	iDefaultCodePage;
 extern int	iDefaultCharSet;
@@ -349,8 +351,7 @@ extern BOOL bUseXPFileDialog;
 #define STYLE_MASK_FORE_COLOR	(1 << 2)
 #define STYLE_MASK_BACK_COLOR	(1 << 3)
 #define STYLE_MASK_FONT_WEIGHT	(1 << 4)
-#define STYLE_MASK_FORCE_CASE	(1 << 5)
-#define STYLE_MASK_CHARSET		(1 << 6)
+#define STYLE_MASK_CHARSET		(1 << 5)
 
 // LF_FACESIZE is 32, LOCALE_NAME_MAX_LENGTH is 85
 #define MAX_STYLE_VALUE_LENGTH	LOCALE_NAME_MAX_LENGTH
@@ -365,7 +366,6 @@ struct DetailStyle {
 	BOOL underline;
 	BOOL strike;
 	BOOL eolFilled;
-	int forceCase;
 	int charset;
 	WCHAR fontWide[LF_FACESIZE];
 	char fontFace[LF_FACESIZE * kMaxMultiByteCount];
@@ -1242,11 +1242,6 @@ void Style_UpdateLexerKeywordAttr(LPCEDITLEXER pLexNew) {
 		attr[13] = KeywordAttr_NoLexer;		// C Function
 		attr[14] = KeywordAttr_NoLexer;		// C++ Function
 		break;
-	case NP2LEX_D:
-		attr[2] = KeywordAttr_NoAutoComp;	// Preprocessor
-		attr[11] = KeywordAttr_NoAutoComp;	// Assembler Intruction
-		attr[12] = KeywordAttr_NoAutoComp;	// Assembler Register
-		break;
 	case NP2LEX_HTML:
 		attr[1] = KeywordAttr_NoAutoComp;	// JavaScript
 		attr[2] = KeywordAttr_MakeLower | KeywordAttr_NoAutoComp;	// VBScript
@@ -1312,6 +1307,13 @@ void Style_UpdateLexerKeywordAttr(LPCEDITLEXER pLexNew) {
 		attr[4] = KeywordAttr_NoLexer;		// environment variables
 		attr[5] = KeywordAttr_NoLexer;		// command options
 		break;
+	case NP2LEX_BLOCKDIAG:
+		attr[1] = KeywordAttr_NoLexer;		// labels
+		attr[2] = KeywordAttr_NoLexer;		// attributes
+		attr[3] = KeywordAttr_NoLexer;		// node shapes
+		attr[4] = KeywordAttr_NoLexer;		// color names
+		attr[5] = KeywordAttr_NoLexer;		// values
+		break;
 	case NP2LEX_CMAKE:
 		attr[6] = KeywordAttr_NoLexer;		// long properties
 		attr[7] = KeywordAttr_NoLexer;		// long variables
@@ -1320,6 +1322,19 @@ void Style_UpdateLexerKeywordAttr(LPCEDITLEXER pLexNew) {
 		attr[2] = KeywordAttr_NoAutoComp;	// vala types
 		attr[3] = KeywordAttr_NoAutoComp;	// preprocessor
 		attr[10] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// comment tag
+		break;
+	case NP2LEX_CSS:
+		attr[1] = KeywordAttr_NoLexer;		// at rules
+		attr[4] = KeywordAttr_NoLexer;		// color names
+		attr[5] = KeywordAttr_NoLexer;		// values
+		break;
+	case NP2LEX_D:
+		attr[2] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// preprocessor
+		attr[3] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// attribute
+		attr[11] = KeywordAttr_NoAutoComp;	// asm keywords
+		attr[12] = KeywordAttr_NoAutoComp;	// asm register
+		attr[13] = KeywordAttr_NoAutoComp;	// asm instruction
+		attr[14] = KeywordAttr_NoLexer;		// function
 		break;
 	case NP2LEX_DART:
 		attr[4] = KeywordAttr_NoLexer;		// metadata
@@ -1338,6 +1353,13 @@ void Style_UpdateLexerKeywordAttr(LPCEDITLEXER pLexNew) {
 		attr[7] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// annotation
 		attr[8] = KeywordAttr_NoLexer;		// function
 		attr[9] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// GroovyDoc
+		break;
+	case NP2LEX_GRAPHVIZ:
+		attr[1] = KeywordAttr_NoLexer;		// labels
+		attr[2] = KeywordAttr_NoLexer;		// attributes
+		attr[3] = KeywordAttr_NoLexer;		// node shapes
+		attr[4] = KeywordAttr_NoLexer;		// color names
+		attr[5] = KeywordAttr_NoLexer;		// values
 		break;
 	case NP2LEX_GROOVY:
 		attr[7] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// annotation
@@ -1579,6 +1601,11 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) {
 			Style_LoadTabSettings(pLexNew);
 			FileVars_Apply(&fvCurFile);
 		}
+
+		// change empty file to use scheme default encoding and line ending
+		if (SciCall_GetLength() == 0 && !(SciCall_CanUndo() || SciCall_CanRedo())) {
+			EditApplyDefaultEncoding(pLexNew);
+		}
 		SciCall_SetLexer(iLexer);
 
 		if (iLexer == SCLEX_CPP || iLexer == SCLEX_MATLAB) {
@@ -1682,7 +1709,7 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) {
 #if _WIN32_WINNT >= _WIN32_WINNT_VISTA
 			GetUserDefaultLocaleName(localeWide, COUNTOF(localeWide));
 #else
-			GetLocaleInfo(0 /*LOCALE_NAME_USER_DEFAULT*/, 0x0000005c /*LOCALE_SNAME*/, localeWide, COUNTOF(localeWide));
+			GetLocaleInfoW(LOCALE_USER_DEFAULT, LOCALE_SNAME, localeWide, COUNTOF(localeWide));
 #endif
 		}
 		WideCharToMultiByte(CP_UTF8, 0, localeWide, -1, localeName, COUNTOF(localeName), NULL, NULL);
@@ -2086,7 +2113,7 @@ PEDITLEXER Style_SniffShebang(char *pchText) {
 //
 int Style_GetDocTypeLanguage(void) {
 	char tchText[4096] = ""; // maybe contains header comments
-	SciCall_GetText(COUNTOF(tchText), tchText);
+	SciCall_GetText(COUNTOF(tchText) - 1, tchText);
 
 	// check DOCTYPE
 	const char *p = StrStrIA(tchText, "<!DOCTYPE");
@@ -2285,7 +2312,7 @@ BOOL MatchCPPKeyword(const char *p, int index) {
 
 PEDITLEXER Style_DetectObjCAndMatlab(void) {
 	char tchText[4096] = ""; // maybe contains header comments
-	SciCall_GetText(COUNTOF(tchText), tchText);
+	SciCall_GetText(COUNTOF(tchText) - 1, tchText);
 
 	const char *p = tchText;
 	np2LexLangIndex = 0;
@@ -2350,7 +2377,7 @@ PEDITLEXER Style_DetectObjCAndMatlab(void) {
 // auto detect file type from content.
 PEDITLEXER Style_AutoDetect(BOOL bDotFile) {
 	char tchText[4096] = ""; // maybe contains header comments
-	SciCall_GetText(COUNTOF(tchText), tchText);
+	SciCall_GetText(COUNTOF(tchText) - 1, tchText);
 
 	const char *p = tchText;
 	const BOOL shebang = *p == '#' && p[1] == '!';
@@ -2599,7 +2626,7 @@ PEDITLEXER Style_MatchLexer(LPCWSTR lpszMatch, BOOL bCheckNames) {
 			} else if (suffix == L'r') {
 				// check preface `REBOL []` at file beginning
 				char tchText[9] = "";
-				SciCall_GetText(COUNTOF(tchText), tchText);
+				SciCall_GetText(COUNTOF(tchText) - 1, tchText);
 				const char after = tchText[CSTRLEN("rebol")];
 				if ((after == ' ' || after == '\t' || after == '[') && StrStartsWithCase(tchText, "rebol")) {
 					return &lexRebol;
@@ -2669,7 +2696,7 @@ static PEDITLEXER Style_GetLexerFromFile(LPCWSTR lpszFile, BOOL bCGIGuess, LPCWS
 
 		if (!bFound && bCGIGuess && (StrCaseEqual(lpszExt, L"cgi") || StrCaseEqual(lpszExt, L"fcgi"))) {
 			char tchText[256] = "";
-			SciCall_GetText(COUNTOF(tchText), tchText);
+			SciCall_GetText(COUNTOF(tchText) - 1, tchText);
 			pLexNew = Style_SniffShebang(tchText);
 			bFound = pLexNew != NULL;
 		}
@@ -2770,7 +2797,7 @@ BOOL Style_SetLexerFromFile(LPCWSTR lpszFile) {
 	// xml/html
 	if ((!bFound && bAutoSelect) || (bFound && (pLexNew->rid == NP2LEX_PHP || pLexNew->rid == NP2LEX_CONF))) {
 		char tchText[256] = "";
-		SciCall_GetText(COUNTOF(tchText), tchText);
+		SciCall_GetText(COUNTOF(tchText) - 1, tchText);
 		const char *p = tchText;
 		while (IsASpace(*p)) {
 			++p;
@@ -2823,9 +2850,9 @@ BOOL Style_SetLexerFromFile(LPCWSTR lpszFile) {
 
 		if (!fNoCGIGuess && (StrCaseEqual(wchMode, L"cgi") || StrCaseEqual(wchMode, L"fcgi"))) {
 			char tchText[256] = "";
-			SciCall_GetText(COUNTOF(tchText), tchText);
+			SciCall_GetText(COUNTOF(tchText) - 1, tchText);
 			if ((pLexSniffed = Style_SniffShebang(tchText)) != NULL) {
-				if (iEncoding != g_DOSEncoding || pLexSniffed != &lexTextFile
+				if (iCurrentEncoding != g_DOSEncoding || pLexSniffed != &lexTextFile
 						|| !(StrCaseEqual(lpszExt, L"nfo") || StrCaseEqual(lpszExt, L"diz"))) {
 					// Although .nfo and .diz were removed from the default lexer's
 					// default extensions list, they may still presist in the user's INI
@@ -2845,7 +2872,7 @@ BOOL Style_SetLexerFromFile(LPCWSTR lpszFile) {
 		}
 	}
 
-	if (!bFound && iEncoding == g_DOSEncoding) {
+	if (!bFound && iCurrentEncoding == g_DOSEncoding) {
 		pLexNew = &lexANSI;
 		bFound = TRUE;
 	}
@@ -2921,7 +2948,7 @@ BOOL Style_MaybeBinaryFile(LPCWSTR lpszFile) {
 	}
 #else
 	uint8_t buf[5] = {0}; // file magic
-	SciCall_GetText(COUNTOF(buf), buf);
+	SciCall_GetText(COUNTOF(buf) - 1, buf);
 	const UINT magic2 = (buf[0] << 8) | buf[1];
 	if (magic2 == 0x4D5AU ||	// PE (exe, dll, etc.): MZ
 		magic2 == 0x504BU ||	// ZIP (zip, jar, docx, apk, etc.): PK
@@ -3584,40 +3611,6 @@ BOOL Style_StrGetColor(BOOL bFore, LPCWSTR lpszStyle, COLORREF *rgb) {
 
 //=============================================================================
 //
-// Style_StrGetCase()
-//
-BOOL Style_StrGetCase(LPCWSTR lpszStyle, int *forceCase) {
-	LPCWSTR p = StrStr(lpszStyle, L"case:");
-
-	if (p != NULL) {
-		p += CSTRLEN(L"case:");
-		while (*p == L' ') {
-			++p;
-		}
-		switch (*p) {
-		case L'u':
-		case L'U':
-			*forceCase = SC_CASE_UPPER;
-			return TRUE;
-		case L'l':
-		case L'L':
-			*forceCase = SC_CASE_LOWER;
-			return TRUE;
-		case L'c':
-		case L'C':
-			*forceCase = SC_CASE_CAMEL;
-			return TRUE;
-		//case L'm':
-		//case L'M':
-		//	*forceCase = SC_CASE_MIXED; // default normal case
-		//	return TRUE;
-		}
-	}
-	return FALSE;
-}
-
-//=============================================================================
-//
 // Style_StrGetAlphaEx()
 //
 BOOL Style_StrGetAlphaEx(BOOL outline, LPCWSTR lpszStyle, int *alpha) {
@@ -3871,11 +3864,6 @@ void Style_SetStyles(int iStyle, LPCWSTR lpszStyle) {
 		SciCall_StyleSetEOLFilled(iStyle, TRUE);
 	}
 
-	// Case
-	if (Style_StrGetCase(lpszStyle, &iValue)) {
-		SciCall_StyleSetCase(iStyle, iValue);
-	}
-
 	// Character Set
 	if (Style_StrGetCharSet(lpszStyle, &iValue)) {
 		SciCall_StyleSetCharacterSet(iStyle, iValue);
@@ -3926,12 +3914,6 @@ void Style_Parse(struct DetailStyle *style, LPCWSTR lpszStyle) {
 	style->strike = Style_StrGetStrike(lpszStyle);
 	// EOL Filled
 	style->eolFilled = Style_StrGetEOLFilled(lpszStyle);
-
-	// Case
-	if (Style_StrGetCase(lpszStyle, &iValue)) {
-		style->forceCase = iValue;
-		mask |= STYLE_MASK_FORCE_CASE;
-	}
 
 	// Character Set
 	if (Style_StrGetCharSet(lpszStyle, &iValue)) {

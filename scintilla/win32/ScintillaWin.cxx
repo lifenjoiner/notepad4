@@ -95,6 +95,7 @@ Used by VSCode, Atom etc.
 #include "AutoComplete.h"
 #include "ScintillaBase.h"
 
+#include "WinTypes.h"
 #include "PlatWin.h"
 #include "HanjaDic.h"
 #include "LaTeXInput.h"
@@ -350,8 +351,8 @@ public:
 class GlobalMemory;
 
 class ReverseArrowCursor {
-	UINT dpi = USER_DEFAULT_SCREEN_DPI;
 	HCURSOR cursor {};
+	UINT dpi = USER_DEFAULT_SCREEN_DPI;
 
 public:
 	ReverseArrowCursor() noexcept = default;
@@ -461,14 +462,10 @@ class ScintillaWin final :
 	#define EnumAllClipboardFormat(tag)
 #endif
 
-	//static sptr_t DirectFunction(
-	//	sptr_t ptr, UINT iMessage, uptr_t wParam, sptr_t lParam);
-	//static sptr_t DirectStatusFunction(
-	//	sptr_t ptr, UINT iMessage, uptr_t wParam, sptr_t lParam, int *pStatus);
-	static LRESULT CALLBACK SWndProc(
-		HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam);
-	static LRESULT CALLBACK CTWndProc(
-		HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam);
+	//static sptr_t DirectFunction(sptr_t ptr, UINT iMessage, uptr_t wParam, sptr_t lParam);
+	//static sptr_t DirectStatusFunction(sptr_t ptr, UINT iMessage, uptr_t wParam, sptr_t lParam, int *pStatus);
+	static LRESULT CALLBACK SWndProc(HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam);
+	static LRESULT CALLBACK CTWndProc(HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam);
 
 	enum : UINT_PTR {
 		invalidTimerID, standardTimerID, idleTimerID, fineTimerStart
@@ -568,6 +565,7 @@ class ScintillaWin final :
 	BOOL IsVisible() const noexcept;
 	int SetScrollInfo(int nBar, LPCSCROLLINFO lpsi, BOOL bRedraw) const noexcept;
 	bool GetScrollInfo(int nBar, LPSCROLLINFO lpsi) const noexcept;
+	bool ChangeScrollRange(int nBar, int nMin, int nMax, UINT nPage) const noexcept;
 	void ChangeScrollPos(int barType, Sci::Position pos);
 	sptr_t GetTextLength() const noexcept;
 	sptr_t GetText(uptr_t wParam, sptr_t lParam) const;
@@ -760,7 +758,7 @@ void ScintillaWin::EnsureRenderTarget(HDC hdc) noexcept {
 		DropRenderTarget();
 		renderTargetValid = true;
 	}
-	if (pD2DFactory && !pRenderTarget) {
+	if (!pRenderTarget) {
 		HWND hw = MainHWND();
 		RECT rc;
 		::GetClientRect(hw, &rc);
@@ -886,8 +884,7 @@ KeyMod ScintillaWin::MouseModifiers(uptr_t wParam) noexcept {
 namespace {
 
 /** Map the key codes to their equivalent Keys:: form. */
-constexpr Keys KeyTranslate(int keyIn) noexcept {
-	//PLATFORM_ASSERT(!keyIn);
+constexpr Keys KeyTranslate(uptr_t keyIn) noexcept {
 	switch (keyIn) {
 	case VK_DOWN:		return Keys::Down;
 	case VK_UP:			return Keys::Up;
@@ -1228,10 +1225,10 @@ void ScintillaWin::SelectionToHangul() {
 		const UINT codePage = CodePageOfDocument();
 
 		std::wstring uniStr = StringDecode(documentStr, codePage);
-		const int converted = GetHangulOfHanja(uniStr.data());
-		documentStr = StringEncode(uniStr, codePage);
+		const bool converted = HanjaDict::GetHangulOfHanja(uniStr);
 
-		if (converted > 0) {
+		if (converted) {
+			documentStr = StringEncode(uniStr, codePage);
 			pdoc->BeginUndoAction();
 			ClearSelection();
 			InsertPaste(documentStr.data(), documentStr.size());
@@ -1562,7 +1559,7 @@ constexpr Message SciMessageFromEM(unsigned int iMessage) noexcept {
 }
 
 UINT ScintillaWin::CodePageOfDocument() const noexcept {
-	return pdoc->dbcsCodePage; // see SCI_GETCODEPAGE in Editor.cxx
+	return pdoc->dbcsCodePage; // see Message::GetCodePage in Editor.cxx
 }
 
 std::string ScintillaWin::EncodeWString(std::wstring_view wsv) {
@@ -1820,7 +1817,7 @@ sptr_t ScintillaWin::KeyMessage(unsigned int iMessage, uptr_t wParam, sptr_t lPa
 			return ::DefWindowProc(MainHWND(), iMessage, wParam, lParam);
 		}
 		const KeyMod modifiers = ModifierFlags(KeyboardIsKeyDown(VK_SHIFT), KeyboardIsKeyDown(VK_CONTROL), altDown);
-		const int ret = KeyDownWithModifiers(KeyTranslate(static_cast<int>(wParam)), modifiers, &lastKeyDownConsumed);
+		const int ret = KeyDownWithModifiers(KeyTranslate(wParam), modifiers, &lastKeyDownConsumed);
 		if (!ret && !lastKeyDownConsumed) {
 			return ::DefWindowProc(MainHWND(), iMessage, wParam, lParam);
 		}
@@ -2644,53 +2641,37 @@ void ScintillaWin::SetHorizontalScrollPos() {
 	ChangeScrollPos(SB_HORZ, xOffset);
 }
 
+bool ScintillaWin::ChangeScrollRange(int nBar, int nMin, int nMax, UINT nPage) const noexcept {
+	SCROLLINFO sci = { sizeof(sci), SIF_PAGE | SIF_RANGE, 0, 0, 0, 0, 0 };
+	GetScrollInfo(nBar, &sci);
+	if ((sci.nMin != nMin) || (sci.nMax != nMax) ||	(sci.nPage != nPage)) {
+		sci.nMin = nMin;
+		sci.nMax = nMax;
+		sci.nPage = nPage;
+		SetScrollInfo(nBar, &sci, TRUE);
+		return true;
+	}
+	return false;
+}
+
 bool ScintillaWin::ModifyScrollBars(Sci::Line nMax, Sci::Line nPage) {
 	if (!IsVisible()) {
 		return false;
 	}
 
-	bool modified = false;
-	SCROLLINFO sci {};
-	sci.cbSize = sizeof(sci);
-	sci.fMask = SIF_PAGE | SIF_RANGE;
-	GetScrollInfo(SB_VERT, &sci);
 	const Sci::Line vertEndPreferred = nMax;
-	if (!verticalScrollBarVisible)
+	if (!verticalScrollBarVisible) {
 		nPage = vertEndPreferred + 1;
-	if ((sci.nMin != 0) ||
-		(sci.nMax != vertEndPreferred) ||
-		(sci.nPage != static_cast<unsigned int>(nPage)) ||
-		(sci.nPos != 0)) {
-		sci.fMask = SIF_PAGE | SIF_RANGE;
-		sci.nMin = 0;
-		sci.nMax = static_cast<int>(vertEndPreferred);
-		sci.nPage = static_cast<UINT>(nPage);
-		sci.nPos = 0;
-		sci.nTrackPos = 1;
-		SetScrollInfo(SB_VERT, &sci, TRUE);
-		modified = true;
 	}
 
+	bool modified = ChangeScrollRange(SB_VERT, 0, static_cast<int>(vertEndPreferred), static_cast<unsigned int>(nPage));
 	const PRectangle rcText = GetTextRectangle();
-	int horizEndPreferred = scrollWidth;
-	if (horizEndPreferred < 0)
-		horizEndPreferred = 0;
 	int pageWidth = static_cast<int>(rcText.Width());
-	if (!horizontalScrollBarVisible || Wrapping())
+	const int horizEndPreferred = std::max(scrollWidth, pageWidth - 1);
+	if (!horizontalScrollBarVisible || Wrapping()) {
 		pageWidth = horizEndPreferred + 1;
-	sci.fMask = SIF_PAGE | SIF_RANGE;
-	GetScrollInfo(SB_HORZ, &sci);
-	if ((sci.nMin != 0) ||
-		(sci.nMax != horizEndPreferred) ||
-		(sci.nPage != static_cast<unsigned int>(pageWidth)) ||
-		(sci.nPos != 0)) {
-		sci.fMask = SIF_PAGE | SIF_RANGE;
-		sci.nMin = 0;
-		sci.nMax = horizEndPreferred;
-		sci.nPage = pageWidth;
-		sci.nPos = 0;
-		sci.nTrackPos = 1;
-		SetScrollInfo(SB_HORZ, &sci, TRUE);
+	}
+	if (ChangeScrollRange(SB_HORZ, 0, horizEndPreferred, pageWidth)) {
 		modified = true;
 		if (scrollWidth < pageWidth) {
 			HorizontalScrollTo(0);
@@ -4006,8 +3987,7 @@ BOOL ScintillaWin::DestroySystemCaret() noexcept {
 	return retval;
 }
 
-LRESULT CALLBACK ScintillaWin::CTWndProc(
-	HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam) {
+LRESULT CALLBACK ScintillaWin::CTWndProc(HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam) {
 	// Find C++ object associated with window.
 	ScintillaWin *sciThis = static_cast<ScintillaWin *>(PointerFromWindow(hWnd));
 	try {
@@ -4105,15 +4085,13 @@ LRESULT CALLBACK ScintillaWin::CTWndProc(
 	return ::DefWindowProc(hWnd, iMessage, wParam, lParam);
 }
 
-//sptr_t ScintillaWin::DirectFunction(
-//	sptr_t ptr, UINT iMessage, uptr_t wParam, sptr_t lParam) {
+//sptr_t ScintillaWin::DirectFunction(sptr_t ptr, UINT iMessage, uptr_t wParam, sptr_t lParam) {
 //	ScintillaWin *sci = reinterpret_cast<ScintillaWin *>(ptr);
 //	PLATFORM_ASSERT(::GetCurrentThreadId() == ::GetWindowThreadProcessId(sci->MainHWND(), nullptr));
 //	return sci->WndProc(static_cast<Message>(iMessage), wParam, lParam);
 //}
 //
-//sptr_t ScintillaWin::DirectStatusFunction(
-//	sptr_t ptr, UINT iMessage, uptr_t wParam, sptr_t lParam, int *pStatus) {
+//sptr_t ScintillaWin::DirectStatusFunction(sptr_t ptr, UINT iMessage, uptr_t wParam, sptr_t lParam, int *pStatus) {
 //	ScintillaWin *sci = reinterpret_cast<ScintillaWin *>(ptr);
 //	PLATFORM_ASSERT(::GetCurrentThreadId() == ::GetWindowThreadProcessId(sci->MainHWND(), nullptr));
 //	const sptr_t returnValue = sci->WndProc(static_cast<Message>(iMessage), wParam, lParam);
@@ -4122,13 +4100,11 @@ LRESULT CALLBACK ScintillaWin::CTWndProc(
 //}
 
 extern "C"
-LRESULT SCI_METHOD Scintilla_DirectFunction(
-	ScintillaWin *sci, UINT iMessage, LPARAM wParam, WPARAM lParam) {
+LRESULT SCI_METHOD Scintilla_DirectFunction(ScintillaWin *sci, UINT iMessage, LPARAM wParam, WPARAM lParam) {
 	return sci->WndProc(static_cast<Message>(iMessage), wParam, lParam);
 }
 
-LRESULT CALLBACK ScintillaWin::SWndProc(
-	HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam) {
+LRESULT CALLBACK ScintillaWin::SWndProc(HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam) {
 	//Platform::DebugPrintf("S W:%x M:%x WP:%x L:%x\n", hWnd, iMessage, wParam, lParam);
 
 	// Find C++ object associated with window.

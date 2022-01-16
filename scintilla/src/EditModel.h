@@ -21,6 +21,7 @@ public:
 
 class EditModel {
 public:
+	Document *pdoc;
 	bool inOverstrike;
 	bool trackLineWidth;
 	int xOffset;		///< Horizontal scrolled amount in pixels
@@ -49,8 +50,12 @@ public:
 
 	// Wrapping support
 	int wrapWidth;
-
-	Document *pdoc;
+	uint32_t hardwareConcurrency;
+	ActionDuration durationWrapOneUnit;
+	ActionDuration durationWrapOneThread;
+	static constexpr uint32_t IdleLineWrapTime = 125;
+	static constexpr uint32_t ActiveLineWrapTime = 250;
+	void *idleTaskTimer;
 
 	EditModel();
 	// Deleted so EditModel objects can not be copied.
@@ -62,12 +67,16 @@ public:
 	virtual Sci::Line TopLineOfMain() const noexcept = 0;
 	virtual Point GetVisibleOriginInMain() const noexcept = 0;
 	virtual Sci::Line LinesOnScreen() const noexcept = 0;
+	virtual void OnLineWrapped(Sci::Line lineDoc, int linesWrapped) = 0;
 	bool BidirectionalEnabled() const noexcept;
 	bool BidirectionalR2L() const noexcept;
 	void SetDefaultFoldDisplayText(const char *text);
 	const char *GetDefaultFoldDisplayText() const noexcept;
-	const char *GetFoldDisplayText(Sci::Line lineDoc) const noexcept;
+	const char *GetFoldDisplayText(Sci::Line lineDoc, bool partialLine) const noexcept;
 	InSelection LineEndInSelection(Sci::Line lineDoc) const noexcept;
+	void SetIdleTaskTime(uint32_t milliseconds) const noexcept;
+	bool IdleTaskTimeExpired() const noexcept;
+	bool UseParallelLayout(int length) const noexcept;
 };
 
 }

@@ -415,7 +415,7 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 	hwndMain = CreateWindowEx(
 				   0,
 				   WC_METAPATH,
-				   L"metapath",
+				   WC_METAPATH,
 				   WS_METAPATH,
 				   wi.x,
 				   wi.y,
@@ -1786,20 +1786,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		if (LOWORD(wParam) == IDM_POP_COPY_FILENAME) {
 			path = PathFindFileName(path);
 		}
-
-		HGLOBAL hData = GlobalAlloc(GMEM_MOVEABLE | GMEM_DDESHARE,
-							sizeof(WCHAR) * (lstrlen(path) + 1));
-		LPWSTR pData = (LPWSTR)GlobalLock(hData);
-		lstrcpy(pData, path);
-		GlobalUnlock(hData);
-
-		if (OpenClipboard(hwnd)) {
-			EmptyClipboard();
-			SetClipboardData(CF_UNICODETEXT, hData);
-			CloseClipboard();
-		} else {
-			GlobalFree(hData);
-		}
+		SetClipData(hwnd, path);
 	}
 	break;
 
@@ -2473,7 +2460,7 @@ void LoadSettings(void) {
 	if (StrIsEmpty(strValue)) {
 #if _WIN32_WINNT >= _WIN32_WINNT_VISTA
 		LPWSTR pszPath = NULL;
-		if (S_OK == SHGetKnownFolderPath(&FOLDERID_Desktop, KF_FLAG_DEFAULT, NULL, &pszPath)) {
+		if (S_OK == SHGetKnownFolderPath(KnownFolderId_Desktop, KF_FLAG_DEFAULT, NULL, &pszPath)) {
 			lstrcpy(tchOpenWithDir, pszPath);
 			CoTaskMemFree(pszPath);
 		}
@@ -2488,7 +2475,7 @@ void LoadSettings(void) {
 	if (StrIsEmpty(strValue)) {
 #if _WIN32_WINNT >= _WIN32_WINNT_VISTA
 		LPWSTR pszPath = NULL;
-		if (S_OK == SHGetKnownFolderPath(&FOLDERID_Documents, KF_FLAG_DEFAULT, NULL, &pszPath)) {
+		if (S_OK == SHGetKnownFolderPath(KnownFolderId_Documents, KF_FLAG_DEFAULT, NULL, &pszPath)) {
 			lstrcpy(tchFavoritesDir, pszPath);
 			CoTaskMemFree(pszPath);
 		}
@@ -2710,12 +2697,12 @@ void SaveSettings(BOOL bSaveSettingsNow) {
 	if (iStartupDir == 1) {
 		IniSectionSetString(pIniSection, L"MRUDirectory", szCurDir);
 	}
-	PathRelativeToApp(tchFavoritesDir, wchTmp, FALSE, TRUE, flagPortableMyDocs);
+	PathRelativeToApp(tchFavoritesDir, wchTmp, FILE_ATTRIBUTE_DIRECTORY, TRUE, flagPortableMyDocs);
 	IniSectionSetString(pIniSection, L"Favorites", wchTmp);
-	PathRelativeToApp(szQuickview, wchTmp, FALSE, TRUE, flagPortableMyDocs);
+	PathRelativeToApp(szQuickview, wchTmp, FILE_ATTRIBUTE_DIRECTORY, TRUE, flagPortableMyDocs);
 	IniSectionSetString(pIniSection, L"Quikview.exe", wchTmp);
 	IniSectionSetStringEx(pIniSection, L"QuikviewParams", szQuickviewParams, L"");
-	PathRelativeToApp(tchOpenWithDir, wchTmp, FALSE, TRUE, flagPortableMyDocs);
+	PathRelativeToApp(tchOpenWithDir, wchTmp, FILE_ATTRIBUTE_DIRECTORY, TRUE, flagPortableMyDocs);
 	IniSectionSetString(pIniSection, L"OpenWithDir", wchTmp);
 	IniSectionSetIntEx(pIniSection, L"FillMask", dwFillMask, DL_ALLOBJECTS);
 	IniSectionSetIntEx(pIniSection, L"SortOptions", nSortFlags, DS_NAME);
@@ -3034,17 +3021,21 @@ BOOL CheckIniFile(LPWSTR lpszFile, LPCWSTR lpszModule) {
 		}
 
 #if _WIN32_WINNT >= _WIN32_WINNT_VISTA
-		REFKNOWNFOLDERID rfidList[] = {
+		const KNOWNFOLDERID *rfidList[] = {
 			&FOLDERID_LocalAppData,
 			&FOLDERID_RoamingAppData,
 			&FOLDERID_Profile,
 		};
 		for (UINT i = 0; i < COUNTOF(rfidList); i++) {
 			LPWSTR pszPath = NULL;
-			if (S_OK == SHGetKnownFolderPath(rfidList[i], KF_FLAG_DEFAULT, NULL, &pszPath)) {
-				lstrcpy(tchBuild, pszPath);
+#if defined(__cplusplus)
+			if (S_OK == SHGetKnownFolderPath(*rfidList[i], KF_FLAG_DEFAULT, nullptr, &pszPath))
+#else
+			if (S_OK == SHGetKnownFolderPath(rfidList[i], KF_FLAG_DEFAULT, NULL, &pszPath))
+#endif
+			{
+				PathCombine(tchBuild, pszPath, WC_NOTEPAD2);
 				CoTaskMemFree(pszPath);
-				PathAppend(tchBuild, WC_NOTEPAD2);
 				PathAppend(tchBuild, tchFileExpanded);
 				if (PathIsFile(tchBuild)) {
 					lstrcpy(lpszFile, tchBuild);
@@ -3502,7 +3493,7 @@ void ShowNotifyIcon(HWND hwnd, BOOL bAdd) {
 	nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
 	nid.uCallbackMessage = APPM_TRAYMESSAGE;
 	nid.hIcon = hIcon;
-	lstrcpy(nid.szTip, L"metapath");
+	lstrcpy(nid.szTip, WC_METAPATH);
 
 	if (bAdd) {
 		Shell_NotifyIcon(NIM_ADD, &nid);
@@ -3562,7 +3553,7 @@ void LoadLaunchSetings(void) {
 		iTargetApplicationMode = 1;
 		lstrcpy(szTargetApplication, L"Notepad2.exe");
 		StrCpyExW(szTargetApplicationParams, L"");
-		lstrcpy(szTargetApplicationWndClass, L"Notepad2");
+		lstrcpy(szTargetApplicationWndClass, WC_NOTEPAD2);
 		StrCpyExW(szDDEMsg, L"");
 		StrCpyExW(szDDEApp, L"");
 		StrCpyExW(szDDETopic, L"");

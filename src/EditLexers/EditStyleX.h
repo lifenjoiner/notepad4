@@ -110,7 +110,7 @@
 #define NP2StyleX_UnknownPseudoClass	EDITSTYLE_HOLE(UnknownPseudoClass, L"Unknown Pseudo Class")
 #define NP2StyleX_CSSProperty			EDITSTYLE_HOLE(CSSProperty, L"CSS Property")
 #define NP2StyleX_UnknownProperty		EDITSTYLE_HOLE(UnknownProperty, L"Unknown Property")
-#define NP2StyleX_Media					EDITSTYLE_HOLE(GroupRule, L"Group Rule")
+#define NP2StyleX_GroupRule				EDITSTYLE_HOLE(GroupRule, L"Group Rule")
 #define NP2StyleX_Value					EDITSTYLE_HOLE(Value, L"Value")
 #define NP2StyleX_Important				EDITSTYLE_HOLE(Important, L"Important")
 
@@ -274,7 +274,6 @@
 #define NP2StyleX_Callback				EDITSTYLE_HOLE(Callback, L"Callback")
 #define NP2StyleX_Target				EDITSTYLE_HOLE(Target, L"Target")
 #define NP2StyleX_Rule					EDITSTYLE_HOLE(Rule, L"Rule")
-#define NP2StyleX_BlobHex				EDITSTYLE_HOLE(BlobHex, L"Blob Hex")
 #define NP2StyleX_BitField				EDITSTYLE_HOLE(BitField, L"Bit Field")
 
 #define EDITSTYLE_DEFAULT 				{ STYLE_DEFAULT, NP2StyleX_Default, L"" }
