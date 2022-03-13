@@ -56,6 +56,7 @@
       <File Name="../../scintilla/lexers/LexLLVM.cxx"/>
       <File Name="../../scintilla/lexers/LexLua.cxx"/>
       <File Name="../../scintilla/lexers/LexMakefile.cxx"/>
+      <File Name="../../scintilla/lexers/LexMarkdown.cxx"/>
       <File Name="../../scintilla/lexers/LexMatlab.cxx"/>
       <File Name="../../scintilla/lexers/LexNSIS.cxx"/>
       <File Name="../../scintilla/lexers/LexNull.cxx"/>
@@ -95,8 +96,6 @@
       <File Name="../../scintilla/lexlib/LexerBase.h"/>
       <File Name="../../scintilla/lexlib/LexerModule.cxx"/>
       <File Name="../../scintilla/lexlib/LexerModule.h"/>
-      <File Name="../../scintilla/lexlib/LexerSimple.cxx"/>
-      <File Name="../../scintilla/lexlib/LexerSimple.h"/>
       <File Name="../../scintilla/lexlib/LexerUtils.h"/>
       <File Name="../../scintilla/lexlib/OptionSet.h"/>
       <File Name="../../scintilla/lexlib/PropSetSimple.cxx"/>
@@ -299,7 +298,7 @@
   </VirtualDirectory>
   <Settings Type="Executable">
     <GlobalSettings>
-      <Compiler Options="-std=gnu++17;-municode;-Wall;-Wextra;-Wshadow;-Wimplicit-fallthrough;-Wformat=2" C_Options="-std=gnu11;-municode;-Wall;-Wextra;-Wshadow;-Wimplicit-fallthrough;-Wformat=2" Assembler="">
+      <Compiler Options="-std=gnu++20;-municode;-Wall;-Wextra;-Wshadow;-Wimplicit-fallthrough;-Wformat=2;-Wundef" C_Options="-std=gnu17;-municode;-Wall;-Wextra;-Wshadow;-Wimplicit-fallthrough;-Wformat=2;-Wundef" Assembler="">
         <IncludePath Value="../../src"/>
         <IncludePath Value="../../scintilla/include"/>
         <IncludePath Value="../../scintilla/lexlib"/>

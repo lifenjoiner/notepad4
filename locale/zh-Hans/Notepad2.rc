@@ -518,6 +518,12 @@ BEGIN
 			MENUITEM "ASP (V&BScript)",				IDM_LEXER_ASP_VBS
 			MENUITEM "ASP (J&Script)",				IDM_LEXER_ASP_JS
 		END
+		POPUP "Mark&down"
+		BEGIN
+			MENUITEM "Git&Hub GFM",					IDM_LEXER_MARKDOWN_GITHUB
+			MENUITEM "Git&Lab GFM",					IDM_LEXER_MARKDOWN_GITLAB
+			MENUITEM "&Pandoc",						IDM_LEXER_MARKDOWN_PANDOC
+		END
 		POPUP "&Math"
 		BEGIN
 			MENUITEM "&MATLAB",						IDM_LEXER_MATLAB
@@ -582,7 +588,12 @@ BEGIN
 		MENUITEM "自动完成设置(&A)...",				IDM_VIEW_AUTOCOMPLETION_SETTINGS
 		MENUITEM "自动完成忽略大小写(&G)",			IDM_VIEW_AUTOCOMPLETION_IGNORECASE
 		MENUITEM "启用 LaTeX 输入法(&X)",			IDM_SET_LATEX_INPUT_METHOD
-		MENUITEM "启用行选择模式(&M)",				IDM_SET_LINE_SELECTION_MODE
+		POPUP "行选择模式(&M)"
+		BEGIN
+			MENUITEM "无(&N)",						IDM_LINE_SELECTION_MODE_NONE
+			MENUITEM "&Visual Studio",				IDM_LINE_SELECTION_MODE_VS
+			MENUITEM "正常(&M)",						IDM_LINE_SELECTION_MODE_NORMAL
+		END
 		MENUITEM SEPARATOR
 		POPUP "外观(&E)"
 		BEGIN
@@ -2153,8 +2164,8 @@ BEGIN
 	IDS_CUSTOMIZE_SCHEMES_HELP		"文件扩展名必须由分号(;)分隔\r\n\
 \r\n\
 样式格式:\r\n\
-\tfont:Name; size:[+|-]nn.mm; weight:nnn; bold; italic; underline; strike;\r\n\
-\tcharset:dd; locale:Name;\r\n\
+\tfont:Name; size:[+|-]nn.mm; weight:nnn; bold; italic;\r\n\
+\tunderline; strike; overline; charset:dd; locale:Name;\r\n\
 \tfore:#RRGGBB; back:#RRGGBB; alpha:aa; outline:aa; eolfilled;\r\n\
 \r\n\
 样式属性可以用复制并粘贴或者拖放来复制。\r\n\
@@ -2198,6 +2209,7 @@ BEGIN
 	NP2STYLE_Bookmark				"书签"
 	NP2STYLE_CallTip				"调用提示"
 	NP2STYLE_CodeFolding			"代码折叠"
+	NP2STYLE_Link					"链接"
 
 	NP2STYLE_Default				"默认样式"
 END

@@ -191,7 +191,15 @@ BOOL	EditSortDlg(HWND hwnd, EditSortFlag *piSortFlags);
 BOOL	EditAlignDlg(HWND hwnd, EditAlignMode *piAlignMode);
 void	EditSelectionAction(int action);
 void	TryBrowseFile(HWND hwnd, LPCWSTR pszFile, BOOL bWarn);
-void	EditOpenSelection(int type);
+
+typedef enum OpenSelectionType {
+	OpenSelectionType_None,
+	OpenSelectionType_Link,
+	OpenSelectionType_File,
+	OpenSelectionType_Folder,
+	OpenSelectionType_ContainingFolder,
+} OpenSelectionType;
+void EditOpenSelection(OpenSelectionType type);
 
 // in Print.cpp
 #ifdef __cplusplus
@@ -533,3 +541,9 @@ void FoldToggleDefault(FOLD_ACTION action);
 void FoldClickAt(Sci_Position pos, int mode);
 void FoldAltArrow(int key, int mode);
 void EditGotoBlock(int menu);
+
+enum LineSelectionMode {
+	LineSelectionMode_None,
+	LineSelectionMode_VisualStudio,
+	LineSelectionMode_Normal,
+};

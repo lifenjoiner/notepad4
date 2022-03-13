@@ -159,6 +159,10 @@ NP2_inline BOOL IsHtmlTagChar(int ch) {
 	return IsAlphaNumeric(ch) || ch == ':' || ch == '_' || ch == '-' || ch == '.';
 }
 
+NP2_inline BOOL IsSchemeNameChar(int ch) {
+	return IsAlphaNumeric(ch) || ch == '+' || ch == '-' || ch == '.';
+}
+
 NP2_inline int ToUpperA(int ch) {
 	return (ch >= 'a' && ch <= 'z') ? (ch - 'a' + 'A') : ch;
 }
@@ -230,7 +234,7 @@ NP2_inline BOOL HexStrToInt(LPCWSTR str, int *value) {
 
 int ParseCommaList(LPCWSTR str, int result[], int count);
 int ParseCommaList64(LPCWSTR str, int64_t result[], int count);
-LPCSTR GetCurrentLogTime(char buf[16]);
+LPCSTR GetCurrentLogTime(void);
 
 typedef struct StopWatch {
 	LARGE_INTEGER freq; // not changed after system boot
@@ -936,6 +940,7 @@ UINT_PTR CALLBACK OpenSaveFileDlgHookProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
 void TransformBackslashes(char *pszInput, BOOL bRegEx, UINT cpEdit);
 BOOL AddBackslashA(char *pszOut, const char *pszInput);
 BOOL AddBackslashW(LPWSTR pszOut, LPCWSTR pszInput);
+void EscapeRegex(LPSTR pszOut, LPCSTR pszIn);
 
 //==== MinimizeToTray Functions - see comments in Helpers.c ===================
 BOOL GetDoAnimateMinimize(void);

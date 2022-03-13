@@ -58,7 +58,7 @@ typedef sptr_t (*SciFnDirectStatus)(sptr_t ptr, unsigned int iMessage, uptr_t wP
 #define SCI_GETLENGTH 2006
 #define SCI_GETCHARAT 2007
 #define SCI_GETCHARACTERANDWIDTH 2038
-#define SCI_ISAUTOCOMPLETIONWORDCHARACTER 2039
+#define SCI_GETCHARACTERCLASS 2039
 #define SCI_GETCURRENTPOS 2008
 #define SCI_GETANCHOR 2009
 #define SCI_GETSTYLEAT 2010
@@ -204,8 +204,8 @@ typedef sptr_t (*SciFnDirectStatus)(sptr_t ptr, unsigned int iMessage, uptr_t wP
 #define SCI_SETMARGINS 2252
 #define SCI_GETMARGINS 2253
 #define STYLE_DEFAULT 0
-#define STYLE_LINENUMBER 32
-#define STYLE_HOTSPOT 33
+#define STYLE_LINK 32
+#define STYLE_LINENUMBER 33
 #define STYLE_BRACELIGHT 34
 #define STYLE_BRACEBAD 35
 #define STYLE_CONTROLCHAR 36
@@ -248,7 +248,8 @@ typedef sptr_t (*SciFnDirectStatus)(sptr_t ptr, unsigned int iMessage, uptr_t wP
 #define SCI_STYLESETEOLFILLED 2057
 #define SCI_STYLERESETDEFAULT 2058
 #define SCI_STYLESETUNDERLINE 2059
-#define SCI_STYLESETSTRIKE 2474
+#define SCI_STYLESETSTRIKE 2041
+#define SCI_STYLESETOVERLINE 2042
 #define SC_CASE_MIXED 0
 #define SC_CASE_UPPER 1
 #define SC_CASE_LOWER 2
@@ -1090,6 +1091,7 @@ typedef sptr_t (*SciFnDirectStatus)(sptr_t ptr, unsigned int iMessage, uptr_t wP
 #define SC_SUPPORTS_FRACTIONAL_STROKE_WIDTH 2
 #define SC_SUPPORTS_TRANSLUCENT_STROKE 3
 #define SC_SUPPORTS_PIXEL_MODIFICATION 4
+#define SC_SUPPORTS_THREAD_SAFE_MEASURE_WIDTHS 5
 #define SCI_SUPPORTSFEATURE 2750
 #define SC_LINECHARACTERINDEX_NONE 0
 #define SC_LINECHARACTERINDEX_UTF32 1

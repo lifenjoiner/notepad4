@@ -518,6 +518,12 @@ BEGIN
 			MENUITEM "ASP (VB스크립트)(&B)",				IDM_LEXER_ASP_VBS
 			MENUITEM "ASP (J스크립트)(&S)",				IDM_LEXER_ASP_JS
 		END
+		POPUP "Mark&down"
+		BEGIN
+			MENUITEM "Git&Hub GFM",					IDM_LEXER_MARKDOWN_GITHUB
+			MENUITEM "Git&Lab GFM",					IDM_LEXER_MARKDOWN_GITLAB
+			MENUITEM "&Pandoc",						IDM_LEXER_MARKDOWN_PANDOC
+		END
 		POPUP "수학(&M)"
 		BEGIN
 			MENUITEM "&MATLAB",						IDM_LEXER_MATLAB
@@ -582,7 +588,12 @@ BEGIN
 		MENUITEM "자동 완성 설정(&A)...",	IDM_VIEW_AUTOCOMPLETION_SETTINGS
 		MENUITEM "대소문자 무시 자동 완성(&G)",	IDM_VIEW_AUTOCOMPLETION_IGNORECASE
 		MENUITEM "LaTeX 입력 방법 활성화(&X)",		IDM_SET_LATEX_INPUT_METHOD
-		MENUITEM "줄 선택 모드 사용(&M)",		IDM_SET_LINE_SELECTION_MODE
+		POPUP "줄 선택 모드 사용(&M)"
+		BEGIN
+			MENUITEM "없음(&N)",						IDM_LINE_SELECTION_MODE_NONE
+			MENUITEM "Visual Studio(&V)",				IDM_LINE_SELECTION_MODE_VS
+			MENUITEM "정상(&M)",						IDM_LINE_SELECTION_MODE_NORMAL
+		END
 		MENUITEM SEPARATOR
 		POPUP "외형(&E)"
 		BEGIN
@@ -2153,8 +2164,8 @@ BEGIN
 	IDS_CUSTOMIZE_SCHEMES_HELP		"확장자는 세미콜론(;)으로 구분되어야 합니다.\r\n\
 \r\n\
 스타일 형식:\r\n\
-\tfont:Name; size:[+|-]nn.mm; weight:nnn; bold; italic; underline; strike;\r\n\
-\tcharset:dd; locale:Name;\r\n\
+\tfont:Name; size:[+|-]nn.mm; weight:nnn; bold; italic;\r\n\
+\tunderline; strike; overline; charset:dd; locale:Name;\r\n\
 \tfore:#RRGGBB; back:#RRGGBB; alpha:aa; outline:aa; eolfilled;\r\n\
 \r\n\
 스타일 속성은 복사/붙여넣기, 또는 끌어서 놓기로 복사할 수 있습니다.\r\n\
@@ -2199,6 +2210,7 @@ BEGIN
 	NP2STYLE_Bookmark				"책갈피"
 	NP2STYLE_CallTip				"호출팁"
 	NP2STYLE_CodeFolding			"코드 접기"
+	NP2STYLE_Link					"링크"
 
 	NP2STYLE_Default				"기본값"
 END

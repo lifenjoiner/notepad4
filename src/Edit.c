@@ -5881,8 +5881,7 @@ static Sci_Line EditMarkAll_Bookmark(Sci_Line bookmarkLine, const Sci_Position *
 BOOL EditMarkAll_Continue(EditMarkAllStatus *status, HANDLE timer) {
 	// use increment search to ensure FindText() terminated in expected time.
 	//++EditMarkAll_Runs;
-	//char logTime[16];
-	//printf("match %3u %s\n", EditMarkAll_Runs, GetCurrentLogTime(logTime));
+	//printf("match %3u %s\n", EditMarkAll_Runs, GetCurrentLogTime());
 	QueryPerformanceCounter(&status->watch.begin);
 	const Sci_Position iLength = SciCall_GetLength();
 	Sci_Position iStartPos = status->iStartPos;
@@ -7259,6 +7258,21 @@ char* EditGetStringAroundCaret(LPCSTR delimiters) {
 		return NULL;
 	}
 
+	const int style = SciCall_GetStyleAt(iCurrentPos);
+	if (SciCall_StyleGetHotSpot(style)) {
+		iLineStart = iCurrentPos - 1;
+		while (SciCall_GetStyleAt(iLineStart) == style) {
+			--iLineStart;
+		}
+		++iLineStart;
+		iLineEnd = iCurrentPos + 1;
+		while (SciCall_GetStyleAt(iLineEnd) == style) {
+			++iLineEnd;
+		}
+
+		goto labelEnd;
+	}
+
 	struct Sci_TextToFind ft = { { iCurrentPos, 0 }, delimiters, { 0, 0 } };
 	const int findFlag = SCFIND_REGEXP | SCFIND_POSIX;
 
@@ -7314,11 +7328,12 @@ char* EditGetStringAroundCaret(LPCSTR delimiters) {
 		return NULL;
 	}
 
+labelEnd: {
 	char *mszSelection = (char *)NP2HeapAlloc(iLineEnd - iLineStart + 1);
 	struct Sci_TextRange tr = { { iLineStart, iLineEnd }, mszSelection };
 	SciCall_GetTextRange(&tr);
-
 	return mszSelection;
+}
 }
 
 extern BOOL bOpenFolderWithMetapath;
@@ -7343,7 +7358,7 @@ static DWORD EditOpenSelectionCheckFile(LPCWSTR link, LPWSTR path, int cchFilePa
 	return dwAttributes;
 }
 
-void EditOpenSelection(int type) {
+void EditOpenSelection(OpenSelectionType type) {
 	Sci_Position cchSelection = SciCall_GetSelTextLength();
 	char *mszSelection = NULL;
 	if (cchSelection != 0) {
@@ -7415,6 +7430,18 @@ void EditOpenSelection(int type) {
 			}
 		}
 
+		// link or full path, ignore any character before scheme name
+		if ((p = StrChr(link, L':')) != NULL) {
+			--p;
+			while (p != link && IsSchemeNameChar(*p)) {
+				--p;
+			}
+			while (!IsAlpha(*p)) {
+				++p;
+			}
+			link = p;
+		}
+
 		WCHAR path[MAX_PATH * 2];
 		WCHAR wchDirectory[MAX_PATH];
 		DWORD dwAttributes = EditOpenSelectionCheckFile(link, path, COUNTOF(path), wchDirectory);
@@ -7437,34 +7464,39 @@ void EditOpenSelection(int type) {
 			}
 		}
 
-		if (type == 4) { // containing folder
+		if (type == OpenSelectionType_ContainingFolder) {
 			if (dwAttributes == INVALID_FILE_ATTRIBUTES) {
-				type = 0;
+				type = OpenSelectionType_None;
 			}
 		} else if (dwAttributes != INVALID_FILE_ATTRIBUTES) {
 			if (dwAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-				type = 3;
+				type = OpenSelectionType_Folder;
 			} else {
 				const BOOL can = line != NULL || Style_CanOpenFile(link);
 				// open supported file in a new window
-				type = can ? 2 : 1;
+				type = can ? OpenSelectionType_File : OpenSelectionType_Link;
 			}
 		} else if (StrChr(link, L':')) { // link
 			// TODO: check scheme
-			type = 1;
+			type = OpenSelectionType_Link;
 		} else if (StrChr(link, L'@')) { // email
 			lstrcpy(wszSelection, L"mailto:");
 			lstrcpy(wszSelection + CSTRLEN(L"mailto:"), link);
-			type = 1;
+			type = OpenSelectionType_Link;
+			link = wszSelection;
+		} else if (StrHasPrefix(link, L"www.")) {
+			lstrcpy(wszSelection, L"http://"); // browser should auto switch to https
+			lstrcpy(wszSelection + CSTRLEN(L"http://"), link);
+			type = OpenSelectionType_Link;
 			link = wszSelection;
 		}
 
 		switch (type) {
-		case 1:
+		case OpenSelectionType_Link:
 			ShellExecute(hwndMain, L"open", link, NULL, NULL, SW_SHOWNORMAL);
 			break;
 
-		case 2: {
+		case OpenSelectionType_File: {
 			WCHAR szModuleName[MAX_PATH];
 			GetModuleFileName(NULL, szModuleName, COUNTOF(szModuleName));
 
@@ -7497,7 +7529,7 @@ void EditOpenSelection(int type) {
 		}
 		break;
 
-		case 3:
+		case OpenSelectionType_Folder:
 			if (bOpenFolderWithMetapath) {
 				TryBrowseFile(hwndMain, link, FALSE);
 			} else {
@@ -7505,8 +7537,36 @@ void EditOpenSelection(int type) {
 			}
 			break;
 
-		case 4:
+		case OpenSelectionType_ContainingFolder:
 			OpenContainingFolder(hwndMain, link, TRUE);
+			break;
+
+		default:
+			if (cchTextW > 1 && link[0] == L'#') {
+				// regex find link anchor in current document
+				// html, markdown: (id | name) = [' | "] anchor [' | "]
+				mszSelection = (char *)NP2HeapAlloc(2*cchSelection + 32);
+				strcpy(mszSelection, "name\\s*=\\s*[\'\"]?");
+				char *lpstrText = mszSelection + CSTRLEN("name\\s*=\\s*[\'\"]?");
+				char* const lpszArgs = lpstrText + cchSelection;
+				WideCharToMultiByte(cpEdit, 0, link + 1, cchTextW - 1, lpszArgs, (int)(cchSelection + 16), NULL, NULL);
+				EscapeRegex(lpstrText, lpszArgs);
+				strcat(lpstrText, "[\'\"]?");
+
+				struct Sci_TextToFind ft = { { 0, SciCall_GetLength() }, mszSelection, { 0, 0 } };
+				Sci_Position iPos = SciCall_FindText(SCFIND_REGEXP | SCFIND_POSIX, &ft);
+				if (iPos < 0) {
+					lpstrText = mszSelection + 2;
+					lpstrText[0] = 'i';
+					lpstrText[1] = 'd';
+					ft.lpstrText = lpstrText;
+					iPos = SciCall_FindText(SCFIND_REGEXP | SCFIND_POSIX, &ft);
+				}
+				NP2HeapFree(mszSelection);
+				if (iPos >= 0) {
+					EditSelectEx(ft.chrgText.cpMin, ft.chrgText.cpMax);
+				}
+			}
 			break;
 		}
 	}

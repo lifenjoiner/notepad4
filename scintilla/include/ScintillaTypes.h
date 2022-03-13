@@ -109,8 +109,8 @@ enum class MarginType {
 
 enum class StylesCommon {
 	Default = 0,
-	LineNumber = 32,
-	HotSpot = 33,
+	Link = 32,
+	LineNumber = 33,
 	BraceLight = 34,
 	BraceBad = 35,
 	ControlChar = 36,
@@ -519,6 +519,7 @@ enum class Supports {
 	FractionalStrokeWidth = 2,
 	TranslucentStroke = 3,
 	PixelModification = 4,
+	ThreadSafeMeasureWidths = 5,
 };
 
 enum class LineCharacterIndexType {

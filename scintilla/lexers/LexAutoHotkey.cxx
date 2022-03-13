@@ -104,7 +104,7 @@ inline bool IsSpecialKey(const char (&buffer)[128], size_t length) noexcept {
 inline bool MaybeStartsQuotedSection(const StyleContext &sc) noexcept {
 	int chNext = sc.GetLineNextChar(true);
 	if (chNext == '\0' || (chNext == ';' && chNext != sc.chNext)) {
-		chNext = LexGetNextChar(sc.lineStartNext, sc.styler);
+		chNext = LexGetNextChar(sc.styler, sc.lineStartNext);
 		return chNext == '(' || chNext == ';';
 	}
 	return false;
@@ -377,7 +377,7 @@ void ColouriseAHKDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initSty
 							// unknown option
 							sectionState = AHKSectionState::None;
 							sectionOption = AHKSectionOption_None;
-							sc.BackTo(backPos);
+							(void)sc.BackTo(backPos);
 							sc.ChangeState(SCE_AHK_OPERATOR);
 							break;
 						}
@@ -551,7 +551,7 @@ void ColouriseAHKDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initSty
 							// unknown option
 							sectionState = AHKSectionState::None;
 							sectionOption = AHKSectionOption_None;
-							sc.BackTo(backPos);
+							(void)sc.BackTo(backPos);
 							sc.ChangeState(SCE_AHK_OPERATOR);
 						}
 					}
@@ -622,7 +622,7 @@ void ColouriseAHKDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initSty
 				} else if (sc.ch == stringQuoteChar) {
 					sectionState = AHKSectionState::None;
 					sectionOption = AHKSectionOption_None;
-					sc.BackTo(backPos);
+					(void)sc.BackTo(backPos);
 					sc.ChangeState((stringQuoteChar == '\'') ? SCE_AHK_STRING_SQ : SCE_AHK_STRING_DQ);
 					break;
 				}
@@ -640,7 +640,7 @@ void ColouriseAHKDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initSty
 			break;
 
 		case SCE_AHK_COMMENTBLOCK:
-			if (sc.Match('*', '/') && (visibleChars == 0 || LexGetNextChar(sc.currentPos + 2, sc.lineStartNext, styler) == 0)) {
+			if (sc.Match('*', '/') && (visibleChars == 0 || LexGetNextChar(styler, sc.currentPos + 2, sc.lineStartNext) == 0)) {
 				sc.Forward();
 				sc.ForwardSetState(SCE_AHK_DEFAULT);
 			}

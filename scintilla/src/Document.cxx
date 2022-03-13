@@ -78,7 +78,7 @@ void LexInterface::Colourise(Sci::Position start, Sci::Position end) {
 
 		int styleStart = 0;
 		if (start > 0)
-			styleStart = pdoc->StyleAt(start - 1);
+			styleStart = pdoc->StyleIndexAt(start - 1);
 
 		if (len > 0) {
 			instance->Lex(start, len, styleStart, pdoc);
@@ -118,8 +118,8 @@ void ActionDuration::AddSample(Sci::Position numberActions, double durationOfAct
 	//	durationOfActions, numberActions, durationOne, duration_, duration, minDuration, maxDuration);
 }
 
-Sci::Position ActionDuration::ActionsInAllowedTime(double secondsAllowed) const noexcept {
-	const Sci::Position actions = std::clamp<Sci::Position>(static_cast<Sci::Position>(secondsAllowed / duration), 8, 0x10000);
+int ActionDuration::ActionsInAllowedTime(double secondsAllowed) const noexcept {
+	const int actions = std::clamp(static_cast<int>(secondsAllowed / duration), 8, 0x10000);
 	return actions * unitBytes;
 }
 
@@ -1799,7 +1799,7 @@ Sci::Position Document::ParaDown(Sci::Position pos) const noexcept {
 		return LineEnd(line - 1);
 }
 
-CharacterClass Document::WordCharacterClass(unsigned int ch) const noexcept {
+CharacterClass SCI_METHOD Document::GetCharacterClass(unsigned int ch) const noexcept {
 	if (dbcsCodePage && !IsASCIICharacter(ch)) {
 		if (CpUtf8 == dbcsCodePage) {
 			return CharClassify::ClassifyCharacter(ch);
@@ -1827,10 +1827,10 @@ Sci::Position Document::ExtendWordSelect(Sci::Position pos, int delta, bool only
 				return MovePositionOutsideChar(pos, delta, true);
 			}
 		}
-		//const int style = StyleAt(pos);
+		//const int style = StyleIndexAt(pos);
 		while (pos > 0) {
 			const CharacterExtracted ce = CharacterBefore(pos);
-			if (/*StyleAt(pos - 1) != style || */WordCharacterClass(ce.character) != ccStart)
+			if (/*StyleIndexAt(pos - 1) != style || */WordCharacterClass(ce.character) != ccStart)
 				break;
 			pos -= ce.widthBytes;
 		}
@@ -1845,10 +1845,10 @@ Sci::Position Document::ExtendWordSelect(Sci::Position pos, int delta, bool only
 				return MovePositionOutsideChar(pos, delta, true);
 			}
 		}
-		//const int style = StyleAt(pos - 1);
+		//const int style = StyleIndexAt(pos - 1);
 		while (pos < Length()) {
 			const CharacterExtracted ce = CharacterAfter(pos);
-			if (/*StyleAt(pos) != style || */WordCharacterClass(ce.character) != ccStart)
+			if (/*StyleIndexAt(pos) != style || */WordCharacterClass(ce.character) != ccStart)
 				break;
 			pos += ce.widthBytes;
 		}
@@ -1951,8 +1951,7 @@ Sci::Position Document::NextWordEnd(Sci::Position pos, int delta) const noexcept
 namespace {
 
 constexpr bool IsWordEdge(CharacterClass cc, CharacterClass ccNext) noexcept {
-	return (cc != ccNext)
-		&& (cc == CharacterClass::word || cc == CharacterClass::punctuation || cc == CharacterClass::cjkWord);
+	return (cc != ccNext) && (cc >= CharacterClass::punctuation);
 }
 
 }
@@ -2647,8 +2646,8 @@ void Document::NotifyModified(DocModification mh) {
 }
 
 bool Document::IsWordPartSeparator(unsigned int ch) const noexcept {
-	const CharacterClass cc = WordCharacterClass(ch);
-	return (cc == CharacterClass::word || cc == CharacterClass::cjkWord) && IsPunctuation(ch);
+	// can be simplified to `return ch == '_';`
+	return (ch < 0x80) && (charClass.GetClass(static_cast<uint8_t>(ch)) == CharacterClass::word) && IsPunctuation(ch);
 }
 
 Sci::Position Document::WordPartLeft(Sci::Position pos) const noexcept {

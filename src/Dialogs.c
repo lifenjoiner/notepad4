@@ -57,6 +57,11 @@ extern EditTabSettings tabSettings;
 extern int iWrapColumn;
 extern BOOL bUseXPFileDialog;
 
+static inline HWND GetMsgBoxParent(void) {
+	HWND hwnd = GetActiveWindow();
+	return (hwnd == NULL) ? hwndMain : hwnd;
+}
+
 //=============================================================================
 //
 // MsgBox()
@@ -102,16 +107,12 @@ int MsgBox(UINT uType, UINT uIdMsg, ...) {
 	WCHAR szTitle[128];
 	GetString(IDS_APPTITLE, szTitle, COUNTOF(szTitle));
 
-	HWND hwnd;
-	if ((hwnd = GetActiveWindow()) == NULL) {
-		hwnd = hwndMain;
-	}
-
 	uType |= MB_SETFOREGROUND;
 	if (bWindowLayoutRTL) {
 		uType |= MB_RTLREADING;
 	}
 
+	HWND hwnd = GetMsgBoxParent();
 	PostMessage(hwndMain, APPM_CENTER_MESSAGE_BOX, (WPARAM)hwnd, 0);
 	return MessageBoxEx(hwnd, szText, szTitle, uType, lang);
 }
@@ -2616,12 +2617,7 @@ INT_PTR InfoBox(UINT uType, LPCWSTR lpstrSetting, UINT uidMessage, ...) {
 	ib.bDisableCheckBox = StrIsEmpty(szIniFile) || StrIsEmpty(lpstrSetting) || iMode == 2;
 
 	const WORD idDlg = (uType == MB_YESNO) ? IDD_INFOBOX_YESNO : ((uType == MB_OKCANCEL) ? IDD_INFOBOX_OKCANCEL : IDD_INFOBOX_OK);
-
-	HWND hwnd;
-	if ((hwnd = GetActiveWindow()) == NULL) {
-		hwnd = hwndMain;
-	}
-
+	HWND hwnd = GetMsgBoxParent();
 	MessageBeep(MB_ICONEXCLAMATION);
 	return ThemedDialogBoxParam(g_hInstance, MAKEINTRESOURCE(idDlg), hwnd, InfoBoxDlgProc, (LPARAM)&ib);
 }

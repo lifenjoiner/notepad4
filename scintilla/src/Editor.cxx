@@ -202,7 +202,6 @@ Editor::Editor() {
 
 Editor::~Editor() {
 	pdoc->RemoveWatcher(this, nullptr);
-	DropGraphics();
 }
 
 void Editor::Finalise() noexcept {
@@ -1578,7 +1577,7 @@ bool Editor::WrapLines(WrapScope ws) {
 		} else if (ws == WrapScope::wsIdle) {
 			// Try to keep time taken by wrapping reasonable so interaction remains smooth.
 			constexpr double secondsAllowed = 0.01;
-			const Sci::Position actionsInAllowedTime = durationWrapOneUnit.ActionsInAllowedTime(secondsAllowed);
+			const int actionsInAllowedTime = durationWrapOneUnit.ActionsInAllowedTime(secondsAllowed);
 			lineToWrapEnd = pdoc->LineFromPositionAfter(lineToWrap, actionsInAllowedTime);
 		}
 
@@ -1624,6 +1623,7 @@ bool Editor::WrapLines(WrapScope ws) {
 				const double duration = epWrapping.Duration();
 				durationWrapOneUnit.AddSample(wrappedBytesAllThread, duration);
 				durationWrapOneThread.AddSample(wrappedBytesOneThread, duration);
+				UpdateParallelLayoutThreshold();
 
 				goodTopLine = pcs->DisplayFromDoc(lineDocTop) + std::min(
 					subLineTop, static_cast<Sci::Line>(pcs->GetHeight(lineDocTop) - 1));
@@ -1632,12 +1632,15 @@ bool Editor::WrapLines(WrapScope ws) {
 
 		// If wrapping is done, bring it to resting position
 		if (!partialLine && wrapPending.start >= lineEndNeedWrap) {
-			//constexpr double scale = 1e3; // 1 KiB in millisecond
-			//printf("%s idle style duration: %f, wrap duration: %f, %f\n", __func__,
-			//	pdoc->durationStyleOneUnit.Duration()*scale,
-			//	durationWrapOneUnit.Duration()*scale, durationWrapOneThread.Duration()*scale);
 			wrapPending.Reset();
 		}
+#if 0
+		constexpr double scale = 1e3; // 1 KiB in millisecond
+		printf("%s idle style duration: %f, wrap duration: %f, %f, parallel=%u, %u\n", __func__,
+			pdoc->durationStyleOneUnit.Duration()*scale,
+			durationWrapOneUnit.Duration()*scale, durationWrapOneThread.Duration()*scale,
+			minParallelLayoutLength/1024, maxParallelLayoutLength/1024);
+#endif
 	}
 
 	if (wrapOccurred) {
@@ -1735,6 +1738,7 @@ void Editor::PaintSelMargin(Surface *surfaceWindow, PRectangle rc) {
 	Surface *surface;
 	if (view.bufferedDraw) {
 		surface = marginView.pixmapSelMargin.get();
+		surface->SetMode(CurrentSurfaceMode());
 	} else {
 		surface = surfaceWindow;
 	}
@@ -1864,16 +1868,12 @@ void Editor::Paint(Surface *surfaceWindow, PRectangle rcArea) {
 // such as the margin markers, line numbers, selection and caret
 // Should be merged back into a combined Draw method.
 Sci::Position Editor::FormatRange(bool draw, const RangeToFormat *pfr) {
-	if (!pfr)
-		return 0;
-
-	AutoSurface surface(pfr->hdc, this, Technology::Default, true);
-	if (!surface)
-		return 0;
-	AutoSurface surfaceMeasure(pfr->hdcTarget, this, Technology::Default, true);
-	if (!surfaceMeasure) {
+	if (!pfr || !wMain.GetID()) {
 		return 0;
 	}
+
+	AutoSurface surface(pfr->hdc, this, true);
+	AutoSurface surfaceMeasure(pfr->hdcTarget, this, true);
 	return view.FormatRange(draw, pfr, surface, surfaceMeasure, *this, vs);
 }
 
@@ -5227,7 +5227,7 @@ Sci::Position Editor::PositionAfterMaxStyling(Sci::Position posMax, bool scrolli
 	const double secondsAllowed = scrolling ? 0.005 : 0.02;
 
 	Sci::Line lineLast = pdoc->SciLineFromPosition(pdoc->GetEndStyled());
-	const Sci::Position actionsInAllowedTime = pdoc->durationStyleOneUnit.ActionsInAllowedTime(secondsAllowed);
+	const int actionsInAllowedTime = pdoc->durationStyleOneUnit.ActionsInAllowedTime(secondsAllowed);
 	lineLast = pdoc->LineFromPositionAfter(lineLast, actionsInAllowedTime);
 
 	const Sci::Line stylingMaxLine = std::min(lineLast, pdoc->LinesTotal());
@@ -5759,6 +5759,26 @@ int Editor::CodePage() const noexcept {
 		return 0;
 }
 
+std::unique_ptr<Surface> Editor::CreateMeasurementSurface() const {
+	if (!wMain.GetID()) {
+		return {};
+	}
+	std::unique_ptr<Surface> surf = Surface::Allocate(technology);
+	surf->Init(wMain.GetID());
+	surf->SetMode(CurrentSurfaceMode());
+	return surf;
+}
+
+std::unique_ptr<Surface> Editor::CreateDrawingSurface(SurfaceID sid, bool printing) const {
+	if (!wMain.GetID()) {
+		return {};
+	}
+	std::unique_ptr<Surface> surf = Surface::Allocate(printing ? Technology::Default : technology);
+	surf->Init(sid, wMain.GetID());
+	surf->SetMode(CurrentSurfaceMode());
+	return surf;
+}
+
 Sci::Line Editor::WrapCount(Sci::Line line) {
 	AutoSurface surface(this);
 
@@ -5832,9 +5852,11 @@ void Editor::StyleSetMessage(Message iMessage, uptr_t wParam, sptr_t lParam) {
 	case Message::StyleSetUnderline:
 		vs.styles[wParam].underline = lParam != 0;
 		break;
-		// Added strike style, 2011-12-20
-	case Message::StyleSetStrike:
+	case Message::StyleSetStrike: // 2011-12-20
 		vs.styles[wParam].strike = lParam != 0;
+		break;
+	case Message::StyleSetOverline: // 2022-02-06
+		vs.styles[wParam].overline = lParam != 0;
 		break;
 	case Message::StyleSetCase:
 		vs.styles[wParam].caseForce = static_cast<Style::CaseForce>(lParam);
@@ -6483,8 +6505,8 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 	case Message::GetCharacterAndWidth:
 		return pdoc->GetCharacterAndWidth(wParam, reinterpret_cast<Sci_Position *>(lParam));
 
-	case Message::IsAutoCompletionWordCharacter:
-		return pdoc->IsAutoCompletionWordCharacter(static_cast<unsigned int>(wParam));
+	case Message::GetCharacterClass:
+		return static_cast<int>(pdoc->GetCharacterClass(static_cast<unsigned int>(wParam)));
 
 	case Message::SetCurrentPos:
 		if (sel.IsRectangular()) {
@@ -6555,7 +6577,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		if (PositionFromUPtr(wParam) >= pdoc->Length())
 			return 0;
 		else
-			return pdoc->StyleAt(PositionFromUPtr(wParam));
+			return pdoc->StyleIndexAt(PositionFromUPtr(wParam));
 
 	case Message::Redo:
 		Redo();
@@ -7282,6 +7304,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 	case Message::StyleSetFont:
 	case Message::StyleSetUnderline:
 	case Message::StyleSetStrike:
+	case Message::StyleSetOverline:
 	case Message::StyleSetCase:
 	case Message::StyleSetCharacterSet:
 	case Message::StyleSetVisible:
@@ -7333,7 +7356,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		return vs.ElementColour(static_cast<Element>(wParam)).has_value();
 
 	case Message::GetElementAllowsTranslucent:
-		return vs.ElementAllowsTranslucent(static_cast<Element>(wParam));
+		return ViewStyle::ElementAllowsTranslucent(static_cast<Element>(wParam));
 
 	case Message::GetElementBaseColour:
 		return vs.elementBaseColours[static_cast<Element>(wParam)].value_or(ColourRGBA()).AsInteger();

@@ -141,6 +141,19 @@ NP2_inline int SciCall_GetCharacterAt(Sci_Position position) {
 	return (int)SciCall(SCI_GETCHARACTERANDWIDTH, position, 0);
 }
 
+// same as CharacterClass in ILexer.h
+typedef enum CharacterClass {
+	CharacterClass_Space,
+	CharacterClass_NewLine,
+	CharacterClass_Punctuation,
+	CharacterClass_Word,
+	CharacterClass_CJKWord
+} CharacterClass;
+
+NP2_inline CharacterClass SciCall_GetCharacterClass(UINT character) {
+	return (CharacterClass)SciCall(SCI_GETCHARACTERCLASS, character, 0);
+}
+
 // Searching and replacing
 
 NP2_inline Sci_Position SciCall_GetTargetStart(void) {
@@ -654,6 +667,10 @@ NP2_inline void SciCall_StyleSetStrike(int style, BOOL strike) {
 	SciCall(SCI_STYLESETSTRIKE, style, strike);
 }
 
+NP2_inline void SciCall_StyleSetOverline(int style, BOOL overline) {
+	SciCall(SCI_STYLESETOVERLINE, style, overline);
+}
+
 NP2_inline void SciCall_StyleSetFore(int style, COLORREF fore) {
 	SciCall(SCI_STYLESETFORE, style, fore);
 }
@@ -676,6 +693,14 @@ NP2_inline void SciCall_StyleSetEOLFilled(int style, BOOL eolFilled) {
 
 NP2_inline void SciCall_StyleSetCharacterSet(int style, int characterSet) {
 	SciCall(SCI_STYLESETCHARACTERSET, style, characterSet);
+}
+
+NP2_inline void SciCall_StyleSetHotSpot(int style, BOOL hotspot) {
+	SciCall(SCI_STYLESETHOTSPOT, style, hotspot);
+}
+
+NP2_inline BOOL SciCall_StyleGetHotSpot(int style) {
+	return (BOOL)SciCall(SCI_STYLEGETHOTSPOT, style, 0);
 }
 
 NP2_inline void SciCall_StyleSetCheckMonospaced(int style, BOOL checkMonospaced) {
@@ -1059,10 +1084,6 @@ NP2_inline void SciCall_AutoCSetDropRestOfWord(BOOL dropRestOfWord) {
 
 NP2_inline void SciCall_AutoCSetMaxHeight(int rowCount) {
 	SciCall(SCI_AUTOCSETMAXHEIGHT, rowCount, 0);
-}
-
-NP2_inline BOOL SciCall_IsAutoCompletionWordCharacter(int ch) {
-	return (BOOL)SciCall(SCI_ISAUTOCOMPLETIONWORDCHARACTER, ch, 0);
 }
 
 // Call tips

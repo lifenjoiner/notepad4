@@ -37,7 +37,8 @@
 #include "GraphicUtils.h"
 #include "resource.h"
 
-LPCSTR GetCurrentLogTime(char buf[16]) {
+LPCSTR GetCurrentLogTime() {
+	static char buf[16];
 	SYSTEMTIME lt;
 	GetLocalTime(&lt);
 	sprintf(buf, "%02d:%02d:%02d.%03d", lt.wHour, lt.wMinute, lt.wSecond, lt.wMilliseconds);
@@ -1667,11 +1668,11 @@ BOOL PathGetRealPath(HANDLE hFile, LPCWSTR lpszSrc, LPWSTR lpszDest) {
 }
 
 #if _WIN32_WINNT < _WIN32_WINNT_WIN8
-#if !defined(_WIN64) && defined(_MSC_BUILD) && (VER_PRODUCTVERSION_W <= _WIN32_WINNT_WIN7)
+#if defined(_MSC_BUILD) && (_WIN32_WINNT < _WIN32_WINNT_VISTA)
 typedef struct FILE_ID_128 {
 	BYTE Identifier[16];
 } FILE_ID_128;
-#endif // Win32 XP with Windows 7 SDK.
+#endif // Win32 XP v141_xp toolset with Windows 7 SDK.
 
 enum { FileIdInfo = 0x12 };
 typedef struct FILE_ID_INFO {

@@ -20,7 +20,6 @@
 #include "Accessor.h"
 #include "LexerModule.h"
 #include "LexerBase.h"
-#include "LexerSimple.h"
 
 using namespace Lexilla;
 
@@ -65,6 +64,7 @@ extern LexerModule lmLisp;
 extern LexerModule lmLLVM;
 extern LexerModule lmLua;
 extern LexerModule lmMake;
+extern LexerModule lmMarkdown;
 extern LexerModule lmMatlab;
 extern LexerModule lmNsis;
 extern LexerModule lmNull;
@@ -138,6 +138,7 @@ const LexerModule * const lexerCatalogue[] = {
 	&lmLLVM,
 	&lmLua,
 	&lmMake,
+	&lmMarkdown,
 	&lmMatlab,
 	&lmNsis,
 	&lmNull,
@@ -183,5 +184,5 @@ Scintilla::ILexer5 *LexerModule::Create() const {
 	if (fnFactory) {
 		return fnFactory();
 	}
-	return new LexerSimple(this);
+	return new LexerBase(this);
 }

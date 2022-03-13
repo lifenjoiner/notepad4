@@ -94,11 +94,6 @@ char ScintillaCall::CharacterAt(Position position) {
 	return static_cast<char>(Call(Message::GetCharAt, position));
 }
 
-int ScintillaCall::UnsignedStyleAt(Position position) {
-	// Returns signed value but easier to use as unsigned
-	return static_cast<unsigned char>(Call(Message::GetStyleAt, position));
-}
-
 std::string ScintillaCall::StringOfSpan(Span span) {
 	std::string text;
 	if (span.Length() != 0) {
@@ -182,8 +177,8 @@ int ScintillaCall::CharacterAndWidth(Position pos, Position width) {
 	return static_cast<int>(Call(Message::GetCharacterAndWidth, pos, width));
 }
 
-bool ScintillaCall::IsAutoCompletionWordCharacter(int ch) {
-	return Call(Message::IsAutoCompletionWordCharacter, ch);
+int ScintillaCall::CharacterClass(int character) {
+	return static_cast<int>(Call(Message::GetCharacterClass, character));
 }
 
 Position ScintillaCall::CurrentPos() {
@@ -536,6 +531,10 @@ void ScintillaCall::StyleSetUnderline(int style, bool underline) {
 
 void ScintillaCall::StyleSetStrike(int style, bool strike) {
 	Call(Message::StyleSetStrike, style, strike);
+}
+
+void ScintillaCall::StyleSetOverline(int style, bool overline) {
+	Call(Message::StyleSetOverline, style, overline);
 }
 
 Colour ScintillaCall::StyleGetFore(int style) {

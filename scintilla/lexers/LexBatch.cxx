@@ -458,7 +458,7 @@ constexpr bool IsCommentLine(int lineState) noexcept {
 }
 
 void ColouriseBatchDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initStyle, LexerWordList keywordLists, Accessor &styler) {
-	const bool fold = styler.GetPropertyInt("fold", 1) & true;
+	const bool fold = styler.GetPropertyBool("fold");
 	int outerStyle = SCE_BAT_DEFAULT;
 	int logicalVisibleChars = 0;
 	int lineVisibleChars = 0;
@@ -573,7 +573,7 @@ void ColouriseBatchDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initS
 								command = Command::Goto;
 							}
 							if (levelCurrent == SC_FOLDLEVELBASE + 1 && parenCount == 0 && (lineVisibleChars == 4
-								|| (lineVisibleChars == 5 && LexGetPrevChar(sc.currentPos - 4, styler) == '@'))) {
+								|| (lineVisibleChars == 5 && LexGetPrevChar(styler, sc.currentPos - 4) == '@'))) {
 								levelNext--;
 							}
 						} else if (StrEqual(s, "call")) {
@@ -678,14 +678,16 @@ void ColouriseBatchDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initS
 					continue;
 				}
 			} else if (sc.state == SCE_BAT_STRINGDQ) {
-				if (sc.ch == '=' && command == Command::Set) {
-					command = Command::SetValue;
+				if (IsBatchOperator(sc.ch, command)) {
+					if (sc.ch == '=' && command == Command::Set) {
+						command = Command::SetValue;
+					}
 					sc.SetState(SCE_BAT_OPERATOR);
 					sc.ForwardSetState(SCE_BAT_STRINGDQ);
 					continue;
 				}
 			} else if (sc.state == SCE_BAT_STRINGNQ) {
-				const int state = nestedState.empty() ? SCE_BAT_DEFAULT : nestedState.back();
+				const int state = TryGetBack(nestedState);
 				if (IsStringArgumentEnd(sc, state, command, parenCount)) {
 					sc.SetState(state);
 					continue;

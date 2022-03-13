@@ -175,20 +175,12 @@ public:
 };
 
 class PositionCacheEntry {
-	uint16_t styleNumber;
-	uint16_t len;
-	uint32_t clock;
+	uint16_t styleNumber = 0;
+	uint16_t clock = 0;
+	uint32_t len = 0;
 	std::unique_ptr<XYPOSITION[]> positions;
 public:
-	PositionCacheEntry() noexcept;
-	// Copy constructor not currently used, but needed for being element in std::vector.
-	PositionCacheEntry(const PositionCacheEntry &);
-	PositionCacheEntry(PositionCacheEntry &&) noexcept = default;
-	// Deleted so PositionCacheEntry objects can not be assigned.
-	void operator=(const PositionCacheEntry &) = delete;
-	void operator=(PositionCacheEntry &&) = delete;
-	~PositionCacheEntry();
-	void Set(uint16_t styleNumber_, std::string_view sv, const XYPOSITION *positions_, uint32_t clock_);
+	void Set(uint16_t styleNumber_, size_t length, std::unique_ptr<XYPOSITION[]> &positions_, uint32_t clock_) noexcept;
 	void Clear() noexcept;
 	bool Retrieve(uint16_t styleNumber_, std::string_view sv, XYPOSITION *positions_) const noexcept;
 	static size_t Hash(uint16_t styleNumber_, std::string_view sv) noexcept;
@@ -248,18 +240,22 @@ struct TextSegment {
 	}
 };
 
+class EditModel;
+
 // Class to break a line of text into shorter runs at sensible places.
 class BreakFinder {
 	const LineLayout *ll;
-	const Range lineRange;
 	int nextBreak;
 	int subBreak;
+	const int endPos;
+	int stopPos;
+	int currentPos;
 	std::vector<int> selAndEdge;
 	unsigned int saeCurrentPos;
 	int saeNext;
 	const Document *pdoc;
 	const EncodingFamily encodingFamily;
-	const SpecialRepresentations * const preprs;
+	const SpecialRepresentations &reprs;
 	void Insert(Sci::Position val);
 public:
 	// If a whole run is longer than lengthStartSubdivision then subdivide
@@ -276,9 +272,10 @@ public:
 		Selection = 1,
 		Foreground = 2,
 		ForegroundAndSelection = 3,
+		Layout = 4,
 	};
-	BreakFinder(const LineLayout *ll_, const Selection *psel, Range lineRange_, Sci::Position posLineStart,
-		XYPOSITION xStart, BreakFor breakFor, const Document *pdoc_, const SpecialRepresentations *preprs_, const ViewStyle *pvsDraw);
+	BreakFinder(const LineLayout *ll_, const Selection *psel, Range lineRange, Sci::Position posLineStart,
+		XYPOSITION xStart, BreakFor breakFor, const EditModel &model, const ViewStyle *pvsDraw, uint32_t posInLine);
 	// Deleted so BreakFinder objects can not be copied.
 	BreakFinder(const BreakFinder &) = delete;
 	BreakFinder(BreakFinder &&) = delete;
@@ -286,7 +283,12 @@ public:
 	void operator=(BreakFinder &&) = delete;
 	~BreakFinder();
 	TextSegment Next();
-	bool More() const noexcept;
+	bool More() const noexcept {
+		return currentPos < stopPos;
+	}
+	int CurrentPos() const noexcept {
+		return currentPos;
+	}
 };
 
 class PositionCache {
@@ -298,8 +300,7 @@ public:
 	void Clear() noexcept;
 	void SetSize(size_t size_);
 	size_t GetSize() const noexcept;
-	void MeasureWidths(Surface *surface, const Style &style, uint16_t styleNumber,
-		std::string_view sv, XYPOSITION *positions);
+	void MeasureWidths(Surface *surface, const Style &style, uint16_t styleNumber, std::string_view sv, XYPOSITION *positions);
 };
 
 }

@@ -139,12 +139,12 @@ static constexpr bool IsStreamCommentStyle(int style) noexcept {
 	return style == SCE_VHDL_BLOCK_COMMENT;
 }
 
-#define IsCommentLine(line) IsLexCommentLine(line, styler, MultiStyle(SCE_VHDL_COMMENT, SCE_VHDL_COMMENTLINEBANG))
+#define IsCommentLine(line) IsLexCommentLine(styler, line, MultiStyle(SCE_VHDL_COMMENT, SCE_VHDL_COMMENTLINEBANG))
 
 // Folding the code
 static void FoldVHDLDoc(Sci_PositionU startPos, Sci_Position length, int /*initStyle*/, LexerWordList keywordLists, Accessor &styler) {
 	const WordList &kwFold = *keywordLists[8];
-	const bool foldAtBegin = styler.GetPropertyInt("fold.at.Begin", 1) != 0;
+	const bool foldAtBegin = styler.GetPropertyBool("fold.at.Begin", true);
 	const Sci_PositionU endPos = startPos + length;
 
 	Sci_Line lineCurrent = styler.GetLine(startPos);

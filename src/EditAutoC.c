@@ -601,7 +601,11 @@ BOOL IsDocWordChar(int ch) {
 }
 
 BOOL IsAutoCompletionWordCharacter(int ch) {
-	return (ch < 0x80) ? IsDocWordChar(ch) : SciCall_IsAutoCompletionWordCharacter(ch);
+	if (ch < 0x80) {
+		return IsDocWordChar(ch);
+	}
+	const CharacterClass cc = SciCall_GetCharacterClass(ch);
+	return cc == CharacterClass_Word;
 }
 
 static inline BOOL IsWordStyleToIgnore(int style) {
@@ -764,7 +768,7 @@ static int GetCurrentHtmlTextBlock(void) {
 	return GetCurrentHtmlTextBlockEx(iCurrentStyle);
 }
 
-static void EscapeRegex(LPSTR pszOut, LPCSTR pszIn) {
+void EscapeRegex(LPSTR pszOut, LPCSTR pszIn) {
 	char ch;
 	while ((ch = *pszIn++) != '\0') {
 		if (ch == '.'		// any character
@@ -1131,6 +1135,13 @@ INT AutoC_AddSpecWord(struct WordList *pWList, int iCurrentStyle, int ch, int ch
 				}
 			}
 			return AutoC_AddSpecWord_Keyword; // application defined tags
+		}
+		break;
+
+	case SCLEX_MARKDOWN:
+		if (ch == '<' || (chPrev == '<' && ch == '/')) {
+			WordList_AddList(pWList, lexHTML.pKeyWords->pszKeyWords[0]);// Tag
+			return AutoC_AddSpecWord_Keyword; // custom tags
 		}
 		break;
 
@@ -2592,6 +2603,10 @@ void EditToggleCommentBlock(void) {
 
 	case SCLEX_LUA:
 		EditEncloseSelection(L"--[[", L"--]]");
+		break;
+
+	case SCLEX_MARKDOWN:
+		EditEncloseSelection(L"<!--", L"-->");
 		break;
 
 	case SCLEX_MATLAB:

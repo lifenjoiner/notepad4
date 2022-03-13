@@ -57,7 +57,7 @@ Latest development builds (artifacts in Release configuration for each compiler 
 	* Common Intermediate Language
 	* Configuration / Properties File
 		* Apache Configuration File
-	* [D](../main/tools/lang/D.), up to D language 2.0.
+	* [D](../main/tools/lang/D.d), up to D language 2.0.
 	* [Dart](../main/tools/lang/Dart.dart), up to Dart 2.12.
 	* Diff/Patch File
 	* Doxygen
@@ -78,12 +78,12 @@ Latest development builds (artifacts in Release configuration for each compiler 
 	* INI Configuration File
 	* [Inno Setup](../main/tools/lang/InnoSetup.iss), up to Inno Setup 6.2.
 	* [Boost Jam](../main/tools/lang/Jamfile.jam), up to Jam 4.4.1.
-	* [Java](../main/tools/lang/Java.java), up to Java 16. [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#java)
+	* [Java](../main/tools/lang/Java.java), up to Java 17. [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#java)
 		* [BeanShell](https://github.com/beanshell/beanshell)
 	* [JavaScript](../main/tools/lang/JavaScript.js), up to ECMAScript 2021 (12th edition) with [JSX](https://facebook.github.io/jsx/) and [Web APIs](https://developer.mozilla.org/en-US/docs/Web/API).
 	* JSON and JSON5 Document
 	* [Julia Script](../main/tools/lang/Julia.jl), up to Julia 1.2. [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#julia)
-	* [Kotlin](../main/tools/lang/Kotlin.kt), up to Kotlin 1.5.
+	* [Kotlin](../main/tools/lang/Kotlin.kt), up to Kotlin 1.6.
 	* LaTeX
 	* Lisp Script (Common Lisp, Clojure, Scheme, etc.)
 	* [LLVM IR](../main/tools/lang/LLVM.ll), up to LLVM 12.
@@ -94,6 +94,10 @@ Latest development builds (artifacts in Release configuration for each compiler 
 		* Borland bmake
 		* qmake
 		* ninja
+	* Markdown, up to [CommonMark](https://spec.commonmark.org/) 0.30, with following extensions:
+		* [GitHub Flavored Markdown](https://github.github.com/gfm/)
+		* [GitLab Flavored Markdown](https://docs.gitlab.com/ee/user/markdown.html)
+		* [Pandoc’s Markdown](https://pandoc.org/MANUAL.html#pandocs-markdown)
 	* MATLAB, [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#matlab-octave)
 		* Octave
 		* Scilab
@@ -121,7 +125,7 @@ Latest development builds (artifacts in Release configuration for each compiler 
 		* [PostgreSQL](../main/tools/lang/PostgreSQL.sql), PostgreSQL 13.
 		* [Transact-SQL](../main/tools/lang/Transact-SQL.sql), SQL Server 2019.
 		* [Oracle](../main/tools/lang/Oracle.sql), Oracle 20, incomplete.
-	* [Swift](../main/tools/lang/Swift.swift), Swift 5.5.
+	* [Swift](../main/tools/lang/Swift.swift), Swift 5.6.
 	* TCL, [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#tcl)
 	* Texinfo
 	* TOML File

@@ -106,6 +106,7 @@ extern EDITLEXER lexLLVM;
 extern EDITLEXER lexLua;
 
 extern EDITLEXER lexMake;
+extern EDITLEXER lexMarkdown;
 extern EDITLEXER lexMatlab;
 
 extern EDITLEXER lexNsis;
@@ -208,6 +209,7 @@ static PEDITLEXER pLexArray[] = {
 	&lexLua,
 
 	&lexMake,
+	&lexMarkdown,
 	&lexMatlab,
 
 	&lexNsis,
@@ -365,6 +367,7 @@ struct DetailStyle {
 	BOOL italic;
 	BOOL underline;
 	BOOL strike;
+	BOOL overline;
 	BOOL eolFilled;
 	int charset;
 	WCHAR fontWide[LF_FACESIZE];
@@ -401,6 +404,7 @@ enum GlobalStyleIndex {
 	GlobalStyleIndex_MarkOccurrences,	// indicator style. `fore`, `alpha`, `outline`
 	GlobalStyleIndex_Bookmark,			// indicator style. `fore`, `back`, `alpha`
 	GlobalStyleIndex_CallTip,			// inherited style.
+	GlobalStyleIndex_Link,				// inherited style.
 };
 
 // styles in ANSI Art used to override global styles.
@@ -1409,6 +1413,9 @@ void Style_UpdateLexerKeywordAttr(LPCEDITLEXER pLexNew) {
 	case NP2LEX_LUA:
 		attr[3] = KeywordAttr_NoLexer;		// standard library
 		break;
+	case NP2LEX_MARKDOWN:
+		attr[0] = KeywordAttr_NoAutoComp;	// html block tag
+		break;
 	case NP2LEX_NSIS:
 		attr[0] = KeywordAttr_MakeLower;	// keywords
 		attr[1] = KeywordAttr_NoLexer;		// preprocessor
@@ -1500,6 +1507,7 @@ static BOOL Style_StrGetAttributeEx(LPCWSTR lpszStyle, LPCWSTR key, int keyLen) 
 #define Style_StrGetItalic(lpszStyle)			Style_StrGetAttribute((lpszStyle), L"italic")
 #define Style_StrGetUnderline(lpszStyle)		Style_StrGetAttribute((lpszStyle), L"underline")
 #define Style_StrGetStrike(lpszStyle)			Style_StrGetAttribute((lpszStyle), L"strike")
+#define Style_StrGetOverline(lpszStyle)			Style_StrGetAttribute((lpszStyle), L"overline")
 #define Style_StrGetEOLFilled(lpszStyle)		Style_StrGetAttribute((lpszStyle), L"eolfilled")
 
 // set default colors to avoid showing white (COLOR_WINDOW or COLOR_3DFACE) window or margin while loading big file.
@@ -1619,7 +1627,7 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) {
 
 			char msg[10];
 			_itoa(rid - NP2LEX_TEXTFILE, msg, 10);
-			SciCall_SetProperty("lexer.lang.type", msg);
+			SciCall_SetProperty("lexer.lang", msg);
 		}
 
 		// Code folding
@@ -1631,7 +1639,7 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) {
 		switch (rid) {
 		case NP2LEX_HTML:
 		case NP2LEX_XML:
-			SciCall_SetProperty("fold.html", "1");
+			//SciCall_SetProperty("fold.html", "1");
 			//SciCall_SetProperty("fold.hypertext.comment", "1");
 			//SciCall_SetProperty("fold.hypertext.heredoc", "1");
 			break;
@@ -1643,19 +1651,26 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) {
 			break;
 
 		case NP2LEX_BASH:
-			SciCall_SetProperty("lexer.bash.csh", ((np2LexLangIndex == IDM_LEXER_CSHELL)? "1" : "0"));
+			SciCall_SetProperty("lexer.lang", ((np2LexLangIndex == IDM_LEXER_CSHELL)? "1" : "0"));
 			break;
 
 		case NP2LEX_JAVASCRIPT:
 		case NP2LEX_TYPESCRIPT: {
 			LPCWSTR lpszExt = PathFindExtension(szCurFile);
 			const char *jsx = (StrNotEmpty(lpszExt) && (StrCaseEqual(lpszExt, L".jsx") || StrCaseEqual(lpszExt, L".tsx")))? "1" : "0";
-			SciCall_SetProperty("lexer.jsx", jsx);
+			SciCall_SetProperty("lexer.lang", jsx);
+		} break;
+
+		case NP2LEX_MARKDOWN: {
+			const char *lang = (np2LexLangIndex == IDM_LEXER_MARKDOWN_GITLAB) ? "1"
+				: ((np2LexLangIndex == IDM_LEXER_MARKDOWN_PANDOC) ? "2" : "0");
+			SciCall_SetProperty("lexer.lang", lang);
+			break;
 		} break;
 
 		case NP2LEX_APDL:
 		case NP2LEX_ABAQUS:
-			SciCall_SetProperty("lexer.apdl", (rid == NP2LEX_APDL) ? "1" : "0");
+			SciCall_SetProperty("lexer.lang", (rid == NP2LEX_APDL) ? "1" : "0");
 			break;
 		}
 
@@ -1889,6 +1904,9 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) {
 
 	// CallTip
 	Style_SetDefaultStyle(GlobalStyleIndex_CallTip);
+	// HotSpot
+	Style_SetDefaultStyle(GlobalStyleIndex_Link);
+	SciCall_StyleSetHotSpot(STYLE_LINK, TRUE);
 
 	if (SciCall_GetIndentationGuides() != SC_IV_NONE) {
 		Style_SetIndentGuides(TRUE);
@@ -1932,6 +1950,7 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) {
 				SciCall_CopyStyles(first, iStyle >> 8);
 			}
 		}
+
 		switch (iLexer) {
 		case SCLEX_PERL:
 #if defined(_WIN64)
@@ -1941,6 +1960,29 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) {
 			SciCall_CopyStyles(SCE_PL_SCALAR, MULTI_STYLE(SCE_PL_REGEX_VAR, SCE_PL_REGSUBST_VAR, SCE_PL_BACKTICKS_VAR, SCE_PL_HERE_QQ_VAR));
 			SciCall_CopyStyles(SCE_PL_SCALAR, MULTI_STYLE(SCE_PL_HERE_QX_VAR, SCE_PL_STRING_QQ_VAR, SCE_PL_STRING_QX_VAR, SCE_PL_STRING_QR_VAR));
 #endif
+			break;
+
+		case SCLEX_REBOL:
+			SciCall_CopyStyles(STYLE_LINK, MULTI_STYLE(SCE_REBOL_URL, SCE_REBOL_EMAIL, 0, 0));
+			break;
+
+		case SCLEX_MARKDOWN:
+			if (!IsStyleLoaded(&lexHTML)) {
+				Style_LoadOne(&lexHTML);
+			}
+			SciCall_CopyStyles(STYLE_LINK, MULTI_STYLE(SCE_MARKDOWN_PLAIN_LINK, SCE_MARKDOWN_PAREN_LINK, SCE_MARKDOWN_ANGLE_LINK, 0));
+			for (UINT i = 1; i < lexHTML.iStyleCount; i++) {
+				const UINT iStyle = lexHTML.Styles[i].iStyle;
+				szValue = lexHTML.Styles[i].szValue;
+				const int first = iStyle & 0xff;
+				Style_SetStyles(first, szValue);
+				if (iStyle > 0xFF) {
+					SciCall_CopyStyles(first, iStyle >> 8);
+				}
+				if (iStyle == SCE_H_QUESTION) {
+					break;
+				}
+			}
 			break;
 		}
 	} else {
@@ -3011,6 +3053,7 @@ void Style_SetLexerByLangIndex(int lang) {
 	np2LexLangIndex = lang;
 
 	switch (lang) {
+	// Text File
 	case IDM_LEXER_TEXTFILE:
 		np2LexLangIndex = 0;
 		pLex = &lexTextFile;
@@ -3025,6 +3068,7 @@ void Style_SetLexerByLangIndex(int lang) {
 		pLex = &lexCONF;
 		break;
 
+	// Web Source Code
 	case IDM_LEXER_WEB:
 	case IDM_LEXER_PHP:
 	case IDM_LEXER_JSP:
@@ -3038,6 +3082,7 @@ void Style_SetLexerByLangIndex(int lang) {
 		pLex = &lexHTML;
 		break;
 
+	// XML Document
 	case IDM_LEXER_XML:
 	case IDM_LEXER_XSD:
 	case IDM_LEXER_XSLT:
@@ -3073,18 +3118,28 @@ void Style_SetLexerByLangIndex(int lang) {
 		pLex = &lexXML;
 		break;
 
+	// Shell Script
 	case IDM_LEXER_BASH:
 	case IDM_LEXER_CSHELL:
 	case IDM_LEXER_M4:
 		pLex = &lexBash;
 		break;
 
+	// Markdown
+	case IDM_LEXER_MARKDOWN_GITHUB:
+	case IDM_LEXER_MARKDOWN_GITLAB:
+	case IDM_LEXER_MARKDOWN_PANDOC:
+		pLex = &lexMarkdown;
+		break;
+
+	// Math
 	case IDM_LEXER_MATLAB:
 	case IDM_LEXER_OCTAVE:
 	case IDM_LEXER_SCILAB:
 		pLex = &lexMatlab;
 		break;
 
+	// CSS Style Sheet
 	case IDM_LEXER_CSS:
 	case IDM_LEXER_SCSS:
 	case IDM_LEXER_LESS:
@@ -3104,21 +3159,30 @@ void Style_UpdateSchemeMenu(HMENU hmenu) {
 	int lang = np2LexLangIndex;
 	if (lang == 0) {
 		switch (pLexCurrent->rid) {
+		// Text File
 		case NP2LEX_TEXTFILE:
 			lang = IDM_LEXER_TEXTFILE;
 			break;
 		case NP2LEX_2NDTEXTFILE:
 			lang = IDM_LEXER_2NDTEXTFILE;
 			break;
+		// Web Source Code
 		case NP2LEX_HTML:
 			lang = IDM_LEXER_WEB;
 			break;
+		// XML Document
 		case NP2LEX_XML:
 			lang = IDM_LEXER_XML;
 			break;
+		// Shell Script
 		case NP2LEX_BASH:
 			lang = IDM_LEXER_BASH;
 			break;
+		// Markdown
+		case NP2LEX_MARKDOWN:
+			lang = IDM_LEXER_MARKDOWN_GITHUB;
+			break;
+		// Math
 		case NP2LEX_MATLAB:
 			lang = IDM_LEXER_MATLAB;
 			break;
@@ -3128,6 +3192,7 @@ void Style_UpdateSchemeMenu(HMENU hmenu) {
 		case NP2LEX_SCILAB:
 			lang = IDM_LEXER_SCILAB;
 			break;
+		// CSS Style Sheet
 		case NP2LEX_CSS:
 			lang = IDM_LEXER_CSS;
 			break;
@@ -3587,6 +3652,7 @@ BOOL Style_StrGetLocale(LPCWSTR lpszStyle, LPWSTR lpszLocale, int cchLocale) {
 #define Style_StrCopyItalic(szNewStyle, lpszStyle)			Style_StrCopyAttribute((szNewStyle), (lpszStyle), L"italic")
 #define Style_StrCopyUnderline(szNewStyle, lpszStyle)		Style_StrCopyAttribute((szNewStyle), (lpszStyle), L"underline")
 #define Style_StrCopyStrike(szNewStyle, lpszStyle)			Style_StrCopyAttribute((szNewStyle), (lpszStyle), L"strike")
+#define Style_StrCopyOverline(szNewStyle, lpszStyle)		Style_StrCopyAttribute((szNewStyle), (lpszStyle), L"overline")
 #define Style_StrCopyEOLFilled(szNewStyle, lpszStyle)		Style_StrCopyAttribute((szNewStyle), (lpszStyle), L"eolfilled")
 
 //=============================================================================
@@ -3721,6 +3787,7 @@ BOOL Style_SelectFont(HWND hwnd, LPWSTR lpszStyle, int cchStyle, BOOL bDefaultSt
 		lstrcat(szNewStyle, L"; strike");
 	}
 
+	Style_StrCopyOverline(szNewStyle, lpszStyle);
 	Style_StrCopyCase(szNewStyle, lpszStyle, tch);
 	Style_StrCopyFore(szNewStyle, lpszStyle, tch);
 	Style_StrCopyBack(szNewStyle, lpszStyle, tch);
@@ -3785,6 +3852,7 @@ BOOL Style_SelectColor(HWND hwnd, BOOL bFore, LPWSTR lpszStyle, int cchStyle) {
 	Style_StrCopyItalic(szNewStyle, lpszStyle);
 	Style_StrCopyUnderline(szNewStyle, lpszStyle);
 	Style_StrCopyStrike(szNewStyle, lpszStyle);
+	Style_StrCopyOverline(szNewStyle, lpszStyle);
 	Style_StrCopyCase(szNewStyle, lpszStyle, tch);
 
 	if (bFore) {
@@ -3859,6 +3927,10 @@ void Style_SetStyles(int iStyle, LPCWSTR lpszStyle) {
 	if (Style_StrGetStrike(lpszStyle)) {
 		SciCall_StyleSetStrike(iStyle, TRUE);
 	}
+	// Overline
+	if (Style_StrGetOverline(lpszStyle)) {
+		SciCall_StyleSetOverline(iStyle, TRUE);
+	}
 	// EOL Filled
 	if (Style_StrGetEOLFilled(lpszStyle)) {
 		SciCall_StyleSetEOLFilled(iStyle, TRUE);
@@ -3912,6 +3984,8 @@ void Style_Parse(struct DetailStyle *style, LPCWSTR lpszStyle) {
 	style->underline = Style_StrGetUnderline(lpszStyle);
 	// Strike
 	style->strike = Style_StrGetStrike(lpszStyle);
+	// Overline
+	style->overline = Style_StrGetOverline(lpszStyle);
 	// EOL Filled
 	style->eolFilled = Style_StrGetEOLFilled(lpszStyle);
 
@@ -3963,6 +4037,10 @@ void Style_SetParsed(const struct DetailStyle *style, int iStyle) {
 	// Strike
 	if (style->strike) {
 		SciCall_StyleSetStrike(iStyle, TRUE);
+	}
+	// Overline
+	if (style->overline) {
+		SciCall_StyleSetOverline(iStyle, TRUE);
 	}
 	// EOL Filled
 	if (style->eolFilled) {

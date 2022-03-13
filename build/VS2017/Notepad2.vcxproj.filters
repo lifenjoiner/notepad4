@@ -153,6 +153,9 @@
     <ClCompile Include="..\..\scintilla\lexers\LexMakefile.cxx">
       <Filter>Scintilla\lexers</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\scintilla\lexers\LexMarkdown.cxx">
+      <Filter>Scintilla\lexers</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\scintilla\lexers\LexMatlab.cxx">
       <Filter>Scintilla\lexers</Filter>
     </ClCompile>
@@ -241,9 +244,6 @@
       <Filter>Scintilla\lexlib</Filter>
     </ClCompile>
     <ClCompile Include="..\..\scintilla\lexlib\LexerModule.cxx">
-      <Filter>Scintilla\lexlib</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\scintilla\lexlib\LexerSimple.cxx">
       <Filter>Scintilla\lexlib</Filter>
     </ClCompile>
     <ClCompile Include="..\..\scintilla\lexlib\PropSetSimple.cxx">
@@ -639,9 +639,6 @@
       <Filter>Scintilla\lexlib</Filter>
     </ClInclude>
     <ClInclude Include="..\..\scintilla\lexlib\LexerModule.h">
-      <Filter>Scintilla\lexlib</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\scintilla\lexlib\LexerSimple.h">
       <Filter>Scintilla\lexlib</Filter>
     </ClInclude>
     <ClInclude Include="..\..\scintilla\lexlib\LexerUtils.h">

@@ -421,7 +421,7 @@ void ScintillaBase::AutoCompleteCompleted(char ch, CompletionMethods completionM
 
 	NotificationData scn = {};
 	scn.nmhdr.code = listType > 0 ?  Notification::UserListSelection : Notification::AutoCSelection;
-	scn.ch = ch;
+	scn.ch = static_cast<uint8_t>(ch);
 	scn.listCompletionMethod = completionMethod;
 	scn.wParam = listType;
 	scn.listType = listType;
@@ -492,18 +492,13 @@ void ScintillaBase::CallTipShow(Point pt, NotificationPosition notifyPos, const 
 	if (wMargin.Created()) {
 		pt = pt + GetVisibleOriginInMain();
 	}
+	AutoSurface surfaceMeasure(this);
 	PRectangle rc = ct.CallTipStart(sel.MainCaret(), pt,
 		vs.lineHeight,
 		defn,
-		style.fontName,
-		style.sizeZoomed,
-		CodePage(),
-		style.characterSet,
-		vs.technology,
-		vs.localeName.c_str(),
-		wMain);
-	// If the call-tip window would be out of the client
-	// space
+		surfaceMeasure,
+		style.font);
+	// If the call-tip window would be out of the client space
 	const PRectangle rcClient = GetClientRectangle();
 	const int offset = vs.lineHeight + static_cast<int>(rc.Height());
 	// adjust so it displays above the text.
