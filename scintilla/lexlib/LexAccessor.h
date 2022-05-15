@@ -144,6 +144,9 @@ public:
 	unsigned char StyleAt(Sci_Position position) const noexcept {
 		return pAccess->StyleAt(position);
 	}
+	unsigned char StyleIndexAt(Sci_Position position) const noexcept {
+		return pAccess->StyleAt(position);
+	}
 	// only used in Colourise() or Lex() function, validLen is always zero in Fold() function.
 	// Return style value from buffer when in buffer, else retrieve from document.
 	// This is faster and can avoid calls to Flush() as that may be expensive.
@@ -325,6 +328,19 @@ inline unsigned char LexGetNextChar(LexAccessor &styler, Sci_Position startPos, 
 		}
 	}
 	return '\0';
+}
+
+inline int GetMatchedDelimiterCount(LexAccessor &styler, Sci_PositionU pos, int delimiter) noexcept {
+	int count = 1;
+	while (true) {
+		const uint8_t ch = styler.SafeGetCharAt(++pos);
+		if (ch == delimiter) {
+			++count;
+		} else {
+			break;
+		}
+	}
+	return count;
 }
 
 void BacktrackToStart(const LexAccessor &styler, int stateMask, Sci_PositionU &startPos, Sci_Position &lengthDoc, int &initStyle) noexcept;

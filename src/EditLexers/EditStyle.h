@@ -63,18 +63,6 @@
 #define NP2STYLE_ASPTag					63272
 #define NP2STYLE_PHPTag					63273
 
-#define NP2STYLE_PHPDefault				63281
-#define NP2STYLE_PHPComment				63282
-#define NP2STYLE_PHPKeyword				63283
-#define NP2STYLE_PHPString				63284
-#define NP2STYLE_PHPHeredocString		63285
-#define NP2STYLE_PHPNowdocString		63286
-#define NP2STYLE_PHPNumber				63287
-#define NP2STYLE_PHPOperator			63288
-#define NP2STYLE_PHPVariable			63289
-#define NP2STYLE_PHPStringVariable		63290
-#define NP2STYLE_PHPComplexVariable		63291
-
 #define NP2STYLE_JSDefault				63301
 #define NP2STYLE_JSComment				63302
 #define NP2STYLE_JSKeyword				63303
@@ -95,13 +83,14 @@
 #define NP2STYLE_TagClass				63401
 #define NP2STYLE_TagId					63402
 #define NP2STYLE_TagAttribute			63403
-#define NP2STYLE_PseudoClassElement		63404
+#define NP2STYLE_PseudoClass			63404
 #define NP2STYLE_UnknownPseudoClass		63405
-#define NP2STYLE_CSSProperty			63406
+#define NP2STYLE_PseudoElement			63406
 #define NP2STYLE_UnknownProperty		63407
-#define NP2STYLE_GroupRule				63408
+#define NP2STYLE_AtRule					63408
 #define NP2STYLE_Value					63409
 #define NP2STYLE_Important				63410
+#define NP2STYLE_UnknownPseudoElement	63411
 
 #define NP2STYLE_Class					63420
 #define NP2STYLE_Structure				63421

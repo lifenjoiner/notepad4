@@ -862,7 +862,7 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 			}
 		}
 	} else {
-		if (iSrcEncoding != CPI_NONE) {
+		if (iSrcEncoding >= CPI_FIRST) {
 			iCurrentEncoding = iSrcEncoding;
 			iOriginalEncoding = iSrcEncoding;
 			SciCall_SetCodePage((iSrcEncoding == CPI_DEFAULT) ? iDefaultCodePage : SC_CP_UTF8);
@@ -1188,6 +1188,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 		break;
 
 	case WM_SYSCOLORCHANGE:
+		SendMessage(hwndToolbar, WM_SYSCOLORCHANGE, wParam, lParam);
 		// update Scintilla colors
 		SendMessage(hwndEdit, WM_SYSCOLORCHANGE, wParam, lParam);
 		Style_SetLexer(pLexCurrent, FALSE);
@@ -1663,6 +1664,10 @@ HWND EditCreate(HWND hwndParent) {
 						  (HMENU)IDC_EDIT,
 						  g_hInstance,
 						  NULL);
+	//SciInitThemes(hwnd);
+	if (bEditLayoutRTL) {
+		SetWindowLayoutRTL(hwnd, TRUE);
+	}
 
 	InitScintillaHandle(hwnd);
 	Style_InitDefaultColor();
@@ -1697,11 +1702,6 @@ HWND EditCreate(HWND hwndParent) {
 	SciCall_AssignCmdKey((SCK_END + (SCMOD_NORM << 16)), SCI_LINEENDWRAP);
 	SciCall_AssignCmdKey((SCK_HOME + (SCMOD_SHIFT << 16)), SCI_VCHOMEWRAPEXTEND);
 	SciCall_AssignCmdKey((SCK_END + (SCMOD_SHIFT << 16)), SCI_LINEENDWRAPEXTEND);
-
-	//SciInitThemes(hwnd);
-	if (bEditLayoutRTL) {
-		SetWindowLayoutRTL(hwnd, TRUE);
-	}
 
 	iRenderingTechnology = SciCall_GetTechnology();
 	iBidirectional = SciCall_GetBidirectional();
@@ -1758,6 +1758,7 @@ HWND EditCreate(HWND hwndParent) {
 #if NP2_DEBUG_FOLD_LEVEL
 	SciCall_SetFoldFlags(SC_FOLDFLAG_LEVELNUMBERS);
 #endif
+	SciCall_SetAutomaticFold(SC_AUTOMATICFOLD_SHOW | SC_AUTOMATICFOLD_CLICK | SC_AUTOMATICFOLD_CHANGE);
 	SciCall_FoldDisplayTextSetStyle(SC_FOLDDISPLAYTEXT_BOXED);
 	const char *text = GetFoldDisplayEllipsis(SC_CP_UTF8, 0); // internal default encoding
 	SciCall_SetDefaultFoldDisplayText(text);
@@ -2353,8 +2354,8 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	EnableCmd(hmenu, CMD_RELOADNOFILEVARS, i);
 	EnableCmd(hmenu, CMD_RECODEDEFAULT, i);
 #if defined(_WIN64)
-	EnableCmd(hmenu, IDM_FILE_LARGE_FILE_MODE, !bLargeFileMode);
-	EnableCmd(hmenu, IDM_FILE_LARGE_FILE_MODE_RELOAD, !bLargeFileMode);
+	DisableCmd(hmenu, IDM_FILE_LARGE_FILE_MODE, bLargeFileMode);
+	DisableCmd(hmenu, IDM_FILE_LARGE_FILE_MODE_RELOAD, bLargeFileMode);
 #endif
 	EnableCmd(hmenu, IDM_FILE_LAUNCH, i);
 	EnableCmd(hmenu, IDM_FILE_PROPERTIES, i);
@@ -2367,14 +2368,14 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	CheckCmd(hmenu, IDM_FILE_READONLY, bReadOnly);
 	CheckCmd(hmenu, IDM_FILE_LOCK_EDITING, bLockedForEditing);
 
-	//EnableCmd(hmenu, IDM_ENCODING_UNICODEREV, !bReadOnly);
-	//EnableCmd(hmenu, IDM_ENCODING_UNICODE, !bReadOnly);
-	//EnableCmd(hmenu, IDM_ENCODING_UTF8SIGN, !bReadOnly);
-	//EnableCmd(hmenu, IDM_ENCODING_UTF8, !bReadOnly);
-	//EnableCmd(hmenu, IDM_ENCODING_ANSI, !bReadOnly);
-	//EnableCmd(hmenu, IDM_LINEENDINGS_CRLF, !bReadOnly);
-	//EnableCmd(hmenu, IDM_LINEENDINGS_LF, !bReadOnly);
-	//EnableCmd(hmenu, IDM_LINEENDINGS_CR, !bReadOnly);
+	//DisableCmd(hmenu, IDM_ENCODING_UNICODEREV, bReadOnly);
+	//DisableCmd(hmenu, IDM_ENCODING_UNICODE, bReadOnly);
+	//DisableCmd(hmenu, IDM_ENCODING_UTF8SIGN, bReadOnly);
+	//DisableCmd(hmenu, IDM_ENCODING_UTF8, bReadOnly);
+	//DisableCmd(hmenu, IDM_ENCODING_ANSI, bReadOnly);
+	//DisableCmd(hmenu, IDM_LINEENDINGS_CRLF, bReadOnly);
+	//DisableCmd(hmenu, IDM_LINEENDINGS_LF, bReadOnly);
+	//DisableCmd(hmenu, IDM_LINEENDINGS_CR, bReadOnly);
 
 	EnableCmd(hmenu, IDM_RECODE_SELECT, i);
 
@@ -2438,24 +2439,24 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	EnableCmd(hmenu, CMD_CUSTOM_ACTION1, i);
 	EnableCmd(hmenu, CMD_CUSTOM_ACTION2, i);
 
-	//EnableCmd(hmenu, IDM_EDIT_MOVELINEUP, !bReadOnly);
-	//EnableCmd(hmenu, IDM_EDIT_MOVELINEDOWN, !bReadOnly);
-	//EnableCmd(hmenu, IDM_EDIT_LINETRANSPOSE, !bReadOnly);
-	//EnableCmd(hmenu, IDM_EDIT_DUPLICATELINE, !bReadOnly);
-	//EnableCmd(hmenu, IDM_EDIT_CUTLINE, !bReadOnly);
-	//EnableCmd(hmenu, IDM_EDIT_COPYLINE, !bReadOnly);
-	//EnableCmd(hmenu, IDM_EDIT_DELETELINE, !bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_MOVELINEUP, bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_MOVELINEDOWN, bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_LINETRANSPOSE, bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_DUPLICATELINE, bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_CUTLINE, bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_COPYLINE, bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_DELETELINE, bReadOnly);
 
-	//EnableCmd(hmenu, IDM_EDIT_INDENT, !bReadOnly);
-	//EnableCmd(hmenu, IDM_EDIT_UNINDENT, !bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_INDENT, bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_UNINDENT, bReadOnly);
 
-	//EnableCmd(hmenu, IDM_EDIT_PADWITHSPACES, !bReadOnly);
-	//EnableCmd(hmenu, IDM_EDIT_STRIP1STCHAR, !bReadOnly);
-	//EnableCmd(hmenu, IDM_EDIT_STRIPLASTCHAR, !bReadOnly);
-	//EnableCmd(hmenu, IDM_EDIT_TRIMLINES, !bReadOnly);
-	//EnableCmd(hmenu, IDM_EDIT_TRIMLEAD, !bReadOnly);
-	//EnableCmd(hmenu, IDM_EDIT_MERGEBLANKLINES, !bReadOnly);
-	//EnableCmd(hmenu, IDM_EDIT_REMOVEBLANKLINES, !bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_PADWITHSPACES, bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_STRIP1STCHAR, bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_STRIPLASTCHAR, bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_TRIMLINES, bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_TRIMLEAD, bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_MERGEBLANKLINES, bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_REMOVEBLANKLINES, bReadOnly);
 
 	EnableCmd(hmenu, IDM_EDIT_SORTLINES, EditGetSelectedLineCount() > 1);
 
@@ -2510,15 +2511,15 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
 	EnableCmd(hmenu, IDM_VIEW_SHOWEXCERPT, i);
 
-	EnableCmd(hmenu, IDM_EDIT_LINECOMMENT, bCurrentLexerHasLineComment);
-	EnableCmd(hmenu, IDM_EDIT_STREAMCOMMENT, bCurrentLexerHasBlockComment);
+	DisableCmd(hmenu, IDM_EDIT_LINECOMMENT, (pLexCurrent->lexerAttr & LexerAttr_NoLineComment));
+	DisableCmd(hmenu, IDM_EDIT_STREAMCOMMENT, (pLexCurrent->lexerAttr & LexerAttr_NoBlockComment));
 
 	EnableCmd(hmenu, IDM_EDIT_INSERT_ENCODING, *mEncoding[iCurrentEncoding].pszParseNames);
 
-	//EnableCmd(hmenu, IDM_EDIT_INSERT_SHORTDATE, !bReadOnly);
-	//EnableCmd(hmenu, IDM_EDIT_INSERT_LONGDATE, !bReadOnly);
-	//EnableCmd(hmenu, IDM_EDIT_INSERT_FILENAME, !bReadOnly);
-	//EnableCmd(hmenu, IDM_EDIT_INSERT_PATHNAME, !bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_INSERT_SHORTDATE, bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_INSERT_LONGDATE, bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_INSERT_FILENAME, bReadOnly);
+	//DisableCmd(hmenu, IDM_EDIT_INSERT_PATHNAME, bReadOnly);
 
 	i = nonEmpty;
 	EnableCmd(hmenu, IDM_EDIT_FIND, i);
@@ -2583,7 +2584,7 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	i = IDM_VIEW_CARET_STYLE_BLOCK + iCaretStyle;
 	CheckMenuRadioItem(hmenu, IDM_VIEW_CARET_STYLE_BLOCK, IDM_VIEW_CARET_STYLE_WIDTH3, i, MF_BYCOMMAND);
 	CheckCmd(hmenu, IDM_VIEW_CARET_STYLE_NOBLINK, iCaretBlinkPeriod == 0);
-	CheckCmd(hmenu, IDM_VIEW_CARET_STYLE_SELECTION, !bBlockCaretOutSelection);
+	UncheckCmd(hmenu, IDM_VIEW_CARET_STYLE_SELECTION, bBlockCaretOutSelection);
 	CheckCmd(hmenu, IDM_VIEW_LONGLINEMARKER, bMarkLongLines);
 	CheckCmd(hmenu, IDM_VIEW_TABSASSPACES, fvCurFile.bTabsAsSpaces);
 	CheckCmd(hmenu, IDM_VIEW_SHOWINDENTGUIDES, bShowIndentGuides);
@@ -2595,7 +2596,7 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	i = IDM_LINE_SELECTION_MODE_NONE + iLineSelectionMode;
 	CheckMenuRadioItem(hmenu, IDM_LINE_SELECTION_MODE_NONE, IDM_LINE_SELECTION_MODE_NORMAL, i, MF_BYCOMMAND);
 
-	CheckCmd(hmenu, IDM_VIEW_MARKOCCURRENCES_OFF, !bMarkOccurrences);
+	UncheckCmd(hmenu, IDM_VIEW_MARKOCCURRENCES_OFF, bMarkOccurrences);
 	CheckCmd(hmenu, IDM_VIEW_MARKOCCURRENCES_CASE, bMarkOccurrencesMatchCase);
 	CheckCmd(hmenu, IDM_VIEW_MARKOCCURRENCES_WORD, bMarkOccurrencesMatchWords);
 	CheckCmd(hmenu, IDM_VIEW_MARKOCCURRENCES_BOOKMARK, bMarkOccurrencesBookmark);
@@ -2630,7 +2631,7 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
 	CheckCmd(hmenu, IDM_VIEW_REUSEWINDOW, bReuseWindow);
 	CheckCmd(hmenu, IDM_VIEW_STICKY_WINDOW_POSITION, bStickyWindowPosition);
-	EnableCmd(hmenu, IDM_VIEW_CLEARWINPOS, !bStickyWindowPosition);
+	DisableCmd(hmenu, IDM_VIEW_CLEARWINPOS, bStickyWindowPosition);
 	CheckCmd(hmenu, IDM_VIEW_SINGLEFILEINSTANCE, bSingleFileInstance);
 	CheckCmd(hmenu, IDM_VIEW_ALWAYSONTOP, IsTopMost());
 	CheckCmd(hmenu, IDM_VIEW_MINTOTRAY, bMinimizeToTray);
@@ -2647,7 +2648,6 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	i = IDM_SET_RENDER_TECH_GDI + iRenderingTechnology;
 	CheckMenuRadioItem(hmenu, IDM_SET_RENDER_TECH_GDI, IDM_SET_RENDER_TECH_D2DDC, i, MF_BYCOMMAND);
 	// RTL Layout
-	EnableCmd(hmenu, IDM_SET_RTL_LAYOUT_EDIT, iRenderingTechnology == SC_TECHNOLOGY_DEFAULT);
 	CheckCmd(hmenu, IDM_SET_RTL_LAYOUT_EDIT, bEditLayoutRTL);
 	CheckCmd(hmenu, IDM_SET_RTL_LAYOUT_OTHER, bWindowLayoutRTL);
 	// Bidirectional
@@ -2717,7 +2717,7 @@ static void ConvertLineEndings(int iNewEOLMode) {
 	UpdateWindowTitle();
 }
 
-static inline uint8_t IsBraceMatchChar(uint32_t ch) {
+static inline bool IsBraceMatchChar(uint32_t ch) {
 #if 0
 	return ch == '(' || ch == ')'
 		|| ch == '[' || ch == ']'
@@ -2726,7 +2726,7 @@ static inline uint8_t IsBraceMatchChar(uint32_t ch) {
 #else
 	// tools/GenerateTable.py
 	static const uint32_t table[8] = { 0, 0x50000300, 0x28000000, 0x28000000 };
-	return bittest(table + (ch >> 5), ch & 31);
+	return BitTestEx(table, ch);
 #endif
 }
 
@@ -3045,7 +3045,9 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		if (EditSetNewEncoding(iCurrentEncoding, iNewEncoding, flagSetEncoding, StrIsEmpty(szCurFile))) {
 			if (SciCall_GetLength() == 0) {
 				iCurrentEncoding = iNewEncoding;
-				iOriginalEncoding = iNewEncoding;
+				if (StrIsEmpty(szCurFile) || Encoding_HasBOM(iNewEncoding) == Encoding_HasBOM(iOriginalEncoding)) {
+					iOriginalEncoding = iNewEncoding;
+				}
 			} else {
 				if (iCurrentEncoding == CPI_DEFAULT || iNewEncoding == CPI_DEFAULT) {
 					iOriginalEncoding = CPI_NONE;
@@ -3066,7 +3068,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 			int iNewEncoding;
 			switch (iCurrentEncoding) {
 			case CPI_DEFAULT:
-				iNewEncoding = -1;
+				iNewEncoding = CPI_NONE; // unknown encoding
 				break;
 			case CPI_UTF8SIGN:
 				iNewEncoding = CPI_UTF8;
@@ -4345,6 +4347,9 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
 	case IDM_SET_RTL_LAYOUT_EDIT:
 		bEditLayoutRTL = !bEditLayoutRTL;
+		if (bEditLayoutRTL && iRenderingTechnology != SC_TECHNOLOGY_DEFAULT) {
+			SendWMCommand(hwnd, IDM_SET_RENDER_TECH_GDI);
+		}
 		SetWindowLayoutRTL(hwndEdit, bEditLayoutRTL);
 		InvalidateStyleRedraw();
 		break;
@@ -5215,9 +5220,11 @@ LRESULT MsgNotify(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
 		case SCN_MARGINCLICK:
 			switch (scn->margin) {
+#if 0
 			case MarginNumber_CodeFolding:
 				FoldClickAt(scn->position, scn->modifiers);
 				break;
+#endif
 			case MarginNumber_Bookmark:
 				EditToggleBookmarkAt(scn->position);
 				break;
@@ -5259,6 +5266,15 @@ LRESULT MsgNotify(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 				PostMessage(hwnd, APPM_POST_HOTSPOTCLICK, iAnchorPos, iCurrentPos);
 			}
 			break;
+
+#if 0
+		case SCN_NEEDSHOWN: {
+			const Sci_Line lineStart = SciCall_LineFromPosition(scn->position);
+			const Sci_Line lineEnd = SciCall_LineFromPosition(scn->position + scn->length);
+			//printf("SCN_NEEDSHOWN %zd %zd\n", lineStart, lineEnd);
+			FoldExpandRange(lineStart, lineEnd);
+		} break;
+#endif
 		}
 		break;
 
@@ -5630,8 +5646,7 @@ void LoadSettings(void) {
 
 	iValue = IniSectionGetInt(pIniSection, L"RenderingTechnology", GetDefualtRenderingTechnology());
 	iValue = clamp_i(iValue, SC_TECHNOLOGY_DEFAULT, SC_TECHNOLOGY_DIRECTWRITEDC);
-	iRenderingTechnology = iValue;
-	bEditLayoutRTL = bEditLayoutRTL && iValue == SC_TECHNOLOGY_DEFAULT;
+	iRenderingTechnology = bEditLayoutRTL ? SC_TECHNOLOGY_DEFAULT : iValue;
 
 	iValue = IniSectionGetInt(pIniSection, L"Bidirectional", SC_BIDIRECTIONAL_DISABLED);
 	iBidirectional = clamp_i(iValue, SC_BIDIRECTIONAL_DISABLED, SC_BIDIRECTIONAL_R2L);
@@ -7269,14 +7284,21 @@ BOOL FileIO(BOOL fLoad, LPWSTR pszFile, int flag, EditFileIOStatus *status) {
 	InvalidateRect(hwndStatus, NULL, TRUE);
 	UpdateWindow(hwndStatus);
 
-	const BOOL fSuccess = fLoad ? EditLoadFile(pszFile, flag, status) : EditSaveFile(hwndEdit, pszFile, flag, status);
+	if (fLoad) {
+		fLoad = EditLoadFile(pszFile, status);
+		iSrcEncoding = CPI_NONE;
+		iWeakSrcEncoding = CPI_NONE;
+	} else {
+		fLoad = EditSaveFile(hwndEdit, pszFile, flag, status);
+	}
+
 	const DWORD dwFileAttributes = GetFileAttributes(pszFile);
 	bReadOnly = (dwFileAttributes != INVALID_FILE_ATTRIBUTES) && (dwFileAttributes & FILE_ATTRIBUTE_READONLY);
 
 	StatusSetSimple(hwndStatus, FALSE);
 	EndWaitCursor();
 
-	return fSuccess;
+	return fLoad;
 }
 
 //=============================================================================
@@ -7398,7 +7420,7 @@ BOOL FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile) {
 				EditSetEmptyText();
 				iCurrentEOLMode = GetScintillaEOLMode(iDefaultEOLMode);
 				SciCall_SetEOLMode(iCurrentEOLMode);
-				if (iSrcEncoding != CPI_NONE) {
+				if (iSrcEncoding >= CPI_FIRST) {
 					iCurrentEncoding = iSrcEncoding;
 				} else {
 					iCurrentEncoding = iDefaultEncoding;
@@ -7415,7 +7437,7 @@ BOOL FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile) {
 			return FALSE;
 		}
 	} else {
-		fSuccess = FileIO(TRUE, szFileName, loadFlag & FileLoadFlag_NoEncDetect, &status);
+		fSuccess = FileIO(TRUE, szFileName, 0, &status);
 		if (fSuccess) {
 			iCurrentEncoding = status.iEncoding;
 			iCurrentEOLMode = status.iEOLMode;
@@ -7732,6 +7754,9 @@ void EditApplyDefaultEncoding(PEDITLEXER pLex) {
 		SciCall_SetEOLMode(iEOLMode);
 		UpdateStatusBarCache(STATUS_EOLMODE);
 	}
+	if (iEncoding == CPI_DEFAULT) {
+		iEncoding = Encoding_GetAnsiIndex();
+	}
 	if (iEncoding != iCurrentEncoding) {
 		iCurrentEncoding = iEncoding;
 		iOriginalEncoding = iEncoding;
@@ -7964,7 +7989,7 @@ BOOL ActivatePrevInst(void) {
 				params->iInitialLine = iInitialLine;
 				params->iInitialColumn = iInitialColumn;
 
-				params->iSrcEncoding = (lpEncodingArg) ? Encoding_Match(lpEncodingArg) : CPI_NONE;
+				params->iSrcEncoding = lpEncodingArg ? Encoding_Match(lpEncodingArg) : CPI_NONE;
 				params->flagSetEncoding = flagSetEncoding;
 				params->flagSetEOLMode = flagSetEOLMode;
 				params->flagTitleExcerpt = 0;
@@ -8050,7 +8075,7 @@ BOOL ActivatePrevInst(void) {
 				params->iInitialLine = iInitialLine;
 				params->iInitialColumn = iInitialColumn;
 
-				params->iSrcEncoding = (lpEncodingArg) ? Encoding_Match(lpEncodingArg) : CPI_NONE;
+				params->iSrcEncoding = lpEncodingArg ? Encoding_Match(lpEncodingArg) : CPI_NONE;
 				params->flagSetEncoding = flagSetEncoding;
 				params->flagSetEOLMode = flagSetEOLMode;
 

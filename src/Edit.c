@@ -51,7 +51,6 @@ extern int xFindReplaceDlg;
 extern int yFindReplaceDlg;
 extern int cxFindReplaceDlg;
 
-extern int iDefaultEncoding;
 extern int iDefaultEOLMode;
 extern BOOL bFixLineEndings;
 extern BOOL bAutoStripBlanks;
@@ -59,12 +58,9 @@ extern BOOL bAutoStripBlanks;
 // Default Codepage and Character Set
 extern int iDefaultCodePage;
 extern BOOL bLoadANSIasUTF8;
-extern BOOL bLoadASCIIasUTF8;
-extern BOOL bLoadNFOasOEM;
 extern int iSrcEncoding;
 extern int iWeakSrcEncoding;
 extern int iCurrentEncoding;
-extern int g_DOSEncoding;
 
 extern LPMRULIST mruFind;
 extern LPMRULIST mruReplace;
@@ -90,9 +86,6 @@ static HMODULE hELSCoreDLL = NULL;
 #else
 #pragma comment(lib, "elscore.lib")
 #endif
-
-// MultiByteToWideChar() and WideCharToMultiByte() uses int as length.
-#define MAX_NON_UTF8_SIZE	((1U << 31) - 16)
 
 void Edit_ReleaseResources(void) {
 	DStringW_Free(&wchPrefixSelection);
@@ -954,144 +947,11 @@ labelStart:
 #endif
 }
 
-int EditDetermineEncoding(LPCWSTR pszFile, char *lpData, DWORD cbData, BOOL bSkipEncodingDetection, int *encodingFlag) {
-	LPCWSTR const pszExt = PathFindExtension(pszFile);
-	int preferedEncoding = CPI_NONE;
-	if (bLoadNFOasOEM && (StrCaseEqual(pszExt, L".nfo") || StrCaseEqual(pszExt, L".diz"))) {
-		preferedEncoding = g_DOSEncoding;
-	} else if (StrCaseEqual(pszExt, L".bat") || StrCaseEqual(pszExt, L".cmd")) {
-		preferedEncoding = CPI_DEFAULT;
-	} else if (StrEqual(pszExt, L".sh") || StrStartsWith(lpData, "#!/")) {
-		// shell script: #!/bin/sh[LF]
-		preferedEncoding = CPI_UTF8;
-	}
-
-	if (!Encoding_IsValid(iDefaultEncoding)) {
-		iDefaultEncoding = CPI_UTF8;
-	}
-
-	int _iDefaultEncoding = (preferedEncoding == CPI_NONE) ? iDefaultEncoding : preferedEncoding;
-	if (iWeakSrcEncoding != CPI_NONE && Encoding_IsValid(iWeakSrcEncoding)) {
-		_iDefaultEncoding = iWeakSrcEncoding;
-	}
-
-	int iEncoding = CPI_DEFAULT;
-	// default encoding for empty file.
-	if (cbData == 0) {
-		FileVars_Init(NULL, 0, &fvCurFile);
-
-		if (iSrcEncoding == CPI_NONE) {
-			if ((bLoadANSIasUTF8 || bLoadASCIIasUTF8) && preferedEncoding == CPI_NONE) {
-				iEncoding = CPI_UTF8;
-			} else {
-				iEncoding = _iDefaultEncoding;
-			}
-		} else {
-			iEncoding = iSrcEncoding;
-		}
-		return iEncoding;
-	}
-
-	BOOL utf8Sig = IsUTF8Signature(lpData);
-	BOOL bBOM = FALSE;
-	BOOL bReverse = FALSE;
-
-	// check Unicode / UTF-16
-	// file large than 2 GiB is loaded without encoding conversion, i.e. loaded as UTF-8 or ANSI only.
-	if (cbData < MAX_NON_UTF8_SIZE && (
-		(iSrcEncoding == CPI_UNICODE || iSrcEncoding == CPI_UNICODEBE) // reload as UTF-16
-		|| (!bSkipEncodingDetection && iSrcEncoding == CPI_NONE && !utf8Sig && IsUnicode(lpData, cbData, &bBOM, &bReverse))
-	)) {
-		if (iSrcEncoding == CPI_UNICODE) {
-			bBOM = (lpData[0] == '\xFF' && lpData[1] == '\xFE');
-			bReverse = FALSE;
-		} else if (iSrcEncoding == CPI_UNICODEBE) {
-			bBOM = (lpData[0] == '\xFE' && lpData[1] == '\xFF');
-		}
-
-		if (iSrcEncoding == CPI_UNICODEBE || bReverse) {
-			_swab(lpData, lpData, cbData);
-			iEncoding = bBOM ? CPI_UNICODEBEBOM : CPI_UNICODEBE;
-		} else {
-			iEncoding = bBOM ? CPI_UNICODEBOM : CPI_UNICODE;
-		}
-
-		*encodingFlag = bBOM;
-		return iEncoding;
-	}
-
-	FileVars_Init(lpData, cbData, &fvCurFile);
-	if (iSrcEncoding == CPI_NONE) {
-		iSrcEncoding = FileVars_GetEncoding(&fvCurFile);
-	}
-
-	iEncoding = iSrcEncoding;
-	if (iEncoding == CPI_NONE) {
-		if (fvCurFile.mask & FV_ENCODING) {
-			iEncoding = CPI_DEFAULT;
-		} else {
-			if (iWeakSrcEncoding != CPI_NONE && (mEncoding[iWeakSrcEncoding].uFlags & NCP_INTERNAL)) {
-				iEncoding = iDefaultEncoding;
-			} else {
-				iEncoding = _iDefaultEncoding;
-			}
-		}
-	}
-
-	// check UTF-8
-	bBOM = utf8Sig;
-	utf8Sig = (iSrcEncoding == CPI_UTF8 || iSrcEncoding == CPI_UTF8SIGN); // reload as UTF-8 or UTF-8 filevar
-	if (iSrcEncoding == CPI_NONE) {
-		if (!bSkipEncodingDetection || cbData >= MAX_NON_UTF8_SIZE) {
-			if (!bBOM && (!bLoadASCIIasUTF8 || preferedEncoding != CPI_NONE)
-				&& cbData < MAX_NON_UTF8_SIZE && IsUTF7(lpData, cbData)) {
-				// 7-bit / any encoding
-				*encodingFlag = EncodingFlag_UTF7;
-				return iEncoding;
-			}
-			utf8Sig = bBOM || IsUTF8(lpData, cbData);
-		}
-	}
-
-	if (utf8Sig) {
-		*encodingFlag = bBOM;
-		iEncoding = bBOM ? CPI_UTF8SIGN : CPI_UTF8;
-		return iEncoding;
-	}
-
-	if (cbData < MAX_NON_UTF8_SIZE && iEncoding != CPI_DEFAULT) {
-		const UINT uFlags = mEncoding[iEncoding].uFlags;
-		const BOOL ascii = IsUTF7(lpData, cbData);
-		if ((uFlags & NCP_8BIT) || ((uFlags & NCP_7BIT) && ascii)) {
-			// 7-bit / any encoding
-			*encodingFlag = ascii ? EncodingFlag_UTF7 : EncodingFlag_None;
-			return iEncoding;
-		}
-	}
-
-	// ANSI / unknown encoding
-	return CPI_DEFAULT;
-}
-
-static LPSTR EncodeAsUTF8(LPSTR lpData, DWORD *cbData, UINT codePage, DWORD flags) {
-	LPWSTR lpDataWide = (LPWSTR)NP2HeapAlloc(*cbData * sizeof(WCHAR) + 16);
-	const int cbDataWide = MultiByteToWideChar(codePage, flags, lpData, *cbData, lpDataWide, (int)(NP2HeapSize(lpDataWide) / sizeof(WCHAR)));
-	if (cbDataWide) {
-		lpData = (char *)NP2HeapAlloc(cbDataWide * kMaxMultiByteCount + 16);
-		*cbData = WideCharToMultiByte(CP_UTF8, 0, lpDataWide, cbDataWide, lpData, (int)NP2HeapSize(lpData), NULL, NULL);
-	} else {
-		lpData = NULL;
-		*cbData = 0;
-	}
-	NP2HeapFree(lpDataWide);
-	return lpData;
-}
-
 //=============================================================================
 //
 // EditLoadFile()
 //
-BOOL EditLoadFile(LPWSTR pszFile, BOOL bSkipEncodingDetection, EditFileIOStatus *status) {
+BOOL EditLoadFile(LPWSTR pszFile, EditFileIOStatus *status) {
 	HANDLE hFile = CreateFile(pszFile,
 					   GENERIC_READ,
 					   FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -1101,8 +961,6 @@ BOOL EditLoadFile(LPWSTR pszFile, BOOL bSkipEncodingDetection, EditFileIOStatus 
 	dwLastIOError = GetLastError();
 
 	if (hFile == INVALID_HANDLE_VALUE) {
-		iSrcEncoding = CPI_NONE;
-		iWeakSrcEncoding = CPI_NONE;
 		return FALSE;
 	}
 
@@ -1111,8 +969,6 @@ BOOL EditLoadFile(LPWSTR pszFile, BOOL bSkipEncodingDetection, EditFileIOStatus 
 	if (!GetFileSizeEx(hFile, &fileSize)) {
 		dwLastIOError = GetLastError();
 		CloseHandle(hFile);
-		iSrcEncoding = CPI_NONE;
-		iWeakSrcEncoding = CPI_NONE;
 		return FALSE;
 	}
 
@@ -1152,8 +1008,6 @@ BOOL EditLoadFile(LPWSTR pszFile, BOOL bSkipEncodingDetection, EditFileIOStatus 
 	if (fileSize.QuadPart > maxFileSize) {
 		CloseHandle(hFile);
 		status->bFileTooBig = TRUE;
-		iSrcEncoding = CPI_NONE;
-		iWeakSrcEncoding = CPI_NONE;
 		WCHAR tchDocSize[32];
 		WCHAR tchMaxSize[32];
 		WCHAR tchDocBytes[32];
@@ -1168,18 +1022,14 @@ BOOL EditLoadFile(LPWSTR pszFile, BOOL bSkipEncodingDetection, EditFileIOStatus 
 		return FALSE;
 	}
 
-	char *lpData = (char *)NP2HeapAlloc((SIZE_T)(fileSize.QuadPart) + 16);
+	char *lpData = (char *)NP2HeapAlloc((SIZE_T)(fileSize.QuadPart) + NP2_ENCODING_DETECTION_PADDING);
 	DWORD cbData = 0;
-	// prevent unsigned integer overflow.
-	const DWORD readLen = max_u((DWORD)(NP2HeapSize(lpData) - 2), (DWORD)fileSize.QuadPart);
-	const BOOL bReadSuccess = ReadFile(hFile, lpData, readLen, &cbData, NULL);
+	const BOOL bReadSuccess = ReadFile(hFile, lpData, (DWORD)(fileSize.QuadPart), &cbData, NULL);
 	dwLastIOError = GetLastError();
 	CloseHandle(hFile);
 
 	if (!bReadSuccess) {
 		NP2HeapFree(lpData);
-		iSrcEncoding = CPI_NONE;
-		iWeakSrcEncoding = CPI_NONE;
 		return FALSE;
 	}
 
@@ -1188,13 +1038,14 @@ BOOL EditLoadFile(LPWSTR pszFile, BOOL bSkipEncodingDetection, EditFileIOStatus 
 	status->totalLineCount = 1;
 
 	int encodingFlag = EncodingFlag_None;
-	const int iEncoding = EditDetermineEncoding(pszFile, lpData, cbData, bSkipEncodingDetection, &encodingFlag);
+	int iEncoding = EditDetermineEncoding(pszFile, lpData, cbData, &encodingFlag);
+	if (iEncoding == CPI_DEFAULT && encodingFlag == EncodingFlag_UTF7) {
+		iEncoding = Encoding_GetAnsiIndex();
+	}
 	status->iEncoding = iEncoding;
 	UINT uFlags = mEncoding[iEncoding].uFlags;
 
 	if (cbData == 0) {
-		iSrcEncoding = CPI_NONE;
-		iWeakSrcEncoding = CPI_NONE;
 		SciCall_SetCodePage((uFlags & NCP_DEFAULT) ? iDefaultCodePage : SC_CP_UTF8);
 		EditSetEmptyText();
 		SciCall_SetEOLMode(status->iEOLMode);
@@ -1206,9 +1057,12 @@ BOOL EditLoadFile(LPWSTR pszFile, BOOL bSkipEncodingDetection, EditFileIOStatus 
 	if (uFlags & NCP_UNICODE) {
 		// cbData/2 => WCHAR, WCHAR*3 => UTF-8
 		lpDataUTF8 = (char *)NP2HeapAlloc((cbData + 1)*sizeof(WCHAR));
-		LPCWSTR pszTextW = encodingFlag ? ((LPWSTR)lpData + 1) : (LPWSTR)lpData;
+		LPCWSTR pszTextW = (uFlags & NCP_UNICODE_BOM) ? ((LPWSTR)lpData + 1) : (LPWSTR)lpData;
 		// NOTE: requires two extra trailing NULL bytes.
-		const DWORD cchTextW = encodingFlag ? (cbData / sizeof(WCHAR)) : ((cbData / sizeof(WCHAR)) + 1);
+		const DWORD cchTextW = (uFlags & NCP_UNICODE_BOM) ? (cbData / sizeof(WCHAR)) : ((cbData / sizeof(WCHAR)) + 1);
+		if ((uFlags & NCP_UNICODE_REVERSE) != 0 && encodingFlag != EncodingFlag_Reversed) {
+			_swab(lpData, lpData, cbData);
+		}
 		cbData = WideCharToMultiByte(CP_UTF8, 0, pszTextW, cchTextW, lpDataUTF8, (int)NP2HeapSize(lpDataUTF8), NULL, NULL);
 		if (cbData == 0) {
 			const UINT legacyACP = mEncoding[CPI_DEFAULT].uCodePage;
@@ -1224,46 +1078,34 @@ BOOL EditLoadFile(LPWSTR pszFile, BOOL bSkipEncodingDetection, EditFileIOStatus 
 		lpData = lpDataUTF8;
 		FileVars_Init(lpData, cbData, &fvCurFile);
 	} else if (uFlags & NCP_UTF8) {
-		if (encodingFlag & EncodingFlag_BOM) {
+		if (uFlags & NCP_UTF8_SIGN) {
 			lpDataUTF8 += 3;
 			cbData -= 3;
 		}
 	} else if (uFlags & (NCP_8BIT | NCP_7BIT)) {
-		if ((encodingFlag & EncodingFlag_UTF7) == 0 || (uFlags & NCP_7BIT) != 0) {
+		if (encodingFlag != EncodingFlag_UTF7 || (uFlags & NCP_7BIT) != 0) {
 			const UINT uCodePage = mEncoding[iEncoding].uCodePage;
-			lpDataUTF8 = EncodeAsUTF8(lpData, &cbData, uCodePage, 0);
+			lpDataUTF8 = RecodeAsUTF8(lpData, &cbData, uCodePage, 0);
 			NP2HeapFree(lpData);
 			lpData = lpDataUTF8;
 		}
-	} else if (iEncoding == CPI_DEFAULT && cbData < MAX_NON_UTF8_SIZE
-		&& iSrcEncoding == CPI_NONE && iWeakSrcEncoding == CPI_NONE
-		&& (bLoadANSIasUTF8 || GetACP() == CP_UTF8)) {
-		if (bSkipEncodingDetection && ((encodingFlag & EncodingFlag_UTF7) || IsUTF8(lpData, cbData))) {
+	} else if (cbData < MAX_NON_UTF8_SIZE && encodingFlag != EncodingFlag_Invalid
+		&& ((bLoadANSIasUTF8 && !(iSrcEncoding == CPI_DEFAULT || iWeakSrcEncoding == CPI_DEFAULT))
+		|| (GetACP() == CP_UTF8))) {
+		// try to load ANSI / unknown encoding as UTF-8
+		DWORD back = cbData;
+		const UINT legacyACP = mEncoding[CPI_DEFAULT].uCodePage;
+		char * const result = RecodeAsUTF8(lpData, &back, legacyACP, MB_ERR_INVALID_CHARS);
+		if (result) {
+			NP2HeapFree(lpData);
+			lpDataUTF8 = result;
+			lpData = result;
+			cbData = back;
 			uFlags = 0;
-			status->iEncoding = CPI_UTF8;
-		} else {
-			// try to load ANSI / unknown encoding as UTF-8
-			const UINT legacyACP = mEncoding[CPI_DEFAULT].uCodePage;
-			if (encodingFlag & EncodingFlag_UTF7) {
-				uFlags = 0;
-				status->iEncoding = Encoding_GetIndex(legacyACP);
-			} else {
-				DWORD back = cbData;
-				char * const result = EncodeAsUTF8(lpData, &back, legacyACP, MB_ERR_INVALID_CHARS);
-				if (result) {
-					NP2HeapFree(lpData);
-					lpDataUTF8 = result;
-					lpData = result;
-					cbData = back;
-					uFlags = 0;
-					status->iEncoding = Encoding_GetIndex(legacyACP);
-				}
-			}
+			status->iEncoding = Encoding_GetIndex(legacyACP);
 		}
 	}
 
-	iSrcEncoding = CPI_NONE;
-	iWeakSrcEncoding = CPI_NONE;
 	if (cbData) {
 		EditDetectEOLMode(lpDataUTF8, cbData, status);
 		EditDetectIndentation(lpDataUTF8, cbData, &fvCurFile);
@@ -1346,29 +1188,22 @@ BOOL EditSaveFile(HWND hwnd, LPCWSTR pszFile, int saveFlag, EditFileIOStatus *st
 
 		lpData = (char *)NP2HeapAlloc(cbData + 1);
 		SciCall_GetText(cbData, lpData);
+#if 0
 		// FIXME: move checks in front of disk file access
-		/*if ((uFlags & NCP_UNICODE) == 0 && (uFlags & NCP_UTF8_SIGN) == 0) {
-				BOOL bEncodingMismatch = TRUE;
-				FILEVARS fv;
-				FileVars_Init(lpData, cbData, &fv);
-				if (fv.mask & FV_ENCODING) {
-					int iAltEncoding;
-					if (FileVars_IsValidEncoding(&fv)) {
-						iAltEncoding = FileVars_GetEncoding(&fv);
-						if (iAltEncoding == iEncoding)
-							bEncodingMismatch = FALSE;
-						else if ((mEncoding[iAltEncoding].uFlags & NCP_UTF8) && (uFlags & NCP_UTF8))
-							bEncodingMismatch = FALSE;
-					}
-					if (bEncodingMismatch) {
-						Encoding_GetLabel(iAltEncoding);
-						Encoding_GetLabel(iEncoding);
-						InfoBoxWarn(MB_OK, L"MsgEncodingMismatch", IDS_ENCODINGMISMATCH,
-							mEncoding[iAltEncoding].wchLabel,
-							mEncoding[iEncoding].wchLabel);
-					}
-				}
-			}*/
+		if ((uFlags & (NCP_UNICODE | NCP_UTF8_SIGN)) == 0) {
+			FILEVARS fv;
+			FileVars_Init(lpData, cbData, &fv);
+			const int iAltEncoding = FileVars_GetEncoding(&fv);
+			if (iAltEncoding >= CPI_FIRST && iAltEncoding != iEncoding
+				&& !((uFlags & NCP_UTF8) && (mEncoding[iAltEncoding].uFlags & NCP_UTF8))) {
+				Encoding_GetLabel(iAltEncoding);
+				Encoding_GetLabel(iEncoding);
+				InfoBoxWarn(MB_OK, L"MsgEncodingMismatch", IDS_ENCODINGMISMATCH,
+					mEncoding[iAltEncoding].wchLabel,
+					mEncoding[iEncoding].wchLabel);
+			}
+		}
+#endif
 		if (uFlags & NCP_UNICODE) {
 			SetEndOfFile(hFile);
 
@@ -6002,7 +5837,7 @@ BOOL EditMarkAll(BOOL bChanged, BOOL matchCase, BOOL wholeWord, BOOL bookmark) {
 			const unsigned char ch = pszText[iSelStart];
 			if (dbcs && IsDBCSLeadByteEx(cpEdit, ch)) {
 				++iSelStart;
-			} else if (!(ch >= 0x80 || IsDocWordChar(ch))) {
+			} else if (!IsDocWordChar(ch)) {
 				NP2HeapFree(pszText);
 				EditMarkAll_Clear();
 				return FALSE;
@@ -7339,6 +7174,13 @@ labelEnd: {
 extern BOOL bOpenFolderWithMetapath;
 
 static DWORD EditOpenSelectionCheckFile(LPCWSTR link, LPWSTR path, int cchFilePath, LPWSTR wchDirectory) {
+	if (StrHasPrefix(link, L"//")) {
+		// issue #454, treat as link
+		lstrcpy(path, L"http:");
+		lstrcpy(path + CSTRLEN(L"http:"), link);
+		return 0;
+	}
+
 	DWORD dwAttributes = GetFileAttributes(link);
 	if (dwAttributes == INVALID_FILE_ATTRIBUTES) {
 		if (StrNotEmpty(szCurFile)) {
@@ -7459,6 +7301,9 @@ void EditOpenSelection(OpenSelectionType type) {
 			}
 		} else {
 			link = path;
+			if (dwAttributes == 0) {
+				dwAttributes = INVALID_FILE_ATTRIBUTES;
+			}
 			if (*back != L'\0') {
 				line = NULL;
 			}
@@ -7593,7 +7438,7 @@ void FileVars_Init(LPCSTR lpData, DWORD cbData, LPFILEVARS lpfv) {
 	lpfv->fWordWrap = fWordWrapG;
 	lpfv->iLongLinesLimit = iLongLinesLimitG;
 
-	if ((fNoFileVariables && bNoEncodingTags) || !lpData || !cbData) {
+	if (lpData == NULL || cbData == 0 || (fNoFileVariables && bNoEncodingTags)) {
 		return;
 	}
 
@@ -7681,7 +7526,12 @@ void FileVars_Init(LPCSTR lpData, DWORD cbData, LPFILEVARS lpfv) {
 		mask |= FV_MaskHasTabIndentWidth;
 	}
 	if (mask & FV_ENCODING) {
-		lpfv->iEncoding = Encoding_MatchA(lpfv->tchEncoding);
+		int iEncoding = Encoding_MatchA(lpfv->tchEncoding);
+		// should never matches UTF-16 or UTF-32.
+		if (Encoding_IsUnicode(iEncoding)) {
+			iEncoding = CPI_NONE;
+		}
+		lpfv->iEncoding = iEncoding;
 	}
 	lpfv->mask = mask;
 }
@@ -7986,104 +7836,6 @@ static void FoldLevelStack_Push(struct FoldLevelStack *levelStack, int level) {
 	++levelStack->levelCount;
 }
 
-static UINT Style_GetDefaultFoldLevel(int iLexer, int rid, int *ignoreInner) {
-	switch (iLexer) {
-	case SCLEX_NULL:
-	case SCLEX_COFFEESCRIPT: // class, function
-		return (1 << 1) | (1 << 2);
-
-	case SCLEX_ASYMPTOTE: // struct, function
-		*ignoreInner = SCE_ASY_FUNCTION_DEFINITION;
-		break;
-
-	case SCLEX_AWK: // namespace, function
-		*ignoreInner = SCE_AWK_FUNCTION_DEFINITION;
-		break;
-
-	case SCLEX_CPP:
-		switch (rid) {
-		case NP2LEX_CPP: // preprocessor, namespace, class, method
-			return (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3);
-
-		case NP2LEX_SCALA: // class, inner class, method
-			return (1 << 0) | (1 << 1) | (1 << 2);
-		}
-		break;
-
-	case SCLEX_CSHARP: // namespace, class, method
-		*ignoreInner = SCE_CSHARP_FUNCTION_DEFINITION;
-		return (1 << 0) | (1 << 1) | (1 << 2);
-
-	case SCLEX_D: // class, function
-		*ignoreInner = SCE_D_FUNCTION_DEFINITION;
-		break;
-
-	case SCLEX_DART: // class, method
-		*ignoreInner = SCE_DART_FUNCTION_DEFINITION;
-		break;
-
-	case SCLEX_DIFF: // file, diff in file
-		return (1 << 0) | (1 << 2);
-
-	case SCLEX_GO: // struct, function
-		*ignoreInner = SCE_GO_FUNCTION_DEFINITION;
-		break;
-
-	case SCLEX_GROOVY: // class, method
-		*ignoreInner = SCE_GROOVY_FUNCTION_DEFINITION;
-		break;
-
-	case SCLEX_HAXE: // class, method
-		*ignoreInner = SCE_HAXE_FUNCTION_DEFINITION;
-		break;
-
-	case SCLEX_HTML:
-	case SCLEX_JSON:
-	case SCLEX_XML:
-		return (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3);
-
-	case SCLEX_JAVA: // class, inner class, method
-		*ignoreInner = SCE_JAVA_FUNCTION_DEFINITION;
-		return (1 << 0) | (1 << 1) | (1 << 2);
-
-	case SCLEX_JAVASCRIPT: // object, anonymous object, function
-		*ignoreInner = SCE_JS_FUNCTION_DEFINITION;
-		return (1 << 0) | (1 << 1) | (1 << 2);
-
-	case SCLEX_JULIA: // struct, function
-		*ignoreInner = SCE_JULIA_FUNCTION_DEFINITION;
-		break;
-
-	case SCLEX_KOTLIN: // class, inner class, method
-		*ignoreInner = SCE_KOTLIN_FUNCTION_DEFINITION;
-		return (1 << 0) | (1 << 1) | (1 << 2);
-
-	case SCLEX_PROPERTIES: // section
-	case SCLEX_TOML: // table
-		return (1 << 0);
-
-	case SCLEX_PYTHON: // class, function
-		*ignoreInner = SCE_PY_FUNCTION_DEFINITION;
-		return (1 << 1) | (1 << 2);
-
-	case SCLEX_RUBY: // module, class, method
-		return (1 << 0) | (1 << 1) | (1 << 2);
-
-	case SCLEX_RUST: // struct, function
-		*ignoreInner = SCE_RUST_FUNCTION_DEFINITION;
-		break;
-
-	case SCLEX_SWIFT: // class, function
-		*ignoreInner = SCE_SWIFT_FUNCTION_DEFINITION;
-		break;
-
-	case SCLEX_YAML:
-		return (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4);
-	}
-
-	return (1 << 0) | (1 << 1);
-}
-
 static void FoldToggleNode(Sci_Line line, FOLD_ACTION *pAction, BOOL *fToggled) {
 	const BOOL fExpanded = SciCall_GetFoldExpanded(line);
 	FOLD_ACTION action = *pAction;
@@ -8119,6 +7871,16 @@ BOOL EditIsLineContainsStyle(Sci_Line line, int style) {
 	return FALSE;
 }
 
+void FoldExpandRange(Sci_Line lineStart, Sci_Line lineEnd) {
+	for (Sci_Line line = lineStart; line <= lineEnd; line++) {
+		const int level = SciCall_GetFoldLevel(line);
+		if ((level & SC_FOLDLEVELHEADERFLAG) != 0 && !SciCall_GetFoldExpanded(line)) {
+			SciCall_ExpandChildren(line, level);
+			line = SciCall_GetLastChildEx(line, level);
+		}
+	}
+}
+
 void FoldToggleAll(FOLD_ACTION action) {
 	SciCall_ColouriseAll();
 	const Sci_Line lineCount = SciCall_GetLineCount();
@@ -8150,7 +7912,7 @@ void FoldToggleLevel(int lev, FOLD_ACTION action) {
 	BOOL fToggled = FALSE;
 
 	SendMessage(hwndEdit, WM_SETREDRAW, FALSE, 0);
-	if (IsFoldIndentationBased(pLexCurrent->iLexer)) {
+	if (pLexCurrent->lexerAttr & LexerAttr_IndentBasedFolding) {
 		struct FoldLevelStack levelStack = { 0, { 0 }};
 		++lev;
 		while (line < lineCount) {
@@ -8228,7 +7990,7 @@ void FoldToggleCurrentLevel(FOLD_ACTION action) {
 	level &= SC_FOLDLEVELNUMBERMASK;
 	level -= SC_FOLDLEVELBASE;
 
-	if (level != 0 && IsFoldIndentationBased(pLexCurrent->iLexer)) {
+	if (level != 0 && (pLexCurrent->lexerAttr & LexerAttr_IndentBasedFolding)) {
 		level = 0;
 		while (line != 0 && level < MAX_EDIT_TOGGLE_FOLD_LEVEL - 1) {
 			line = SciCall_GetFoldParent(line);
@@ -8244,15 +8006,15 @@ void FoldToggleCurrentLevel(FOLD_ACTION action) {
 
 void FoldToggleDefault(FOLD_ACTION action) {
 	SciCall_ColouriseAll();
-	int ignoreInner = 0;
-	const UINT levelMask = Style_GetDefaultFoldLevel(pLexCurrent->iLexer, pLexCurrent->rid, &ignoreInner);
+	const int ignoreInner = pLexCurrent->defaultFoldIgnoreInner;
+	const UINT levelMask = pLexCurrent->defaultFoldLevelMask;
 	const int maxLevel = np2_bsr(levelMask);
 	const Sci_Line lineCount = SciCall_GetLineCount();
 	Sci_Line line = 0;
 	BOOL fToggled = FALSE;
 
 	SendMessage(hwndEdit, WM_SETREDRAW, FALSE, 0);
-	if (IsFoldIndentationBased(pLexCurrent->iLexer)) {
+	if (pLexCurrent->lexerAttr & LexerAttr_IndentBasedFolding) {
 		struct FoldLevelStack levelStack = { 0, { 0 }};
 		while (line < lineCount) {
 			int level = SciCall_GetFoldLevel(line);

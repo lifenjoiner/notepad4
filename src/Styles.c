@@ -65,8 +65,8 @@ extern EDITLEXER lexAPDL;
 extern EDITLEXER lexASM;
 extern EDITLEXER lexAsymptote;
 extern EDITLEXER lexAutoHotkey;
-extern EDITLEXER lexAU3;
-extern EDITLEXER lexAVS;
+extern EDITLEXER lexAutoIt3;
+extern EDITLEXER lexAviSynth;
 extern EDITLEXER lexAwk;
 
 extern EDITLEXER lexBatch;
@@ -75,11 +75,11 @@ extern EDITLEXER lexBlockdiag;
 extern EDITLEXER lexCIL;
 extern EDITLEXER lexCMake;
 extern EDITLEXER lexCoffeeScript;
-extern EDITLEXER lexCONF;
+extern EDITLEXER lexConfig;
 
-extern EDITLEXER lexD;
+extern EDITLEXER lexDLang;
 extern EDITLEXER lexDart;
-extern EDITLEXER lexDIFF;
+extern EDITLEXER lexDiff;
 
 extern EDITLEXER lexFSharp;
 extern EDITLEXER lexFortran;
@@ -93,9 +93,9 @@ extern EDITLEXER lexGroovy;
 extern EDITLEXER lexHaxe;
 
 extern EDITLEXER lexINI;
-extern EDITLEXER lexINNO;
+extern EDITLEXER lexInnoSetup;
 
-extern EDITLEXER lexJam;
+extern EDITLEXER lexJamfile;
 extern EDITLEXER lexJulia;
 
 extern EDITLEXER lexKotlin;
@@ -105,7 +105,7 @@ extern EDITLEXER lexLisp;
 extern EDITLEXER lexLLVM;
 extern EDITLEXER lexLua;
 
-extern EDITLEXER lexMake;
+extern EDITLEXER lexMakefile;
 extern EDITLEXER lexMarkdown;
 extern EDITLEXER lexMatlab;
 
@@ -113,11 +113,11 @@ extern EDITLEXER lexNsis;
 
 extern EDITLEXER lexPascal;
 extern EDITLEXER lexPerl;
-extern EDITLEXER lexPS1;
+extern EDITLEXER lexPowerShell;
 
-extern EDITLEXER lexR;
+extern EDITLEXER lexRLang;
 extern EDITLEXER lexRebol;
-extern EDITLEXER lexRC;
+extern EDITLEXER lexResourceScript;
 extern EDITLEXER lexRust;
 
 extern EDITLEXER lexScala;
@@ -129,11 +129,11 @@ extern EDITLEXER lexTexinfo;
 extern EDITLEXER lexTOML;
 extern EDITLEXER lexTypeScript;
 
-extern EDITLEXER lexVBS;
+extern EDITLEXER lexVBScript;
 extern EDITLEXER lexVerilog;
 extern EDITLEXER lexVHDL;
 extern EDITLEXER lexVim;
-extern EDITLEXER lexVB;
+extern EDITLEXER lexVisualBasic;
 
 extern EDITLEXER lexWASM;
 
@@ -168,8 +168,8 @@ static PEDITLEXER pLexArray[] = {
 	&lexASM,
 	&lexAsymptote,
 	&lexAutoHotkey,
-	&lexAU3,
-	&lexAVS,
+	&lexAutoIt3,
+	&lexAviSynth,
 	&lexAwk,
 
 	&lexBatch,
@@ -178,11 +178,11 @@ static PEDITLEXER pLexArray[] = {
 	&lexCIL,
 	&lexCMake,
 	&lexCoffeeScript,
-	&lexCONF,
+	&lexConfig,
 
-	&lexD,
+	&lexDLang,
 	&lexDart,
-	&lexDIFF,
+	&lexDiff,
 
 	&lexFSharp,
 	&lexFortran,
@@ -196,9 +196,9 @@ static PEDITLEXER pLexArray[] = {
 	&lexHaxe,
 
 	&lexINI,
-	&lexINNO,
+	&lexInnoSetup,
 
-	&lexJam,
+	&lexJamfile,
 	&lexJulia,
 
 	&lexKotlin,
@@ -208,7 +208,7 @@ static PEDITLEXER pLexArray[] = {
 	&lexLLVM,
 	&lexLua,
 
-	&lexMake,
+	&lexMakefile,
 	&lexMarkdown,
 	&lexMatlab,
 
@@ -216,11 +216,11 @@ static PEDITLEXER pLexArray[] = {
 
 	&lexPascal,
 	&lexPerl,
-	&lexPS1,
+	&lexPowerShell,
 
-	&lexR,
+	&lexRLang,
 	&lexRebol,
-	&lexRC,
+	&lexResourceScript,
 	&lexRust,
 
 	&lexScala,
@@ -232,11 +232,11 @@ static PEDITLEXER pLexArray[] = {
 	&lexTOML,
 	&lexTypeScript,
 
-	&lexVBS,
+	&lexVBScript,
 	&lexVerilog,
 	&lexVHDL,
 	&lexVim,
-	&lexVB,
+	&lexVisualBasic,
 
 	&lexWASM,
 
@@ -271,7 +271,6 @@ static WCHAR favoriteSchemesConfig[MAX_FAVORITE_SCHEMES_CONFIG_SIZE];
 static PEDITLEXER pLexGlobal = &lexGlobal;
 PEDITLEXER pLexCurrent = &lexTextFile;
 int np2LexLangIndex = 0;
-uint8_t currentLexKeywordAttr[NUMKEYWORD] = {0};
 
 #define STYLESMODIFIED_NONE			0
 #define STYLESMODIFIED_SOME_STYLE	1
@@ -311,8 +310,6 @@ static BOOL iCustomColorLoaded = FALSE;
 
 BOOL	bUse2ndGlobalStyle;
 int		np2StyleTheme;
-BOOL	bCurrentLexerHasLineComment;
-BOOL	bCurrentLexerHasBlockComment;
 static UINT fStylesModified = STYLESMODIFIED_NONE;
 static BOOL fWarnedNoIniFile = FALSE;
 static int	defaultBaseFontSize = 11*SC_FONT_SIZE_MULTIPLIER; // 11 pt
@@ -627,49 +624,51 @@ static inline void FindDarkThemeFile(void) {
 
 void Style_LoadTabSettings(PEDITLEXER pLex) {
 	LPCWSTR lpSection = pLex->pszName;
+	const UINT lexerAttr = pLex->lexerAttr;
 	int iValue = IniGetInt(lpSection, L"TabWidth", pLex->defaultTabWidth);
 	tabSettings.schemeTabWidth = clamp_i(iValue, TAB_WIDTH_MIN, TAB_WIDTH_MAX);
 	iValue = IniGetInt(lpSection, L"IndentWidth", pLex->defaultIndentWidth);
 	tabSettings.schemeIndentWidth = clamp_i(iValue, INDENT_WIDTH_MIN, INDENT_WIDTH_MAX);
-	tabSettings.schemeTabsAsSpaces = IniGetInt(lpSection, L"TabsAsSpaces", pLex->defaultTabsAsSpaces);
-	tabSettings.schemeUseGlobalTabSettings = IniGetInt(lpSection, L"UseGlobalTabSettings", pLex->defaultUseGlobalTabSettings);
+	tabSettings.schemeTabsAsSpaces = IniGetInt(lpSection, L"TabsAsSpaces", LexerAttr_GetTabAsSpaces(lexerAttr));
+	tabSettings.schemeUseGlobalTabSettings = IniGetInt(lpSection, L"UseGlobalTabSettings", LexerAttr_GetGlobalTabSettings(lexerAttr));
 }
 
 void Style_SaveTabSettings(PEDITLEXER pLex) {
 	LPCWSTR lpSection = pLex->pszName;
+	const UINT lexerAttr = pLex->lexerAttr;
 	IniSetIntEx(lpSection, L"TabWidth", tabSettings.schemeTabWidth, pLex->defaultTabWidth);
 	IniSetIntEx(lpSection, L"IndentWidth", tabSettings.schemeIndentWidth, pLex->defaultIndentWidth);
-	IniSetBoolEx(lpSection, L"TabsAsSpaces", tabSettings.schemeTabsAsSpaces, pLex->defaultTabsAsSpaces);
-	IniSetBoolEx(lpSection, L"UseGlobalTabSettings", tabSettings.schemeUseGlobalTabSettings, pLex->defaultUseGlobalTabSettings);
+	IniSetBoolEx(lpSection, L"TabsAsSpaces", tabSettings.schemeTabsAsSpaces, LexerAttr_GetTabAsSpaces(lexerAttr));
+	IniSetBoolEx(lpSection, L"UseGlobalTabSettings", tabSettings.schemeUseGlobalTabSettings, LexerAttr_GetGlobalTabSettings(lexerAttr));
 }
 
 static inline void SaveLexTabSettings(IniSectionOnSave *pIniSection, PEDITLEXER pLex) {
+	const UINT lexerAttr = pLex->lexerAttr;
 	IniSectionSetIntEx(pIniSection, L"TabWidth", tabSettings.schemeTabWidth, pLex->defaultTabWidth);
 	IniSectionSetIntEx(pIniSection, L"IndentWidth", tabSettings.schemeIndentWidth, pLex->defaultIndentWidth);
-	IniSectionSetBoolEx(pIniSection, L"TabsAsSpaces", tabSettings.schemeTabsAsSpaces, pLex->defaultTabsAsSpaces);
-	IniSectionSetBoolEx(pIniSection, L"UseGlobalTabSettings", tabSettings.schemeUseGlobalTabSettings, pLex->defaultUseGlobalTabSettings);
+	IniSectionSetBoolEx(pIniSection, L"TabsAsSpaces", tabSettings.schemeTabsAsSpaces, LexerAttr_GetTabAsSpaces(lexerAttr));
+	IniSectionSetBoolEx(pIniSection, L"UseGlobalTabSettings", tabSettings.schemeUseGlobalTabSettings, LexerAttr_GetGlobalTabSettings(lexerAttr));
 }
 
 static void Style_LoadOneEx(PEDITLEXER pLex, IniSection *pIniSection, WCHAR *pIniSectionBuf, int cchIniSection) {
+	pLex->iStyleTheme = (uint8_t)np2StyleTheme;
 	LPCWSTR themePath = GetStyleThemeFilePath();
 	GetPrivateProfileSection(pLex->pszName, pIniSectionBuf, cchIniSection, themePath);
 
 	const UINT iStyleCount = pLex->iStyleCount;
-	LPWSTR szStyleBuf = pLex->szStyleBuf;
-	if (szStyleBuf == NULL) {
-		szStyleBuf = (LPWSTR)NP2HeapAlloc(EDITSTYLE_BufferSize(iStyleCount));
-		pLex->szStyleBuf = szStyleBuf;
+	LPWSTR szValue = pLex->szStyleBuf;
+	if (szValue == NULL) {
+		szValue = (LPWSTR)NP2HeapAlloc(EDITSTYLE_BufferSize(iStyleCount));
+		pLex->szStyleBuf = szValue;
 	}
 	if (!IniSectionParse(pIniSection, pIniSectionBuf)) {
-		for (UINT i = 0; i < iStyleCount; i++) {
-			LPWSTR szValue = szStyleBuf + (i * MAX_EDITSTYLE_VALUE_SIZE);
+		for (UINT i = 0; i < iStyleCount; szValue += MAX_EDITSTYLE_VALUE_SIZE, i++) {
 			pLex->Styles[i].szValue = szValue;
 			lstrcpy(szValue, pLex->Styles[i].pszDefault);
 		}
 	} else {
-		pLex->bUseDefaultCodeStyle = IniSectionGetBool(pIniSection, L"UseDefaultCodeStyle", pLex->bUseDefaultCodeStyle);
-		for (UINT i = 0; i < iStyleCount; i++) {
-			LPWSTR szValue = szStyleBuf + (i * MAX_EDITSTYLE_VALUE_SIZE);
+		pLex->bUseDefaultCodeStyle = (uint8_t)IniSectionGetBool(pIniSection, L"UseDefaultCodeStyle", pLex->bUseDefaultCodeStyle);
+		for (UINT i = 0; i < iStyleCount; szValue += MAX_EDITSTYLE_VALUE_SIZE, i++) {
 			pLex->Styles[i].szValue = szValue;
 			LPCWSTR value = IniSectionGetValueImpl(pIniSection, pLex->Styles[i].pszName, pLex->Styles[i].iNameLen);
 			if (value != NULL) {
@@ -679,8 +678,6 @@ static void Style_LoadOneEx(PEDITLEXER pLex, IniSection *pIniSection, WCHAR *pIn
 			}
 		}
 	}
-
-	pLex->iStyleTheme = np2StyleTheme;
 }
 
 void Style_SetFavoriteSchemes(void) {
@@ -1021,7 +1018,7 @@ BOOL Style_Import(HWND hwnd) {
 				if (!IniSectionParse(pIniSection, pIniSectionBuf)) {
 					continue;
 				}
-				pLex->bUseDefaultCodeStyle = IniSectionGetBool(pIniSection, L"UseDefaultCodeStyle", pLex->bUseDefaultCodeStyle);
+				pLex->bUseDefaultCodeStyle = (uint8_t)IniSectionGetBool(pIniSection, L"UseDefaultCodeStyle", pLex->bUseDefaultCodeStyle);
 				const UINT iStyleCount = pLex->iStyleCount;
 				for (UINT i = 0; i < iStyleCount; i++) {
 					LPCWSTR value = IniSectionGetValueImpl(pIniSection, pLex->Styles[i].pszName, pLex->Styles[i].iNameLen);
@@ -1118,7 +1115,7 @@ static void Style_ResetAll(BOOL resetColor) {
 			lstrcpy(pLex->szExtensions, pLex->pszDefExt);
 		}
 		pLex->bStyleChanged = TRUE;
-		pLex->bUseDefaultCodeStyle = (pLex->rid == NP2LEX_TEXTFILE)? 0 : 1;
+		pLex->bUseDefaultCodeStyle = (pLex->rid == NP2LEX_TEXTFILE);
 		if (resetColor) {
 			const UINT iStyleCount = pLex->iStyleCount;
 			for (UINT i = 0; i < iStyleCount; i++) {
@@ -1230,249 +1227,27 @@ void Style_UpdateCaret(void) {
 	SciCall_SetCaretPeriod(iValue);
 }
 
-void Style_UpdateLexerKeywordAttr(LPCEDITLEXER pLexNew) {
-	ZeroMemory(currentLexKeywordAttr, sizeof(currentLexKeywordAttr));
-	uint8_t *attr = currentLexKeywordAttr;
-
-	// Code Snippet
-	attr[KEYWORDSET_MAX] = KeywordAttr_NoLexer;
-
-	switch (pLexNew->rid) {
-	case NP2LEX_CPP:
-		attr[2] = KeywordAttr_NoAutoComp;	// Preprocessor
-		attr[3] = KeywordAttr_NoAutoComp;	// Directive
-		attr[11] = KeywordAttr_NoAutoComp;	// Assembler Intruction
-		attr[12] = KeywordAttr_NoAutoComp;	// Assembler Register
-		attr[13] = KeywordAttr_NoLexer;		// C Function
-		attr[14] = KeywordAttr_NoLexer;		// C++ Function
-		break;
-	case NP2LEX_HTML:
-		attr[1] = KeywordAttr_NoAutoComp;	// JavaScript
-		attr[2] = KeywordAttr_MakeLower | KeywordAttr_NoAutoComp;	// VBScript
-		attr[3] = KeywordAttr_NoAutoComp;	// Python
-		attr[4] = KeywordAttr_NoAutoComp;	// PHP
-		attr[8] = KeywordAttr_NoLexer;		// Value
-		break;
-	case NP2LEX_RC:
-		attr[2] = KeywordAttr_NoAutoComp;	// Preprocessor
-		break;
-	case NP2LEX_VB:
-	case NP2LEX_VBS:
-		attr[0] = KeywordAttr_MakeLower;
-		attr[1] = KeywordAttr_MakeLower;
-		attr[2] = KeywordAttr_MakeLower;
-		attr[3] = KeywordAttr_MakeLower | KeywordAttr_NoAutoComp; // Preprocessor
-		attr[4] = KeywordAttr_MakeLower;
-		attr[5] = KeywordAttr_MakeLower;
-		attr[6] = KeywordAttr_MakeLower;
-		break;
-	case NP2LEX_PHP:
-		attr[9] = KeywordAttr_NoLexer;		// Function
-		attr[10] = KeywordAttr_NoLexer;		// Field
-		attr[11] = KeywordAttr_NoLexer;		// Method
-		attr[12] = KeywordAttr_NoLexer;		// Tag
-		attr[13] = KeywordAttr_NoLexer;		// String Constant
-		break;
-	case NP2LEX_XML:
-		attr[6] = KeywordAttr_NoLexer;		// Attribute
-		attr[7] = KeywordAttr_NoLexer;		// Value
-		break;
-//++Autogenerated -- start of section automatically generated
-	case NP2LEX_ACTIONSCRIPT:
-		attr[8] = KeywordAttr_NoLexer;		// function
-		break;
-	case NP2LEX_AHK:
-		attr[0] = KeywordAttr_MakeLower;	// keywords
-		attr[1] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// directives
-		attr[2] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// compiler directives
-		attr[3] = KeywordAttr_MakeLower;	// objects
-		attr[4] = KeywordAttr_MakeLower;	// built-in variables
-		attr[5] = KeywordAttr_MakeLower;	// keys
-		attr[6] = KeywordAttr_MakeLower;	// functions
-		attr[7] = KeywordAttr_NoLexer;		// misc
-		break;
-	case NP2LEX_ASYMPTOTE:
-		attr[4] = KeywordAttr_NoLexer;		// functions
-		break;
-	case NP2LEX_AVS:
-		attr[1] = KeywordAttr_MakeLower;	// internal functions
-		attr[2] = KeywordAttr_MakeLower;	// internal filters
-		attr[3] = KeywordAttr_MakeLower;	// external filters
-		attr[4] = KeywordAttr_MakeLower;	// properties
-		attr[5] = KeywordAttr_NoLexer;		// options
-		break;
-	case NP2LEX_AWK:
-		attr[3] = KeywordAttr_NoLexer;		// library function
-		attr[4] = KeywordAttr_NoLexer;		// misc
-		break;
-	case NP2LEX_BATCH:
-		attr[2] = KeywordAttr_NoLexer;		// system commands
-		attr[3] = KeywordAttr_NoLexer;		// upper case keywords / commands
-		attr[4] = KeywordAttr_NoLexer;		// environment variables
-		attr[5] = KeywordAttr_NoLexer;		// command options
-		break;
-	case NP2LEX_BLOCKDIAG:
-		attr[1] = KeywordAttr_NoLexer;		// labels
-		attr[2] = KeywordAttr_NoLexer;		// attributes
-		attr[3] = KeywordAttr_NoLexer;		// node shapes
-		attr[4] = KeywordAttr_NoLexer;		// color names
-		attr[5] = KeywordAttr_NoLexer;		// values
-		break;
-	case NP2LEX_CMAKE:
-		attr[6] = KeywordAttr_NoLexer;		// long properties
-		attr[7] = KeywordAttr_NoLexer;		// long variables
-		break;
-	case NP2LEX_CSHARP:
-		attr[2] = KeywordAttr_NoAutoComp;	// vala types
-		attr[3] = KeywordAttr_NoAutoComp;	// preprocessor
-		attr[10] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// comment tag
-		break;
-	case NP2LEX_CSS:
-		attr[1] = KeywordAttr_NoLexer;		// at rules
-		attr[4] = KeywordAttr_NoLexer;		// color names
-		attr[5] = KeywordAttr_NoLexer;		// values
-		break;
-	case NP2LEX_D:
-		attr[2] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// preprocessor
-		attr[3] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// attribute
-		attr[11] = KeywordAttr_NoAutoComp;	// asm keywords
-		attr[12] = KeywordAttr_NoAutoComp;	// asm register
-		attr[13] = KeywordAttr_NoAutoComp;	// asm instruction
-		attr[14] = KeywordAttr_NoLexer;		// function
-		break;
-	case NP2LEX_DART:
-		attr[4] = KeywordAttr_NoLexer;		// metadata
-		attr[5] = KeywordAttr_NoLexer;		// function
-		break;
-	case NP2LEX_GN:
-		attr[3] = KeywordAttr_NoLexer;		// target variables
-		attr[4] = KeywordAttr_NoLexer;		// placeholders
-		break;
-	case NP2LEX_GO:
-		attr[7] = KeywordAttr_NoLexer;		// variables
-		attr[8] = KeywordAttr_NoLexer;		// function
-		attr[9] = KeywordAttr_NoLexer;		// package
-		break;
-	case NP2LEX_GRADLE:
-		attr[7] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// annotation
-		attr[8] = KeywordAttr_NoLexer;		// function
-		attr[9] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// GroovyDoc
-		break;
-	case NP2LEX_GRAPHVIZ:
-		attr[1] = KeywordAttr_NoLexer;		// labels
-		attr[2] = KeywordAttr_NoLexer;		// attributes
-		attr[3] = KeywordAttr_NoLexer;		// node shapes
-		attr[4] = KeywordAttr_NoLexer;		// color names
-		attr[5] = KeywordAttr_NoLexer;		// values
-		break;
-	case NP2LEX_GROOVY:
-		attr[7] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// annotation
-		attr[9] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// GroovyDoc
-		break;
-	case NP2LEX_HAXE:
-		attr[1] = KeywordAttr_NoAutoComp;	// preprocessor
-		attr[8] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// comment
-		break;
-	case NP2LEX_INNO:
-		attr[0] = KeywordAttr_NoLexer;		// section
-		attr[1] = KeywordAttr_NoLexer;		// parameters
-		attr[2] = KeywordAttr_NoLexer;		// constants
-		attr[4] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// directives
-		attr[6] = KeywordAttr_MakeLower;	// predefined variables
-		attr[7] = KeywordAttr_NoLexer;		// functions
-		attr[8] = KeywordAttr_MakeLower;	// pascal keywords
-		attr[9] = KeywordAttr_MakeLower;	// pascal types
-		attr[10] = KeywordAttr_NoLexer;		// pascal functions
-		attr[11] = KeywordAttr_MakeLower;	// pascal constants
-		attr[12] = KeywordAttr_NoLexer;		// misc
-		break;
-	case NP2LEX_JAM:
-		attr[5] = KeywordAttr_NoLexer;		// rule
-		attr[6] = KeywordAttr_NoLexer;		// feature
-		break;
-	case NP2LEX_JAVA:
-		attr[7] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// annotation
-		attr[9] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// Javadoc
-		break;
-	case NP2LEX_JAVASCRIPT:
-		attr[8] = KeywordAttr_NoLexer;		// function
-		attr[9] = KeywordAttr_NoLexer;		// properties
-		attr[10] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// JSDoc
-		break;
-	case NP2LEX_JULIA:
-		attr[1] = KeywordAttr_NoAutoComp;	// code fold
-		attr[5] = KeywordAttr_NoLexer;		// module
-		attr[6] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// macro
-		attr[7] = KeywordAttr_NoLexer;		// function
-		break;
-	case NP2LEX_KOTLIN:
-		attr[4] = KeywordAttr_NoLexer;		// annotation
-		attr[5] = KeywordAttr_NoLexer;		// function
-		attr[6] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// KDoc
-		break;
-	case NP2LEX_LUA:
-		attr[3] = KeywordAttr_NoLexer;		// standard library
-		break;
-	case NP2LEX_MARKDOWN:
-		attr[0] = KeywordAttr_NoAutoComp;	// html block tag
-		break;
-	case NP2LEX_NSIS:
-		attr[0] = KeywordAttr_MakeLower;	// keywords
-		attr[1] = KeywordAttr_NoLexer;		// preprocessor
-		attr[2] = KeywordAttr_NoLexer;		// instruction
-		attr[3] = KeywordAttr_NoLexer;		// attribute
-		attr[4] = KeywordAttr_NoLexer;		// function
-		attr[5] = KeywordAttr_NoLexer;		// predefined variables
-		break;
-	case NP2LEX_PYTHON:
-		attr[7] = KeywordAttr_NoLexer;		// decorator
-		attr[8] = KeywordAttr_NoLexer;		// module
-		attr[9] = KeywordAttr_NoLexer;		// function
-		attr[10] = KeywordAttr_NoLexer;		// field
-		attr[11] = KeywordAttr_NoLexer;		// misc
-		attr[12] = KeywordAttr_NoLexer;		// comment tag
-		break;
-	case NP2LEX_R:
-		attr[1] = KeywordAttr_NoLexer;		// package
-		break;
-	case NP2LEX_REBOL:
-		attr[2] = KeywordAttr_NoLexer;		// datatype
-		attr[3] = KeywordAttr_NoLexer;		// function
-		break;
-	case NP2LEX_RUBY:
-		attr[1] = KeywordAttr_NoAutoComp;	// code fold
-		attr[2] = KeywordAttr_NoAutoComp;	// re
-		attr[3] = KeywordAttr_NoLexer;		// pre-defined variables
-		break;
-	case NP2LEX_RUST:
-		attr[1] = KeywordAttr_NoAutoComp;	// reserved keywords
-		attr[8] = KeywordAttr_NoLexer;		// attribute
-		attr[9] = KeywordAttr_NoLexer;		// macro
-		attr[10] = KeywordAttr_NoLexer;		// module
-		attr[11] = KeywordAttr_NoLexer;		// function
-		break;
-	case NP2LEX_SQL:
-		attr[3] = KeywordAttr_NoLexer;		// upper case keywords
-		attr[4] = KeywordAttr_NoLexer;		// upper case data types
-		attr[5] = KeywordAttr_NoLexer;		// upper case functions
-		break;
-	case NP2LEX_SWIFT:
-		attr[7] = KeywordAttr_NoLexer;		// function
-		break;
-	case NP2LEX_TYPESCRIPT:
-		attr[10] = KeywordAttr_NoLexer | KeywordAttr_NoAutoComp;	// TSDoc
-		break;
-	case NP2LEX_WASM:
-		attr[3] = KeywordAttr_NoLexer;		// full instruction
-		break;
-//--Autogenerated -- end of section automatically generated
-	default:
-		break;
-	}
-}
-
 static inline void Style_SetDefaultStyle(int index) {
 	Style_SetStyles(pLexGlobal->Styles[index].iStyle, pLexGlobal->Styles[index].szValue);
+}
+
+static void Style_SetAllStyle(PEDITLEXER pLex, int offset) {
+	if (!IsStyleLoaded(pLex)) {
+		Style_LoadOne(pLex);
+	}
+
+	const int high = offset << 8;
+	const UINT iStyleCount = pLex->iStyleCount;
+	// first style is the default style.
+	for (UINT i = 1; i < iStyleCount; i++) {
+		const UINT iStyle = pLex->Styles[i].iStyle;
+		LPCWSTR szValue = pLex->Styles[i].szValue;
+		const int first = (iStyle & 0xff) + offset;
+		Style_SetStyles(first, szValue);
+		if (iStyle > 0xff) {
+			SciCall_CopyStyles(first | high, iStyle >> 8);
+		}
+	}
 }
 
 // parse a style attribute separated by ';'
@@ -1600,8 +1375,7 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) {
 	}
 
 	// Lexer
-	const int iLexer = pLexNew->iLexer;
-	int rid = pLexNew->rid;
+	const int rid = pLexNew->rid;
 
 	if (bLexerChanged) {
 		if ((fvCurFile.mask & FV_MaskHasFileTabSettings) != FV_MaskHasFileTabSettings) {
@@ -1614,21 +1388,7 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) {
 		if (SciCall_GetLength() == 0 && !(SciCall_CanUndo() || SciCall_CanRedo())) {
 			EditApplyDefaultEncoding(pLexNew);
 		}
-		SciCall_SetLexer(iLexer);
-
-		if (iLexer == SCLEX_CPP || iLexer == SCLEX_MATLAB) {
-			if (iLexer == NP2LEX_MATLAB) {
-				if (np2LexLangIndex == IDM_LEXER_OCTAVE) {
-					rid = NP2LEX_OCTAVE;
-				} else if (np2LexLangIndex == IDM_LEXER_SCILAB) {
-					rid = NP2LEX_SCILAB;
-				}
-			}
-
-			char msg[10];
-			_itoa(rid - NP2LEX_TEXTFILE, msg, 10);
-			SciCall_SetProperty("lexer.lang", msg);
-		}
+		SciCall_SetLexer(pLexNew->iLexer);
 
 		// Code folding
 		SciCall_SetProperty("fold", "1");
@@ -1636,54 +1396,65 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) {
 		//SciCall_SetProperty("fold.preprocessor", "1");
 		//SciCall_SetProperty("fold.compact", "0");
 
+		int dialect = 0;
 		switch (rid) {
-		case NP2LEX_HTML:
-		case NP2LEX_XML:
-			//SciCall_SetProperty("fold.html", "1");
-			//SciCall_SetProperty("fold.hypertext.comment", "1");
-			//SciCall_SetProperty("fold.hypertext.heredoc", "1");
-			break;
+		//case NP2LEX_HTML:
+		//case NP2LEX_XML:
+		//	//SciCall_SetProperty("fold.html", "1");
+		//	//SciCall_SetProperty("fold.hypertext.comment", "1");
+		//	//SciCall_SetProperty("fold.hypertext.heredoc", "1");
+		//	break;
 
 		case NP2LEX_CSS:
-			SciCall_SetProperty("lexer.css.scss", ((np2LexLangIndex == IDM_LEXER_SCSS)? "1" : "0"));
-			SciCall_SetProperty("lexer.css.less", ((np2LexLangIndex == IDM_LEXER_LESS)? "1" : "0"));
-			SciCall_SetProperty("lexer.css.hss", ((np2LexLangIndex == IDM_LEXER_HSS)? "1" : "0"));
+			dialect = np2LexLangIndex - IDM_LEXER_CSS;
 			break;
 
 		case NP2LEX_BASH:
-			SciCall_SetProperty("lexer.lang", ((np2LexLangIndex == IDM_LEXER_CSHELL)? "1" : "0"));
+			dialect = np2LexLangIndex == IDM_LEXER_CSHELL;
 			break;
 
 		case NP2LEX_JAVASCRIPT:
 		case NP2LEX_TYPESCRIPT: {
 			LPCWSTR lpszExt = PathFindExtension(szCurFile);
-			const char *jsx = (StrNotEmpty(lpszExt) && (StrCaseEqual(lpszExt, L".jsx") || StrCaseEqual(lpszExt, L".tsx")))? "1" : "0";
-			SciCall_SetProperty("lexer.lang", jsx);
+			if (StrNotEmpty(lpszExt) && (StrCaseEqual(lpszExt, L".jsx") || StrCaseEqual(lpszExt, L".tsx"))) {
+				dialect = 1;
+			}
 		} break;
 
-		case NP2LEX_MARKDOWN: {
-			const char *lang = (np2LexLangIndex == IDM_LEXER_MARKDOWN_GITLAB) ? "1"
-				: ((np2LexLangIndex == IDM_LEXER_MARKDOWN_PANDOC) ? "2" : "0");
-			SciCall_SetProperty("lexer.lang", lang);
+		case NP2LEX_MARKDOWN:
+			dialect = np2LexLangIndex - IDM_LEXER_MARKDOWN_GITHUB;
 			break;
-		} break;
+
+		case NP2LEX_MATLAB:
+			dialect = np2LexLangIndex - IDM_LEXER_MATLAB;
+			break;
 
 		case NP2LEX_APDL:
 		case NP2LEX_ABAQUS:
-			SciCall_SetProperty("lexer.lang", (rid == NP2LEX_APDL) ? "1" : "0");
+			dialect = rid == NP2LEX_APDL;
+			break;
+
+		// see LexCPP.cxx
+		case NP2LEX_RESOURCESCRIPT:
+			dialect = 1;
+			break;
+		case NP2LEX_SCALA:
+			dialect = 3;
 			break;
 		}
+		if (dialect > 0) {
+			char lang[2] = "";
+			lang[0] = (char)(dialect + '0');
+			SciCall_SetProperty("lexer.lang", lang);
+		}
 
-		Style_UpdateLexerKeywords(pLexNew);
-		Style_UpdateLexerKeywordAttr(pLexNew);
 		// Add keyword lists
-		for (int i = 0; i < KEYWORDSET_MAX; i++) {
+		uint64_t attr = pLexNew->keywordAttr;
+		for (int i = 0; i < KEYWORDSET_MAX; attr >>= 4, i++) {
 			const char *pKeywords = pLexNew->pKeyWords->pszKeyWords[i];
-			if (StrNotEmptyA(pKeywords)) {
-				const uint8_t attr = currentLexKeywordAttr[i];
-				if (!(attr & KeywordAttr_NoLexer)) {
-					SciCall_SetKeywords(i | (attr & KeywordAttr_MakeLower), pKeywords);
-				}
+			if (!(attr & KeywordAttr_NoLexer) && StrNotEmptyA(pKeywords)) {
+				const int attribute = attr & (KeywordAttr_NoLexer - 1);
+				SciCall_SetKeywords(i | (attribute << 8), pKeywords);
 			}
 		}
 
@@ -1938,21 +1709,10 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) {
 	// other lexer styles
 	if (rid != NP2LEX_ANSI) {
 		Style_SetDefaultStyle(GlobalStyleIndex_ControlCharacter);
+		Style_SetAllStyle(pLexNew, 0);
 
-		const UINT iStyleCount = pLexNew->iStyleCount;
-		// first style is the default style.
-		for (UINT i = 1; i < iStyleCount; i++) {
-			const UINT iStyle = pLexNew->Styles[i].iStyle;
-			szValue = pLexNew->Styles[i].szValue;
-			const int first = iStyle & 0xff;
-			Style_SetStyles(first, szValue);
-			if (iStyle > 0xFF) {
-				SciCall_CopyStyles(first, iStyle >> 8);
-			}
-		}
-
-		switch (iLexer) {
-		case SCLEX_PERL:
+		switch (rid) {
+		case NP2LEX_PERL:
 #if defined(_WIN64)
 			SciCall_CopyStyles(SCE_PL_SCALAR, MULTI_STYLE8(SCE_PL_REGEX_VAR, SCE_PL_REGSUBST_VAR, SCE_PL_BACKTICKS_VAR, SCE_PL_HERE_QQ_VAR,
 				SCE_PL_HERE_QX_VAR, SCE_PL_STRING_QQ_VAR, SCE_PL_STRING_QX_VAR, SCE_PL_STRING_QR_VAR));
@@ -1962,15 +1722,21 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) {
 #endif
 			break;
 
-		case SCLEX_REBOL:
+		case NP2LEX_REBOL:
 			SciCall_CopyStyles(STYLE_LINK, MULTI_STYLE(SCE_REBOL_URL, SCE_REBOL_EMAIL, 0, 0));
 			break;
 
-		case SCLEX_MARKDOWN:
+		case NP2LEX_MARKDOWN:
+		case NP2LEX_PHP:
 			if (!IsStyleLoaded(&lexHTML)) {
 				Style_LoadOne(&lexHTML);
 			}
-			SciCall_CopyStyles(STYLE_LINK, MULTI_STYLE(SCE_MARKDOWN_PLAIN_LINK, SCE_MARKDOWN_PAREN_LINK, SCE_MARKDOWN_ANGLE_LINK, 0));
+			if (rid == NP2LEX_MARKDOWN) {
+				SciCall_CopyStyles(STYLE_LINK, MULTI_STYLE(SCE_MARKDOWN_PLAIN_LINK, SCE_MARKDOWN_PAREN_LINK, SCE_MARKDOWN_ANGLE_LINK, 0));
+			} else {
+				Style_SetAllStyle(&lexJavaScript, SCE_PHP_LABEL + 1);
+				Style_SetAllStyle(&lexCSS, SCE_PHP_LABEL + SCE_JS_LABEL + 2);
+			}
 			for (UINT i = 1; i < lexHTML.iStyleCount; i++) {
 				const UINT iStyle = lexHTML.Styles[i].iStyle;
 				szValue = lexHTML.Styles[i].szValue;
@@ -2014,8 +1780,7 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) {
 
 		// Save current lexer
 		pLexCurrent = pLexNew;
-		bCurrentLexerHasLineComment = DidLexerHasLineComment(iLexer);
-		bCurrentLexerHasBlockComment = DidLexerHasBlockComment(iLexer);
+		InitAutoCompletionCache(pLexNew);
 		UpdateStatusBarCache(STATUS_LEXER);
 		UpdateStatusbar();
 	}
@@ -2120,7 +1885,6 @@ PEDITLEXER Style_SniffShebang(char *pchText) {
 				return &lexLua;
 			}
 			if (StrStartsWith(name, "php")) {
-				//np2LexLangIndex = IDM_LEXER_PHP;
 				return &lexPHP;
 			}
 			if (StrStartsWith(name, "tcl")) {
@@ -2194,9 +1958,9 @@ int Style_GetDocTypeLanguage(void) {
 		}
 	}
 
-	if (strstr(tchText, "<?php")) {
-		return IDM_LEXER_PHP;
-	}
+	//if (strstr(tchText, "<?php")) {
+	//	return IDM_LEXER_PHP;
+	//}
 	// check Language
 	if ((p = strstr(tchText, "<%@")) != NULL && (p = StrStrIA(p + CSTRLEN("<%@"), "Language")) != NULL) {
 		p += CSTRLEN("Language") + 1;
@@ -2500,7 +2264,7 @@ PEDITLEXER Style_AutoDetect(BOOL bDotFile) {
 		return &lexCPP;
 	}
 	if (sharpCount) {
-		return shebang ? &lexBash : &lexCONF;
+		return shebang ? &lexBash : &lexConfig;
 	}
 	if (maybeJson && !notJson) {
 		return &lexJSON;
@@ -2509,7 +2273,7 @@ PEDITLEXER Style_AutoDetect(BOOL bDotFile) {
 		return &lexINI;
 	}
 	if (bDotFile) {
-		return &lexCONF;
+		return &lexConfig;
 	}
 	if (maybeJson) {
 		// for braces and brackets
@@ -2566,7 +2330,7 @@ static void Style_UpdateLexerLang(PEDITLEXER pLex, LPCWSTR lpszExt, LPCWSTR lpsz
 		}
 		break;
 
-	case NP2LEX_CONF:
+	case NP2LEX_CONFIG:
 		if (StrHasPrefixCase(lpszName, L"httpd") || StrCaseEqual(lpszExt, L"htaccess")) {
 			np2LexLangIndex = IDM_LEXER_APACHE;
 		}
@@ -2719,14 +2483,12 @@ extern BOOL fNoAutoDetection;
 static PEDITLEXER Style_GetLexerFromFile(LPCWSTR lpszFile, BOOL bCGIGuess, LPCWSTR *pszExt, BOOL *pDotFile) {
 	LPCWSTR lpszExt = PathFindExtension(lpszFile);
 	const LPCWSTR lpszName = PathFindFileName(lpszFile);
-	BOOL bFound = FALSE;
 	PEDITLEXER pLexNew = NULL;
 
 	if (StrNotEmpty(lpszExt)) {
 		lpszExt++;
 
 		if (StrCaseEqual(lpszExt, L"txt")) {
-			bFound = TRUE;
 			if (StrCaseEqual(lpszName, L"CMakeLists.txt") || StrCaseEqual(lpszName, L"CMakeCache.txt")) {
 				pLexNew = &lexCMake;
 			} else if (StrCaseEqual(lpszName, L"LLVMBuild.txt")) {
@@ -2734,41 +2496,37 @@ static PEDITLEXER Style_GetLexerFromFile(LPCWSTR lpszFile, BOOL bCGIGuess, LPCWS
 			} else {
 				pLexNew = &lexTextFile;
 			}
+			return pLexNew;
 		}
 
-		if (!bFound && bCGIGuess && (StrCaseEqual(lpszExt, L"cgi") || StrCaseEqual(lpszExt, L"fcgi"))) {
+		if (bCGIGuess && (StrCaseEqual(lpszExt, L"cgi") || StrCaseEqual(lpszExt, L"fcgi"))) {
 			char tchText[256] = "";
 			SciCall_GetText(COUNTOF(tchText) - 1, tchText);
 			pLexNew = Style_SniffShebang(tchText);
-			bFound = pLexNew != NULL;
 		}
 
 		// autoconf / automake
-		if (!bFound && StrCaseEqual(lpszExt, L"in") && pDotFile != NULL) {
+		if (!pLexNew && pDotFile != NULL && StrCaseEqual(lpszExt, L"in")) {
 			WCHAR tchCopy[MAX_PATH];
 			lstrcpyn(tchCopy, lpszFile, COUNTOF(tchCopy));
 			PathRemoveExtension(tchCopy);
 			pLexNew = Style_GetLexerFromFile(tchCopy, FALSE, NULL, NULL);
-			bFound = pLexNew != NULL;
 		}
 
 		// MySQL ini/cnf
-		if (!bFound && StrHasPrefixCase(lpszName, L"my") && (StrCaseEqual(lpszExt, L"ini") || StrCaseEqual(lpszExt, L"cnf"))) {
-			pLexNew = &lexCONF;
-			bFound = TRUE;
+		if (!pLexNew && StrHasPrefixCase(lpszName, L"my") && (StrCaseEqual(lpszExt, L"ini") || StrCaseEqual(lpszExt, L"cnf"))) {
+			pLexNew = &lexConfig;
 		}
-		if (!bFound && StrCaseEqual(lpszName, L"web.config")) {
+		else if (StrCaseEqual(lpszName, L"web.config")) {
 			pLexNew = &lexXML;
-			bFound = TRUE;
 			np2LexLangIndex = IDM_LEXER_WEB_NET;
 		}
 
 		// check associated extensions
-		if (!bFound) {
+		if (!pLexNew) {
 			pLexNew = Style_MatchLexer(lpszExt, FALSE);
-			bFound = pLexNew != NULL;
 		}
-		if (bFound) {
+		if (pLexNew) {
 			Style_UpdateLexerLang(pLexNew, lpszExt, lpszName);
 		}
 		// dot file
@@ -2778,51 +2536,42 @@ static PEDITLEXER Style_GetLexerFromFile(LPCWSTR lpszFile, BOOL bCGIGuess, LPCWS
 			}
 			if (StrHasPrefix(lpszExt, L"bash") || StrEqualExW(lpszExt, L"profile")) { // .bash_history, .bash_logout, .bash_profile, .bashrc, .profile
 				pLexNew = &lexBash;
-				bFound = TRUE;
 			}
 		}
 	}
 
-	if (!bFound) {
+	if (!pLexNew) {
 		if (StrHasPrefixCase(lpszName, L"Readme")) {
 			pLexNew = &lexTextFile;
-			bFound = TRUE;
 		}
-		if (!bFound && (StrHasPrefixCase(lpszName, L"Makefile") || StrHasPrefixCase(lpszName, L"Kbuild"))) {
-			pLexNew = &lexMake;
-			bFound = TRUE;
+		else if (StrHasPrefixCase(lpszName, L"Makefile") || StrHasPrefixCase(lpszName, L"Kbuild")) {
+			pLexNew = &lexMakefile;
 		}
-		if (!bFound && StrCaseEqual(lpszName, L"Cakefile")) {
+		else if (StrCaseEqual(lpszName, L"Cakefile")) {
 			pLexNew = &lexCoffeeScript;
-			bFound = TRUE;
 		}
-		if (!bFound && (StrCaseEqual(lpszName, L"Rakefile") || StrCaseEqual(lpszName, L"Podfile"))) {
+		else if (StrCaseEqual(lpszName, L"Rakefile") || StrCaseEqual(lpszName, L"Podfile")) {
 			pLexNew = &lexRuby;
-			bFound = TRUE;
 		}
-		if (!bFound && StrCaseEqual(lpszName, L"mozconfig")) {
+		else if (StrCaseEqual(lpszName, L"mozconfig")) {
 			pLexNew = &lexBash;
-			bFound = TRUE;
 		}
 		// Boost build
-		if (!bFound && (StrCaseEqual(lpszName, L"Jamroot") || StrHasPrefixCase(lpszName, L"Jamfile"))) {
-			pLexNew = &lexJam;
-			bFound = TRUE;
+		else if (StrCaseEqual(lpszName, L"Jamroot") || StrHasPrefixCase(lpszName, L"Jamfile")) {
+			pLexNew = &lexJamfile;
 		}
-		if (!bFound && (StrHasPrefixCase(lpszName, L"Kconfig") || StrHasPrefixCase(lpszName, L"Doxyfile"))) {
-			pLexNew = &lexCONF;
-			bFound = TRUE;
+		else if (StrHasPrefixCase(lpszName, L"Kconfig") || StrHasPrefixCase(lpszName, L"Doxyfile")) {
+			pLexNew = &lexConfig;
 		}
 	}
 
-	if (!bFound && pszExt) {
+	if (!pLexNew && pszExt) {
 		*pszExt = lpszExt;
 	}
 	return pLexNew;
 }
 
 BOOL Style_SetLexerFromFile(LPCWSTR lpszFile) {
-	BOOL bFound = TRUE;
 	BOOL bDotFile = FALSE;
 	LPCWSTR lpszExt = NULL;
 	PEDITLEXER pLexNew = NULL;
@@ -2831,29 +2580,20 @@ BOOL Style_SetLexerFromFile(LPCWSTR lpszFile) {
 	if (bAutoSelect) {
 		pLexNew = Style_GetLexerFromFile(lpszFile, !fNoCGIGuess, &lpszExt, &bDotFile);
 	}
-	if (pLexNew == NULL) {
-		bFound = FALSE;
-		pLexNew = pLexArray[iDefaultLexerIndex];
-	}
 
 	// xml/html
-	if ((!bFound && bAutoSelect) || (bFound && (pLexNew->rid == NP2LEX_PHP || pLexNew->rid == NP2LEX_CONF))) {
+	if ((!pLexNew && bAutoSelect) || (pLexNew && (pLexNew->iLexer == SCLEX_CONFIG))) {
 		char tchText[256] = "";
 		SciCall_GetText(COUNTOF(tchText) - 1, tchText);
 		const char *p = tchText;
 		while (IsASpace(*p)) {
 			++p;
 		}
-		const BOOL bPHP = StrStartsWith(p, "<?php");
-		if ((pLexNew->rid == NP2LEX_PHP) != bPHP) {
-			pLexNew = &lexHTML;
-			np2LexLangIndex = IDM_LEXER_PHP;
-			bFound = TRUE;
-		} else if (*p == '<') {
+		if (*p == '<') {
 			if (StrStartsWith(p, "<?xml")) {
 				// some conf/cfg file is xml
 				pLexNew = &lexXML;
-			} else if (!bFound) {
+			} else if (!pLexNew) {
 				if (StrStartsWithCase(p, "<!DOCTYPE")) {
 					p += CSTRLEN("<!DOCTYPE");
 					while (IsASpace(*p)) {
@@ -2870,22 +2610,20 @@ BOOL Style_SetLexerFromFile(LPCWSTR lpszFile) {
 					}
 				}
 			}
-			if (pLexNew->rid == NP2LEX_HTML || pLexNew->rid == NP2LEX_XML) {
-				bFound = TRUE;
+			if (pLexNew && (pLexNew->iLexer == SCLEX_HTML || pLexNew->iLexer == SCLEX_XML)) {
 				np2LexLangIndex = Style_GetDocTypeLanguage();
-				if (pLexNew->rid == NP2LEX_XML && np2LexLangIndex == IDM_LEXER_WEB) {
+				if (pLexNew->iLexer == SCLEX_XML && np2LexLangIndex == IDM_LEXER_WEB) {
 					// xhtml: <?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html>
 					pLexNew = &lexHTML;
 				}
 			}
 		} else if ((p == tchText) && !fNoCGIGuess && (pLexSniffed = Style_SniffShebang(tchText)) != NULL) {
 			pLexNew = pLexSniffed;
-			bFound = TRUE;
 		}
 	}
 
 	// file mode
-	if (!bFound && (fvCurFile.mask & FV_MODE) && fvCurFile.tchMode[0]) {
+	if (!pLexNew && (fvCurFile.mask & FV_MODE) && fvCurFile.tchMode[0]) {
 		WCHAR wchMode[32];
 		const UINT cpEdit = SciCall_GetCodePage();
 		MultiByteToWideChar(cpEdit, 0, fvCurFile.tchMode, -1, wchMode, COUNTOF(wchMode));
@@ -2899,38 +2637,38 @@ BOOL Style_SetLexerFromFile(LPCWSTR lpszFile) {
 					// Although .nfo and .diz were removed from the default lexer's
 					// default extensions list, they may still presist in the user's INI
 					pLexNew = pLexSniffed;
-					bFound = TRUE;
 				}
 			}
 		}
 		// file mode name/extension
-		if (!bFound) {
+		if (!pLexNew) {
 			PEDITLEXER pLexMode;
 			if ((pLexMode = Style_MatchLexer(wchMode, FALSE)) != NULL ||
 				(pLexMode = Style_MatchLexer(wchMode, TRUE)) != NULL) {
 				pLexNew = pLexMode;
-				bFound = TRUE;
 			}
 		}
 	}
 
-	if (!bFound && iCurrentEncoding == g_DOSEncoding) {
+	if (!pLexNew && iCurrentEncoding == g_DOSEncoding) {
 		pLexNew = &lexANSI;
-		bFound = TRUE;
 	}
 
-	if (!bFound && (!fNoAutoDetection || bDotFile)) {
+	if (!pLexNew && (!fNoAutoDetection || bDotFile)) {
 		if (!fNoAutoDetection) {
 			if ((pLexSniffed = Style_AutoDetect(bDotFile)) != NULL) {
 				pLexNew = pLexSniffed;
-				bFound = TRUE;
 			}
 		} else {
-			pLexNew = &lexCONF;
-			bFound = TRUE;
+			pLexNew = &lexConfig;
 		}
 	}
 
+	BOOL bFound =TRUE;
+	if (!pLexNew) {
+		bFound = FALSE;
+		pLexNew = pLexArray[iDefaultLexerIndex];
+	}
 	// Apply the new lexer
 	Style_SetLexer(pLexNew, TRUE);
 	return bFound;
@@ -3065,12 +2803,11 @@ void Style_SetLexerByLangIndex(int lang) {
 		break;
 
 	case IDM_LEXER_APACHE:
-		pLex = &lexCONF;
+		pLex = &lexConfig;
 		break;
 
 	// Web Source Code
 	case IDM_LEXER_WEB:
-	case IDM_LEXER_PHP:
 	case IDM_LEXER_JSP:
 	case IDM_LEXER_ASPX_CS:
 	case IDM_LEXER_ASPX_VB:
@@ -3080,6 +2817,9 @@ void Style_SetLexerByLangIndex(int lang) {
 			np2LexLangIndex = Style_GetDocTypeLanguage();
 		}
 		pLex = &lexHTML;
+		break;
+	case IDM_LEXER_PHP:
+		pLex = &lexPHP;
 		break;
 
 	// XML Document
@@ -3303,7 +3043,7 @@ void Style_SetIndentGuides(BOOL bShow) {
 	int iIndentView = SC_IV_NONE;
 	if (bShow) {
 		if (!flagSimpleIndentGuides) {
-			if (IsPythonLikeFolding(pLexCurrent->iLexer)) {
+			if (pLexCurrent->lexerAttr & LexerAttr_IndentLookForward) {
 				iIndentView = SC_IV_LOOKFORWARD;
 			} else {
 				iIndentView = SC_IV_LOOKBOTH;
