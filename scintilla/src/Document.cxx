@@ -68,19 +68,20 @@ void LexInterface::Colourise(Sci::Position start, Sci::Position end) {
 		// code looks for child lines which may trigger styling.
 		performingStyle = true;
 
-		const Sci::Position lengthDoc = pdoc->Length();
-		if (end == -1)
+		const Sci::Position lengthDoc = pdoc->LengthNoExcept();
+		if (end < 0) {
 			end = lengthDoc;
+		}
 		const Sci::Position len = end - start;
 
 		PLATFORM_ASSERT(len >= 0);
 		PLATFORM_ASSERT(start + len <= lengthDoc);
 
-		int styleStart = 0;
-		if (start > 0)
-			styleStart = pdoc->StyleIndexAt(start - 1);
-
 		if (len > 0) {
+			int styleStart = 0;
+			if (start > 0) {
+				styleStart = pdoc->StyleIndexAt(start - 1);
+			}
 			instance->Lex(start, len, styleStart, pdoc);
 			instance->Fold(start, len, styleStart, pdoc);
 		}
@@ -355,8 +356,9 @@ Sci::Line Document::MarkerNext(Sci::Line lineStart, MarkerMask mask) const noexc
 }
 
 int Document::AddMark(Sci::Line line, int markerNum) {
-	if (line >= 0 && line <= LinesTotal()) {
-		const int prev = Markers()->AddMark(line, markerNum, LinesTotal());
+	const Sci::Line lines = LinesTotal();
+	if (IsValidIndex(line, lines)) {
+		const int prev = Markers()->AddMark(line, markerNum, lines);
 		const DocModification mh(ModificationFlags::ChangeMarker, LineStart(line), 0, 0, nullptr, line);
 		NotifyModified(mh);
 		return prev;
@@ -366,13 +368,14 @@ int Document::AddMark(Sci::Line line, int markerNum) {
 }
 
 void Document::AddMarkSet(Sci::Line line, MarkerMask valueSet) {
-	if (line < 0 || line > LinesTotal()) {
+	const Sci::Line lines = LinesTotal();
+	if (!IsValidIndex(line, lines)) {
 		return;
 	}
 	MarkerMask m = valueSet;
 	for (int i = 0; m; i++, m >>= 1) {
 		if (m & 1)
-			Markers()->AddMark(line, i, LinesTotal());
+			Markers()->AddMark(line, i, lines);
 	}
 	const DocModification mh(ModificationFlags::ChangeMarker, LineStart(line), 0, 0, nullptr, line);
 	NotifyModified(mh);
@@ -393,7 +396,8 @@ void Document::DeleteMarkFromHandle(int markerHandle) {
 
 void Document::DeleteAllMarks(int markerNum) {
 	bool someChanges = false;
-	for (Sci::Line line = 0; line < LinesTotal(); line++) {
+	const Sci::Line lines = LinesTotal();
+	for (Sci::Line line = 0; line < lines; line++) {
 		if (Markers()->DeleteMark(line, markerNum, true))
 			someChanges = true;
 	}
@@ -421,7 +425,7 @@ Sci_Position SCI_METHOD Document::LineStart(Sci_Line line) const noexcept {
 }
 
 bool Document::IsLineStartPosition(Sci::Position position) const noexcept {
-	return LineStart(LineFromPosition(position)) == position;
+	return LineStart(SciLineFromPosition(position)) == position;
 }
 
 Sci_Position SCI_METHOD Document::LineEnd(Sci_Line line) const noexcept {
@@ -466,15 +470,15 @@ Sci::Line Document::SciLineFromPosition(Sci::Position pos) const noexcept {
 }
 
 Sci::Position Document::LineEndPosition(Sci::Position position) const noexcept {
-	return LineEnd(LineFromPosition(position));
+	return LineEnd(SciLineFromPosition(position));
 }
 
 bool Document::IsLineEndPosition(Sci::Position position) const noexcept {
-	return LineEnd(LineFromPosition(position)) == position;
+	return LineEnd(SciLineFromPosition(position)) == position;
 }
 
 bool Document::IsPositionInLineEnd(Sci::Position position) const noexcept {
-	return position >= LineEnd(LineFromPosition(position));
+	return position >= LineEnd(SciLineFromPosition(position));
 }
 
 Sci::Position Document::VCHomePosition(Sci::Position position) const noexcept {
@@ -501,7 +505,7 @@ Sci::Line Document::LineFromPositionIndex(Sci::Position pos, LineCharacterIndexT
 
 Sci::Line Document::LineFromPositionAfter(Sci::Line line, Sci::Position length) const noexcept {
 	const Sci::Position posAfter = cb.LineStart(line) + length;
-	if (posAfter >= Length()) {
+	if (posAfter >= LengthNoExcept()) {
 		return LinesTotal();
 	}
 	const Sci::Line lineAfter = SciLineFromPosition(posAfter);
@@ -533,23 +537,33 @@ void Document::ClearLevels() {
 	Levels()->ClearLevels();
 }
 
-static bool IsSubordinate(FoldLevel levelStart, FoldLevel levelTry) noexcept {
+static constexpr bool IsSubordinate(FoldLevel levelStart, FoldLevel levelTry) noexcept {
 	if (LevelIsWhitespace(levelTry))
 		return true;
 	else
 		return LevelNumber(levelStart) < LevelNumber(levelTry);
 }
 
-Sci::Line Document::GetLastChild(Sci::Line lineParent, std::optional<FoldLevel> level, Sci::Line lastLine) {
-	const FoldLevel levelStart = LevelNumberPart(level ? *level : GetFoldLevel(lineParent));
-	const Sci::Line maxLine = LinesTotal();
-	const Sci::Line lookLastLine = (lastLine != -1) ? std::min(LinesTotal() - 1, lastLine) : -1;
+Sci::Line Document::GetLastChild(Sci::Line lineParent, FoldLevel level, Sci::Line lastLine) {
+	if (level == FoldLevel::None) {
+		level = GetFoldLevel(lineParent);
+	}
+	const FoldLevel levelStart = LevelNumberPart(level);
+	const Sci::Line maxLine = LinesTotal() - 1;
+	if (lastLine < 0 || lastLine > maxLine) {
+		lastLine = maxLine;
+	}
+	Sci::Line lineEndStyled = SciLineFromPosition(GetEndStyled()) - 2;
 	Sci::Line lineMaxSubord = lineParent;
-	while (lineMaxSubord < maxLine - 1) {
-		EnsureStyledTo(LineStart(lineMaxSubord + 2));
+	while (lineMaxSubord < maxLine) {
+		if (lineMaxSubord >= lineEndStyled) {
+			// two or more lines are required to make stable fold for most lexer
+			EnsureStyledTo(LineStart(lineMaxSubord + 2 + 1));
+			lineEndStyled = SciLineFromPosition(GetEndStyled()) - 2;
+		}
 		if (!IsSubordinate(levelStart, GetFoldLevel(lineMaxSubord + 1)))
 			break;
-		if ((lookLastLine != -1) && (lineMaxSubord >= lookLastLine) && !LevelIsWhitespace(GetFoldLevel(lineMaxSubord)))
+		if ((lineMaxSubord >= lastLine) && !LevelIsWhitespace(GetFoldLevel(lineMaxSubord)))
 			break;
 		lineMaxSubord++;
 	}
@@ -566,19 +580,13 @@ Sci::Line Document::GetLastChild(Sci::Line lineParent, std::optional<FoldLevel> 
 
 Sci::Line Document::GetFoldParent(Sci::Line line) const noexcept {
 	const FoldLevel level = LevelNumberPart(GetFoldLevel(line));
-	Sci::Line lineLook = line - 1;
-	while ((lineLook > 0) && (
-		(!LevelIsHeader(GetFoldLevel(lineLook))) ||
-		(LevelNumberPart(GetFoldLevel(lineLook)) >= level))
-		) {
-		lineLook--;
+	for (Sci::Line lineLook = line - 1; lineLook >= 0; lineLook--) {
+		const FoldLevel levelTry = GetFoldLevel(lineLook);
+		if (LevelIsHeader(levelTry) && LevelNumberPart(levelTry) < level) {
+			return lineLook;
+		}
 	}
-	if (LevelIsHeader(GetFoldLevel(lineLook)) &&
-		(LevelNumberPart(GetFoldLevel(lineLook)) < level)) {
-		return lineLook;
-	} else {
-		return -1;
-	}
+	return -1;
 }
 
 void Document::GetHighlightDelimiters(HighlightDelimiter &highlightDelimiter, Sci::Line line, Sci::Line lastLine) {
@@ -595,7 +603,7 @@ void Document::GetHighlightDelimiters(HighlightDelimiter &highlightDelimiter, Sc
 	}
 
 	Sci::Line beginFoldBlock = LevelIsHeader(lookLineLevel) ? lookLine : GetFoldParent(lookLine);
-	if (beginFoldBlock == -1) {
+	if (beginFoldBlock < 0) {
 		highlightDelimiter.Clear();
 		return;
 	}
@@ -608,7 +616,7 @@ void Document::GetHighlightDelimiters(HighlightDelimiter &highlightDelimiter, Sc
 		lookLineLevelNum = LevelNumberPart(lookLineLevel);
 		while ((lookLine >= 0) && (lookLineLevelNum >= FoldLevel::Base)) {
 			if (LevelIsHeader(lookLineLevel)) {
-				if (GetLastChild(lookLine, {}, lookLastLine) == line) {
+				if (GetLastChild(lookLine, lookLineLevel, lookLastLine) == line) {
 					beginFoldBlock = lookLine;
 					endFoldBlock = line;
 					firstChangeableLineBefore = line - 1;
@@ -620,7 +628,7 @@ void Document::GetHighlightDelimiters(HighlightDelimiter &highlightDelimiter, Sc
 			lookLineLevelNum = LevelNumberPart(lookLineLevel);
 		}
 	}
-	if (firstChangeableLineBefore == -1) {
+	if (firstChangeableLineBefore < 0) {
 		for (lookLine = line - 1, lookLineLevel = GetFoldLevel(lookLine), lookLineLevelNum = LevelNumberPart(lookLineLevel);
 			lookLine >= beginFoldBlock;
 			lookLineLevel = GetFoldLevel(--lookLine), lookLineLevelNum = LevelNumberPart(lookLineLevel)) {
@@ -630,7 +638,7 @@ void Document::GetHighlightDelimiters(HighlightDelimiter &highlightDelimiter, Sc
 			}
 		}
 	}
-	if (firstChangeableLineBefore == -1)
+	if (firstChangeableLineBefore < 0)
 		firstChangeableLineBefore = beginFoldBlock - 1;
 
 	Sci::Line firstChangeableLineAfter = -1;
@@ -642,7 +650,7 @@ void Document::GetHighlightDelimiters(HighlightDelimiter &highlightDelimiter, Sc
 			break;
 		}
 	}
-	if (firstChangeableLineAfter == -1)
+	if (firstChangeableLineAfter < 0)
 		firstChangeableLineAfter = endFoldBlock + 1;
 
 	highlightDelimiter.beginFoldBlock = beginFoldBlock;
@@ -652,25 +660,26 @@ void Document::GetHighlightDelimiters(HighlightDelimiter &highlightDelimiter, Sc
 }
 
 Sci::Position Document::ClampPositionIntoDocument(Sci::Position pos) const noexcept {
-	return std::clamp<Sci::Position>(pos, 0, Length());
+	return std::clamp<Sci::Position>(pos, 0, LengthNoExcept());
 }
 
 bool Document::IsCrLf(Sci::Position pos) const noexcept {
-	if (pos < 0)
+	if (!IsValidIndex(pos, LengthNoExcept())) {
 		return false;
-	if (pos >= (Length() - 1))
-		return false;
+	}
 	return (cb.CharAt(pos) == '\r') && (cb.CharAt(pos + 1) == '\n');
 }
 
-int Document::LenChar(Sci::Position pos, bool *invalid) noexcept {
-	if (pos < 0 || pos >= Length()) {
+int Document::LenChar(Sci::Position pos, bool *invalid) const noexcept {
+	if (!IsValidIndex(pos, LengthNoExcept())) {
+		// Returning 1 instead of 0 to defend against hanging with a loop that goes (or starts) out of bounds.
 		return 1;
-	} else if (IsCrLf(pos)) {
-		return 2;
 	}
 
 	const unsigned char leadByte = cb.UCharAt(pos);
+	if (leadByte == '\r' && cb.CharAt(pos + 1) == '\n') {
+		return 2;
+	}
 	if (UTF8IsAscii(leadByte) || !dbcsCodePage) {
 		// Common case: ASCII character
 		return 1;
@@ -743,10 +752,10 @@ Sci::Position Document::MovePositionOutsideChar(Sci::Position pos, Sci::Position
 	// If out of range, just return minimum/maximum value.
 	if (pos <= 0)
 		return 0;
-	if (pos >= Length())
-		return Length();
+	if (pos >= cb.Length())
+		return cb.Length();
 
-	// PLATFORM_ASSERT(pos > 0 && pos < Length());
+	// PLATFORM_ASSERT(pos > 0 && pos < LengthNoExcept());
 	if (checkLineEnd && IsCrLf(pos - 1)) {
 		if (moveDir > 0)
 			return pos + 1;
@@ -773,7 +782,7 @@ Sci::Position Document::MovePositionOutsideChar(Sci::Position pos, Sci::Position
 		} else {
 			// Anchor DBCS calculations at start of line because start of line can
 			// not be a DBCS trail byte.
-			const Sci::Position posStartLine = LineStart(LineFromPosition(pos));
+			const Sci::Position posStartLine = LineStart(cb.LineFromPosition(pos));
 			if (pos == posStartLine)
 				return pos;
 
@@ -816,7 +825,7 @@ Sci::Position Document::NextPosition(Sci::Position pos, int moveDir) const noexc
 
 	if (dbcsCodePage) {
 		if (CpUtf8 == dbcsCodePage) {
-			if (increment == 1) {
+			if (moveDir > 0) {
 				// Simple forward movement case so can avoid some checks
 				const unsigned char leadByte = cb.UCharAt(pos);
 				if (UTF8IsAscii(leadByte)) {
@@ -909,7 +918,7 @@ bool Document::NextCharacter(Sci::Position &pos, int moveDir) const noexcept {
 }
 
 Document::CharacterExtracted Document::CharacterAfter(Sci::Position position) const noexcept {
-	if (position >= Length()) {
+	if (position >= LengthNoExcept()) {
 		return CharacterExtracted(unicodeReplacementChar, 0);
 	}
 	const unsigned char leadByte = cb.UCharAt(position);
@@ -997,7 +1006,7 @@ Sci_Position SCI_METHOD Document::GetRelativePosition(Sci_Position positionStart
 		}
 	} else {
 		pos = positionStart + characterOffset;
-		if ((pos < 0) || (pos > Length()))
+		if (!IsValidIndex(pos, LengthNoExcept()))
 			return Sci::invalidPosition;
 	}
 	return pos;
@@ -1018,7 +1027,7 @@ Sci::Position Document::GetRelativePositionUTF16(Sci::Position positionStart, Sc
 		}
 	} else {
 		pos = positionStart + characterOffset;
-		if ((pos < 0) || (pos > Length()))
+		if (!IsValidIndex(pos, LengthNoExcept()))
 			return Sci::invalidPosition;
 	}
 	return pos;
@@ -1211,7 +1220,7 @@ bool Document::DeleteChars(Sci::Position pos, Sci::Position len) {
 		return false;
 	if (len <= 0)
 		return false;
-	if ((pos + len) > Length())
+	if ((pos + len) > LengthNoExcept())
 		return false;
 	CheckReadOnly();
 	if (enteredModification != 0) {
@@ -1230,7 +1239,7 @@ bool Document::DeleteChars(Sci::Position pos, Sci::Position len) {
 			const char *text = cb.DeleteChars(pos, len, startSequence);
 			if (startSavePoint && cb.IsCollectingUndo())
 				NotifySavePoint(false);
-			if ((pos < Length()) || (pos == 0))
+			if ((pos < LengthNoExcept()) || (pos == 0))
 				ModifiedAt(pos);
 			else
 				ModifiedAt(pos - 1);
@@ -1331,7 +1340,7 @@ void Document::ChangeInsertion(const char *s, Sci::Position length) {
 
 int SCI_METHOD Document::AddData(const char *data, Sci_Position length) {
 	try {
-		const Sci::Position position = Length();
+		const Sci::Position position = LengthNoExcept();
 		InsertString(position, data, length);
 	} catch (std::bad_alloc &) {
 		return static_cast<int>(Status::BadAlloc);
@@ -1528,9 +1537,9 @@ static std::string CreateIndentation(Sci::Position indent, int tabSize, bool ins
 
 int SCI_METHOD Document::GetLineIndentation(Sci_Line line) const noexcept {
 	int indent = 0;
-	if ((line >= 0) && (line < LinesTotal())) {
+	if (IsValidIndex(line, LinesTotal())) {
 		const Sci::Position lineStart = LineStart(line);
-		const Sci::Position length = Length();
+		const Sci::Position length = LengthNoExcept();
 		for (Sci::Position i = lineStart; i < length; i++) {
 			const char ch = cb.CharAt(i);
 			if (ch == ' ')
@@ -1564,17 +1573,17 @@ Sci::Position Document::GetLineIndentPosition(Sci::Line line) const noexcept {
 	if (line < 0)
 		return 0;
 	Sci::Position pos = LineStart(line);
-	const Sci::Position length = Length();
+	const Sci::Position length = LengthNoExcept();
 	while ((pos < length) && IsSpaceOrTab(cb.CharAt(pos))) {
 		pos++;
 	}
 	return pos;
 }
 
-Sci::Position Document::GetColumn(Sci::Position pos) noexcept {
+Sci::Position Document::GetColumn(Sci::Position pos) const noexcept {
 	Sci::Position column = 0;
 	const Sci::Line line = SciLineFromPosition(pos);
-	if ((line >= 0) && (line < LinesTotal())) {
+	if (IsValidIndex(line, LinesTotal())) {
 		for (Sci::Position i = LineStart(line); i < pos;) {
 			const char ch = cb.CharAt(i);
 			if (ch == '\t') {
@@ -1587,7 +1596,7 @@ Sci::Position Document::GetColumn(Sci::Position pos) noexcept {
 			} else if (UTF8IsAscii(ch)) {
 				column++;
 				i++;
-			} else if (i >= Length()) {
+			} else if (i >= LengthNoExcept()) {
 				return column;
 			} else {
 				column++;
@@ -1611,7 +1620,7 @@ Sci::Position Document::CountCharacters(Sci::Position startPos, Sci::Position en
 }
 
 void Document::CountCharactersAndColumns(sptr_t lParam) const noexcept {
-	TextToFind *ft = reinterpret_cast<TextToFind *>(lParam);
+	TextToFindFull *ft = reinterpret_cast<TextToFindFull *>(lParam);
 	const Sci::Position startPos = ft->chrg.cpMin;
 	const Sci::Position endPos = ft->chrg.cpMax;
 	Sci::Position count = ft->chrgText.cpMin;
@@ -1652,11 +1661,11 @@ Sci::Position Document::CountUTF16(Sci::Position startPos, Sci::Position endPos)
 	return count;
 }
 
-Sci::Position Document::FindColumn(Sci::Line line, Sci::Position column) noexcept {
+Sci::Position Document::FindColumn(Sci::Line line, Sci::Position column) const noexcept {
 	Sci::Position position = LineStart(line);
-	if ((line >= 0) && (line < LinesTotal())) {
+	if (IsValidIndex(line, LinesTotal())) {
 		Sci::Position columnCurrent = 0;
-		while ((columnCurrent < column) && (position < Length())) {
+		while ((columnCurrent < column) && (position < LengthNoExcept())) {
 			const char ch = cb.CharAt(position);
 			if (ch == '\t') {
 				columnCurrent = NextTab(columnCurrent, tabInChars);
@@ -1720,7 +1729,7 @@ std::string Document::TransformLineEnds(const char *s, size_t len, EndOfLine eol
 void Document::ConvertLineEnds(EndOfLine eolModeSet) {
 	UndoGroup ug(this);
 
-	for (Sci::Position pos = 0; pos < Length(); pos++) {
+	for (Sci::Position pos = 0; pos < LengthNoExcept(); pos++) {
 		if (cb.CharAt(pos) == '\r') {
 			if (cb.CharAt(pos + 1) == '\n') {
 				// CRLF
@@ -1786,14 +1795,15 @@ Sci::Position Document::ParaUp(Sci::Position pos) const noexcept {
 }
 
 Sci::Position Document::ParaDown(Sci::Position pos) const noexcept {
+	const Sci::Line maxLine = LinesTotal();
 	Sci::Line line = SciLineFromPosition(pos);
-	while (line < LinesTotal() && !IsWhiteLine(line)) { // skip non-empty lines
+	while (line < maxLine && !IsWhiteLine(line)) { // skip non-empty lines
 		line++;
 	}
-	while (line < LinesTotal() && IsWhiteLine(line)) { // skip empty lines
+	while (line < maxLine && IsWhiteLine(line)) { // skip empty lines
 		line++;
 	}
-	if (line < LinesTotal())
+	if (line < maxLine)
 		return LineStart(line);
 	else // end of a document
 		return LineEnd(line - 1);
@@ -1835,7 +1845,7 @@ Sci::Position Document::ExtendWordSelect(Sci::Position pos, int delta, bool only
 			pos -= ce.widthBytes;
 		}
 	} else {
-		if (pos < Length()) {
+		if (pos < LengthNoExcept()) {
 			const CharacterExtracted ce = CharacterAfter(pos);
 			const CharacterClass ceStart = WordCharacterClass(ce.character);
 			if (!onlyWordCharacters || ceStart == ccStart || ceStart == CharacterClass::cjkWord) {
@@ -1846,7 +1856,7 @@ Sci::Position Document::ExtendWordSelect(Sci::Position pos, int delta, bool only
 			}
 		}
 		//const int style = StyleIndexAt(pos - 1);
-		while (pos < Length()) {
+		while (pos < LengthNoExcept()) {
 			const CharacterExtracted ce = CharacterAfter(pos);
 			if (/*StyleIndexAt(pos) != style || */WordCharacterClass(ce.character) != ccStart)
 				break;
@@ -1884,13 +1894,13 @@ Sci::Position Document::NextWordStart(Sci::Position pos, int delta) const noexce
 	} else {
 		CharacterExtracted ce = CharacterAfter(pos);
 		const CharacterClass ccStart = WordCharacterClass(ce.character);
-		while (pos < Length()) {
+		while (pos < LengthNoExcept()) {
 			ce = CharacterAfter(pos);
 			if (WordCharacterClass(ce.character) != ccStart)
 				break;
 			pos += ce.widthBytes;
 		}
-		while (pos < Length()) {
+		while (pos < LengthNoExcept()) {
 			ce = CharacterAfter(pos);
 			if (WordCharacterClass(ce.character) != CharacterClass::space)
 				break;
@@ -1928,16 +1938,16 @@ Sci::Position Document::NextWordEnd(Sci::Position pos, int delta) const noexcept
 			}
 		}
 	} else {
-		while (pos < Length()) {
+		while (pos < LengthNoExcept()) {
 			const CharacterExtracted ce = CharacterAfter(pos);
 			if (WordCharacterClass(ce.character) != CharacterClass::space)
 				break;
 			pos += ce.widthBytes;
 		}
-		if (pos < Length()) {
+		if (pos < LengthNoExcept()) {
 			CharacterExtracted ce = CharacterAfter(pos);
 			const CharacterClass ccStart = WordCharacterClass(ce.character);
-			while (pos < Length()) {
+			while (pos < LengthNoExcept()) {
 				ce = CharacterAfter(pos);
 				if (WordCharacterClass(ce.character) != ccStart)
 					break;
@@ -1961,7 +1971,7 @@ constexpr bool IsWordEdge(CharacterClass cc, CharacterClass ccNext) noexcept {
  * the previous character is of a different character class.
  */
 bool Document::IsWordStartAt(Sci::Position pos) const noexcept {
-	if (pos >= Length())
+	if (pos >= LengthNoExcept())
 		return false;
 	if (pos >= 0) {
 		const CharacterClass ccPos = WordCharacterClass(CharacterAfter(pos).character);
@@ -1979,9 +1989,9 @@ bool Document::IsWordStartAt(Sci::Position pos) const noexcept {
 bool Document::IsWordEndAt(Sci::Position pos) const noexcept {
 	if (pos <= 0)
 		return false;
-	if (pos <= Length()) {
+	if (pos <= LengthNoExcept()) {
 		// At end of document, treat as if space after so can be word end
-		const CharacterClass ccPos = (pos < Length()) ? WordCharacterClass(CharacterAfter(pos).character) : CharacterClass::space;
+		const CharacterClass ccPos = (pos < LengthNoExcept()) ? WordCharacterClass(CharacterAfter(pos).character) : CharacterClass::space;
 		const CharacterClass ccPrev = WordCharacterClass(CharacterBefore(pos).character);
 		return IsWordEdge(ccPrev, ccPos);
 	}
@@ -2310,10 +2320,6 @@ void Document::ReleaseLineCharacterIndex(LineCharacterIndexType lineCharacterInd
 	return cb.ReleaseLineCharacterIndex(lineCharacterIndex);
 }
 
-Sci::Line Document::LinesTotal() const noexcept {
-	return cb.Lines();
-}
-
 void Document::AllocateLines(Sci::Line lines) {
 	cb.AllocateLines(lines);
 }
@@ -2358,7 +2364,7 @@ void SCI_METHOD Document::StartStyling(Sci_Position position) noexcept {
 }
 
 bool SCI_METHOD Document::SetStyleFor(Sci_Position length, unsigned char style) {
-	if (enteredStyling != 0) {
+	if (enteredStyling != 0 || !cb.HasStyles()) {
 		return false;
 	} else {
 		enteredStyling++;
@@ -2375,7 +2381,7 @@ bool SCI_METHOD Document::SetStyleFor(Sci_Position length, unsigned char style) 
 }
 
 bool SCI_METHOD Document::SetStyles(Sci_Position length, const unsigned char *styles) {
-	if (enteredStyling != 0) {
+	if (enteredStyling != 0 || !cb.HasStyles()) {
 		return false;
 	} else {
 		enteredStyling++;
@@ -2383,7 +2389,7 @@ bool SCI_METHOD Document::SetStyles(Sci_Position length, const unsigned char *st
 		Sci::Position startMod = 0;
 		Sci::Position endMod = 0;
 		for (int iPos = 0; iPos < length; iPos++, endStyled++) {
-			PLATFORM_ASSERT(endStyled < Length());
+			PLATFORM_ASSERT(endStyled < LengthNoExcept());
 			if (cb.SetStyleAt(endStyled, styles[iPos])) {
 				if (!didChange) {
 					startMod = endStyled;
@@ -2509,7 +2515,7 @@ StyledText Document::AnnotationStyledText(Sci::Line line) const noexcept {
 }
 
 void Document::AnnotationSetText(Sci::Line line, const char *text) {
-	if (line >= 0 && line < LinesTotal()) {
+	if (IsValidIndex(line, LinesTotal())) {
 		const Sci::Line linesBefore = AnnotationLines(line);
 		Annotations()->SetText(line, text);
 		const int linesAfter = AnnotationLines(line);
@@ -2521,7 +2527,7 @@ void Document::AnnotationSetText(Sci::Line line, const char *text) {
 }
 
 void Document::AnnotationSetStyle(Sci::Line line, int style) {
-	if (line >= 0 && line < LinesTotal()) {
+	if (IsValidIndex(line, LinesTotal())) {
 		Annotations()->SetStyle(line, style);
 		const DocModification mh(ModificationFlags::ChangeAnnotation, LineStart(line),
 			0, 0, nullptr, line);
@@ -2530,7 +2536,7 @@ void Document::AnnotationSetStyle(Sci::Line line, int style) {
 }
 
 void Document::AnnotationSetStyles(Sci::Line line, const unsigned char *styles) {
-	if (line >= 0 && line < LinesTotal()) {
+	if (IsValidIndex(line, LinesTotal())) {
 		Annotations()->SetStyles(line, styles);
 	}
 }
@@ -2558,7 +2564,7 @@ StyledText Document::EOLAnnotationStyledText(Sci::Line line) const noexcept {
 }
 
 void Document::EOLAnnotationSetText(Sci::Line line, const char *text) {
-	if (line >= 0 && line < LinesTotal()) {
+	if (IsValidIndex(line, LinesTotal())) {
 		EOLAnnotations()->SetText(line, text);
 		const DocModification mh(ModificationFlags::ChangeEOLAnnotation, LineStart(line),
 			0, 0, nullptr, line);
@@ -2567,7 +2573,7 @@ void Document::EOLAnnotationSetText(Sci::Line line, const char *text) {
 }
 
 void Document::EOLAnnotationSetStyle(Sci::Line line, int style) {
-	if (line >= 0 && line < LinesTotal()) {
+	if (IsValidIndex(line, LinesTotal())) {
 		EOLAnnotations()->SetStyle(line, style);
 		const DocModification mh(ModificationFlags::ChangeEOLAnnotation, LineStart(line),
 			0, 0, nullptr, line);
@@ -2773,14 +2779,14 @@ Sci::Position Document::WordPartRight(Sci::Position pos) const noexcept {
 	return pos;
 }
 
-Sci::Position Document::ExtendStyleRange(Sci::Position pos, int delta, bool singleLine) noexcept {
+Sci::Position Document::ExtendStyleRange(Sci::Position pos, int delta, bool singleLine) const noexcept {
 	const char sStart = cb.StyleAt(pos);
 	if (delta < 0) {
 		while (pos > 0 && (cb.StyleAt(pos) == sStart) && (!singleLine || !IsEOLCharacter(cb.CharAt(pos))))
 			pos--;
 		pos++;
 	} else {
-		while (pos < (Length()) && (cb.StyleAt(pos) == sStart) && (!singleLine || !IsEOLCharacter(cb.CharAt(pos))))
+		while (pos < LengthNoExcept() && (cb.StyleAt(pos) == sStart) && (!singleLine || !IsEOLCharacter(cb.CharAt(pos))))
 			pos++;
 	}
 	return pos;
@@ -2819,7 +2825,8 @@ Sci::Position Document::BraceMatch(Sci::Position position, Sci::Position /*maxRe
 	const int direction = (chBrace < chSeek) ? 1 : -1;
 	int depth = 1;
 	position = useStartPos ? startPos : NextPosition(position, direction);
-	while ((position >= 0) && (position < Length())) {
+	const Sci::Position length = LengthNoExcept();
+	while (IsValidIndex(position, length)) {
 		const char chAtPos = CharAt(position);
 		const int styAtPos = StyleIndexAt(position);
 		if ((position > GetEndStyled()) || (styAtPos == styBrace)) {
@@ -2843,9 +2850,9 @@ Sci::Position Document::BraceMatch(Sci::Position position, Sci::Position /*maxRe
  */
 class BuiltinRegex : public RegexSearchBase {
 public:
-	explicit BuiltinRegex(CharClassify *charClassTable) : search(charClassTable) {}
+	explicit BuiltinRegex(const CharClassify *charClassTable) : search(charClassTable) {}
 
-	Sci::Position FindText(Document *doc, Sci::Position minPos, Sci::Position maxPos, const char *s,
+	Sci::Position FindText(const Document *doc, Sci::Position minPos, Sci::Position maxPos, const char *s,
 		bool caseSensitive, FindOption flags, Sci::Position *length) override;
 
 	const char *SubstituteByPosition(Document *doc, const char *text, Sci::Position *length) override;
@@ -2887,7 +2894,7 @@ public:
 	}
 	Range LineRange(Sci::Line line) const noexcept {
 		Range range(doc->LineStart(line), doc->LineEnd(line));
-		if (increment == 1) {
+		if (increment > 0) {
 			if (line == lineRangeStart)
 				range.start = startPos;
 			if (line == lineRangeEnd)
@@ -2904,10 +2911,10 @@ public:
 
 // Define a way for the Regular Expression code to access the document
 class DocumentIndexer : public CharacterIndexer {
-	Document *pdoc;
+	const Document *pdoc;
 	Sci::Position end;
 public:
-	DocumentIndexer(Document *pdoc_, Sci::Position end_) noexcept :
+	DocumentIndexer(const Document *pdoc_, Sci::Position end_) noexcept :
 		pdoc(pdoc_), end(end_) {}
 
 	DocumentIndexer(const DocumentIndexer &) = delete;
@@ -2918,10 +2925,10 @@ public:
 	~DocumentIndexer() override = default;
 
 	char CharAt(Sci::Position index) const noexcept override {
-		if (index < 0 || index >= end)
-			return '\0';
-		else
+		if (IsValidIndex(index, end))
 			return pdoc->CharAt(index);
+		else
+			return '\0';
 	}
 
 	bool IsWordStartAt(Sci::Position pos) const noexcept override {
@@ -3181,7 +3188,7 @@ bool MatchOnLines(const Document *doc, const Regex &regexp, const RESearchRange 
 		matched = std::regex_search(itStart, itEnd, match, regexp, flagsMatch);
 		// Check for the last match on this line.
 		if (matched) {
-			if (resr.increment == -1) {
+			if (resr.increment < 0) {
 				while (matched) {
 					Iterator itNext(doc, match[0].second.PosRoundUp());
 					flagsMatch = MatchFlags(doc, itNext.Pos(), lineRange.end);
@@ -3266,7 +3273,7 @@ Sci::Position Cxx11RegexFindText(const Document *doc, Sci::Position minPos, Sci:
 
 }
 
-Sci::Position BuiltinRegex::FindText(Document *doc, Sci::Position minPos, Sci::Position maxPos, const char *s,
+Sci::Position BuiltinRegex::FindText(const Document *doc, Sci::Position minPos, Sci::Position maxPos, const char *s,
 	bool caseSensitive, FindOption flags, Sci::Position *length) {
 
 #ifndef NO_CXX11_REGEX
@@ -3294,7 +3301,7 @@ Sci::Position BuiltinRegex::FindText(Document *doc, Sci::Position minPos, Sci::P
 	for (Sci::Line line = resr.lineRangeStart; line != resr.lineRangeBreak; line += resr.increment) {
 		Sci::Position startOfLine = doc->LineStart(line);
 		Sci::Position endOfLine = doc->LineEnd(line);
-		if (resr.increment == 1) {
+		if (resr.increment > 0) {
 			if (line == resr.lineRangeStart) {
 				if ((resr.startPos != startOfLine) && searchforLineStart)
 					continue;	// Can't match start of line if start position after start of line
@@ -3326,7 +3333,7 @@ Sci::Position BuiltinRegex::FindText(Document *doc, Sci::Position minPos, Sci::P
 			search.eopat[0] = doc->MovePositionOutsideChar(search.eopat[0], 1, false);
 			lenRet = search.eopat[0] - search.bopat[0];
 			// There can be only one start of a line, so no need to look for last match in line
-			if ((resr.increment == -1) && !searchforLineStart) {
+			if ((resr.increment < 0) && !searchforLineStart) {
 				// Check for the last match on this line.
 				int repetitions = 1000;	// Break out of infinite loop
 				while (success && (search.eopat[0] <= endOfLine) && (repetitions--)) {
@@ -3350,7 +3357,7 @@ Sci::Position BuiltinRegex::FindText(Document *doc, Sci::Position minPos, Sci::P
 
 const char *BuiltinRegex::SubstituteByPosition(Document *doc, const char *text, Sci::Position *length) {
 	substituted.clear();
-	const DocumentIndexer di(doc, doc->Length());
+	const DocumentIndexer di(doc, doc->LengthNoExcept());
 	search.GrabMatches(di);
 	for (Sci::Position j = 0; j < *length; j++) {
 		if (text[j] == '\\') {
@@ -3402,7 +3409,7 @@ const char *BuiltinRegex::SubstituteByPosition(Document *doc, const char *text, 
 
 #ifndef SCI_OWNREGEX
 
-RegexSearchBase *Scintilla::Internal::CreateRegexSearch(CharClassify *charClassTable) {
+RegexSearchBase *Scintilla::Internal::CreateRegexSearch(const CharClassify *charClassTable) {
 	return new BuiltinRegex(charClassTable);
 }
 

@@ -720,23 +720,25 @@ void ScintillaWin::Finalise() noexcept {
 
 bool ScintillaWin::UpdateRenderingParams(bool force) noexcept {
 	HMONITOR monitor = ::MonitorFromWindow(MainHWND(), MONITOR_DEFAULTTONEAREST);
-	if (!force && monitor == hCurrentMonitor && defaultRenderingParams) {
+	if (!force && monitor == hCurrentMonitor && (technology == Technology::Default || defaultRenderingParams)) {
 		return false;
 	}
 
 	IDWriteRenderingParams *monitorRenderingParams = nullptr;
 	IDWriteRenderingParams *customClearTypeRenderingParams = nullptr;
-	const HRESULT hr = pIDWriteFactory->CreateMonitorRenderingParams(monitor, &monitorRenderingParams);
-	UINT clearTypeContrast = 0;
-	if (SUCCEEDED(hr) && ::SystemParametersInfo(SPI_GETFONTSMOOTHINGCONTRAST, 0, &clearTypeContrast, 0) != 0) {
-		if (clearTypeContrast >= 1000 && clearTypeContrast <= 2200) {
-			const FLOAT gamma = static_cast<FLOAT>(clearTypeContrast) / 1000.0f;
-			pIDWriteFactory->CreateCustomRenderingParams(gamma,
-				monitorRenderingParams->GetEnhancedContrast(),
-				monitorRenderingParams->GetClearTypeLevel(),
-				monitorRenderingParams->GetPixelGeometry(),
-				monitorRenderingParams->GetRenderingMode(),
-				&customClearTypeRenderingParams);
+	if (technology != Technology::Default) {
+		const HRESULT hr = pIDWriteFactory->CreateMonitorRenderingParams(monitor, &monitorRenderingParams);
+		UINT clearTypeContrast = 0;
+		if (SUCCEEDED(hr) && ::SystemParametersInfo(SPI_GETFONTSMOOTHINGCONTRAST, 0, &clearTypeContrast, 0) != 0) {
+			if (clearTypeContrast >= 1000 && clearTypeContrast <= 2200) {
+				const FLOAT gamma = static_cast<FLOAT>(clearTypeContrast) / 1000.0f;
+				pIDWriteFactory->CreateCustomRenderingParams(gamma,
+					monitorRenderingParams->GetEnhancedContrast(),
+					monitorRenderingParams->GetClearTypeLevel(),
+					monitorRenderingParams->GetPixelGeometry(),
+					monitorRenderingParams->GetRenderingMode(),
+					&customClearTypeRenderingParams);
+			}
 		}
 	}
 
@@ -1571,18 +1573,18 @@ std::string ScintillaWin::EncodeWString(std::wstring_view wsv) {
 }
 
 sptr_t ScintillaWin::GetTextLength() const noexcept {
-	return pdoc->CountUTF16(0, pdoc->Length());
+	return pdoc->CountUTF16(0, pdoc->LengthNoExcept());
 }
 
 sptr_t ScintillaWin::GetText(uptr_t wParam, sptr_t lParam) const {
 	if (lParam == 0) {
-		return pdoc->CountUTF16(0, pdoc->Length());
+		return pdoc->CountUTF16(0, pdoc->LengthNoExcept());
 	}
 	if (wParam == 0) {
 		return 0;
 	}
 	wchar_t *ptr = static_cast<wchar_t *>(PtrFromSPtr(lParam));
-	if (pdoc->Length() == 0) {
+	if (pdoc->LengthNoExcept() == 0) {
 		*ptr = L'\0';
 		return 0;
 	}
@@ -1590,7 +1592,7 @@ sptr_t ScintillaWin::GetText(uptr_t wParam, sptr_t lParam) const {
 	Sci::Position sizeRequestedRange = pdoc->GetRelativePositionUTF16(0, lengthWanted);
 	if (sizeRequestedRange < 0) {
 		// Requested more text than there is in the document.
-		sizeRequestedRange = pdoc->Length();
+		sizeRequestedRange = pdoc->LengthNoExcept();
 	}
 	std::string docBytes(sizeRequestedRange, '\0');
 	pdoc->GetCharRange(docBytes.data(), 0, sizeRequestedRange);
@@ -1974,8 +1976,8 @@ sptr_t ScintillaWin::EditMessage(unsigned int iMessage, uptr_t wParam, sptr_t lP
 			return -1;
 		} else {
 			const FINDTEXTA *pFT = reinterpret_cast<const FINDTEXTA *>(lParam);
-			TextToFind tt = { { pFT->chrg.cpMin, pFT->chrg.cpMax }, pFT->lpstrText, {} };
-			return ScintillaBase::WndProc(Message::FindText, wParam, reinterpret_cast<sptr_t>(&tt));
+			TextToFindFull tt = { { pFT->chrg.cpMin, pFT->chrg.cpMax }, pFT->lpstrText, {} };
+			return ScintillaBase::WndProc(Message::FindTextFull, wParam, reinterpret_cast<sptr_t>(&tt));
 		}
 
 	case EM_FINDTEXTEX:
@@ -1983,30 +1985,30 @@ sptr_t ScintillaWin::EditMessage(unsigned int iMessage, uptr_t wParam, sptr_t lP
 			return -1;
 		} else {
 			FINDTEXTEXA *pFT = reinterpret_cast<FINDTEXTEXA *>(lParam);
-			TextToFind tt = { { pFT->chrg.cpMin, pFT->chrg.cpMax }, pFT->lpstrText, {} };
-			const Sci::Position pos =ScintillaBase::WndProc(Message::FindText, wParam, reinterpret_cast<sptr_t>(&tt));
-			pFT->chrgText.cpMin = (pos == -1)? -1 : static_cast<LONG>(tt.chrgText.cpMin);
-			pFT->chrgText.cpMax = (pos == -1)? -1 : static_cast<LONG>(tt.chrgText.cpMax);
+			TextToFindFull tt = { { pFT->chrg.cpMin, pFT->chrg.cpMax }, pFT->lpstrText, {} };
+			const Sci::Position pos =ScintillaBase::WndProc(Message::FindTextFull, wParam, reinterpret_cast<sptr_t>(&tt));
+			pFT->chrgText.cpMin = (pos < 0)? -1 : static_cast<LONG>(tt.chrgText.cpMin);
+			pFT->chrgText.cpMax = (pos < 0)? -1 : static_cast<LONG>(tt.chrgText.cpMax);
 			return pos;
 		}
 
 	case EM_FORMATRANGE:
 		if (lParam) {
 			const FORMATRANGE *pFR = reinterpret_cast<const FORMATRANGE *>(lParam);
-			const RangeToFormat fr = { pFR->hdcTarget, pFR->hdc,
+			const RangeToFormatFull fr = { pFR->hdcTarget, pFR->hdc,
 				{ pFR->rc.left, pFR->rc.top, pFR->rc.right, pFR->rc.bottom },
 				{ pFR->rcPage.left, pFR->rcPage.top, pFR->rcPage.right, pFR->rcPage.bottom },
 				{ pFR->chrg.cpMin, pFR->chrg.cpMax },
 			};
-			return ScintillaBase::WndProc(Message::FormatRange, wParam, reinterpret_cast<sptr_t>(&fr));
+			return ScintillaBase::WndProc(Message::FormatRangeFull, wParam, reinterpret_cast<sptr_t>(&fr));
 		}
 		break;
 
 	case EM_GETTEXTRANGE:
 		if (lParam) {
 			TEXTRANGEA *pTR = reinterpret_cast<TEXTRANGEA *>(lParam);
-			TextRange tr = { { pTR->chrg.cpMin, pTR->chrg.cpMax }, pTR->lpstrText };
-			return ScintillaBase::WndProc(Message::GetTextRange, 0, reinterpret_cast<sptr_t>(&tr));
+			TextRangeFull tr = { { pTR->chrg.cpMin, pTR->chrg.cpMax }, pTR->lpstrText };
+			return ScintillaBase::WndProc(Message::GetTextRangeFull, 0, reinterpret_cast<sptr_t>(&tr));
 		}
 		break;
 
@@ -2014,10 +2016,10 @@ sptr_t ScintillaWin::EditMessage(unsigned int iMessage, uptr_t wParam, sptr_t lP
 		if (PositionFromUPtr(wParam) < 0) {
 			wParam = SelectionStart().Position();
 		}
-		return pdoc->LineFromPosition(wParam);
+		return pdoc->SciLineFromPosition(wParam);
 
 	case EM_EXLINEFROMCHAR:
-		return pdoc->LineFromPosition(lParam);
+		return pdoc->SciLineFromPosition(lParam);
 
 	case EM_GETSEL:
 		if (wParam) {
@@ -2041,10 +2043,10 @@ sptr_t ScintillaWin::EditMessage(unsigned int iMessage, uptr_t wParam, sptr_t lP
 	case EM_SETSEL: {
 		Sci::Position nStart = wParam;
 		Sci::Position nEnd = lParam;
-		if (nStart == 0 && nEnd == -1) {
-			nEnd = pdoc->Length();
+		if (nStart == 0 && nEnd < 0) {
+			nEnd = pdoc->LengthNoExcept();
 		}
-		if (nStart == -1) {
+		if (nStart < 0) {
 			nStart = nEnd;	// Remove selection
 		}
 		SetSelection(nEnd, nStart);
@@ -2057,18 +2059,15 @@ sptr_t ScintillaWin::EditMessage(unsigned int iMessage, uptr_t wParam, sptr_t lP
 			return 0;
 		}
 		const CHARRANGE *pCR = reinterpret_cast<const CHARRANGE *>(lParam);
+		const Sci::Position cpMax = (pCR->cpMax < 0) ? pdoc->LengthNoExcept() : pCR->cpMax;
 		sel.selType = Selection::SelTypes::stream;
-		if (pCR->cpMin == 0 && pCR->cpMax == -1) {
-			SetSelection(pCR->cpMin, pdoc->Length());
-		} else {
-			SetSelection(pCR->cpMin, pCR->cpMax);
-		}
+		SetSelection(pCR->cpMin, cpMax);
 		EnsureCaretVisible();
-		return pdoc->LineFromPosition(SelectionStart().Position());
+		return pdoc->SciLineFromPosition(SelectionStart().Position());
 	}
 
 	case EM_LINELENGTH:
-		return ScintillaBase::WndProc(Message::LineLength, pdoc->LineFromPosition(wParam), lParam);
+		return ScintillaBase::WndProc(Message::LineLength, pdoc->SciLineFromPosition(wParam), lParam);
 
 	case EM_POSFROMCHAR:
 		if (wParam) {
@@ -2173,7 +2172,6 @@ sptr_t ScintillaWin::SciMessage(Message iMessage, uptr_t wParam, sptr_t lParam) 
 						// Failed to load Direct2D or DirectWrite so no effect
 						return 0;
 					}
-					UpdateRenderingParams(true);
 				} else {
 					bidirectional = Bidirectional::Disabled;
 				}
@@ -2182,6 +2180,7 @@ sptr_t ScintillaWin::SciMessage(Message iMessage, uptr_t wParam, sptr_t lParam) 
 				technology = technologyNew;
 				// Invalidate all cached information including layout.
 				vs.fontsValid = false;
+				UpdateRenderingParams(true);
 				InvalidateStyleRedraw();
 			}
 		}
@@ -2299,9 +2298,7 @@ sptr_t ScintillaWin::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		case WM_SETTINGCHANGE:
 			//printf("%s before %s\n", GetCurrentLogTime(), "WM_SETTINGCHANGE");
 			//Platform::DebugPrintf("Setting Changed\n");
-			if (technology != Technology::Default) {
-				UpdateRenderingParams(true);
-			}
+			UpdateRenderingParams(true);
 			UpdateBaseElements();
 			// Get Intellimouse scroll line parameters
 			GetIntelliMouseParameters();
@@ -2378,11 +2375,11 @@ sptr_t ScintillaWin::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 			return ::DefWindowProc(MainHWND(), msg, wParam, lParam);
 
 		case WM_WINDOWPOSCHANGED:
-			if (technology != Technology::Default) {
-				if (UpdateRenderingParams(false)) {
-					DropGraphics();
-					Redraw();
-				}
+			if (UpdateRenderingParams(false)) {
+				DropGraphics();
+				Redraw();
+				// recreate toolbar after monitor changed
+				::SendMessage(::GetParent(MainHWND()), WM_THEMECHANGED, 0, 0);
 			}
 			return ::DefWindowProc(MainHWND(), msg, wParam, lParam);
 
@@ -3259,7 +3256,7 @@ void ScintillaWin::ImeStartComposition() {
 			// The negative is to allow for leading
 			lf.lfHeight = -::MulDiv(sizeZoomed, dpi, 72*FontSizeMultiplier);
 			lf.lfWeight = static_cast<LONG>(vs.styles[styleHere].weight);
-			lf.lfItalic = vs.styles[styleHere].italic ? TRUE : FALSE;
+			lf.lfItalic = vs.styles[styleHere].italic;
 			lf.lfCharSet = DEFAULT_CHARSET;
 			lf.lfQuality = Win32MapFontQuality(vs.extraFontFlag);
 #if 1
@@ -3294,7 +3291,7 @@ LRESULT ScintillaWin::ImeOnReconvert(LPARAM lParam) {
 	const Sci::Position mainStart = sel.RangeMain().Start().Position();
 	const Sci::Position mainEnd = sel.RangeMain().End().Position();
 	const Sci::Line curLine = pdoc->SciLineFromPosition(mainStart);
-	if (curLine != pdoc->LineFromPosition(mainEnd))
+	if (curLine != pdoc->SciLineFromPosition(mainEnd))
 		return 0;
 	const Sci::Position baseStart = pdoc->LineStart(curLine);
 	const Sci::Position baseEnd = pdoc->LineEnd(curLine);
@@ -3357,7 +3354,7 @@ LRESULT ScintillaWin::ImeOnReconvert(LPARAM lParam) {
 		} else {
 			// Ensure docCompStart+docCompLen be not beyond lineEnd.
 			// since docCompLen by byte might break eol.
-			const Sci::Position lineEnd = pdoc->LineEnd(pdoc->LineFromPosition(rBase));
+			const Sci::Position lineEnd = pdoc->LineEnd(pdoc->SciLineFromPosition(rBase));
 			const Sci::Position overflow = (docCompStart + docCompLen) - lineEnd;
 			if (overflow > 0) {
 				pdoc->DeleteChars(docCompStart, docCompLen - overflow);

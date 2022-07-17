@@ -90,7 +90,7 @@ class RegexSearchBase {
 public:
 	virtual ~RegexSearchBase() = default;
 
-	virtual Sci::Position FindText(Document *doc, Sci::Position minPos, Sci::Position maxPos, const char *s,
+	virtual Sci::Position FindText(const Document *doc, Sci::Position minPos, Sci::Position maxPos, const char *s,
 		bool caseSensitive, Scintilla::FindOption flags, Sci::Position *length) = 0;
 
 	///@return String with the substitutions, must remain valid until the next call or destruction
@@ -100,7 +100,7 @@ public:
 };
 
 /// Factory function for RegexSearchBase
-extern RegexSearchBase *CreateRegexSearch(CharClassify *charClassTable);
+extern RegexSearchBase *CreateRegexSearch(const CharClassify *charClassTable);
 
 struct StyledText {
 	size_t length;
@@ -142,7 +142,7 @@ public:
 	}
 
 	bool IsFoldBlockHighlighted(Sci::Line line) const noexcept {
-		return isEnabled && beginFoldBlock != -1 && beginFoldBlock <= line && line <= endFoldBlock;
+		return isEnabled && InRangeInclusive(beginFoldBlock, line) && line <= endFoldBlock;
 	}
 
 	bool IsHeadOfFoldBlock(Sci::Line line) const noexcept {
@@ -150,11 +150,11 @@ public:
 	}
 
 	bool IsBodyOfFoldBlock(Sci::Line line) const noexcept {
-		return beginFoldBlock != -1 && beginFoldBlock < line && line < endFoldBlock;
+		return IsValidIndex(beginFoldBlock, line) && line < endFoldBlock;
 	}
 
 	bool IsTailOfFoldBlock(Sci::Line line) const noexcept {
-		return beginFoldBlock != -1 && beginFoldBlock < line && line == endFoldBlock;
+		return IsValidIndex(beginFoldBlock, line) && line == endFoldBlock;
 	}
 
 	Sci::Line beginFoldBlock;	// Begin of current fold block
@@ -344,7 +344,7 @@ public:
 		return cb.ContainsLineEnd(s, length);
 	}
 	bool IsCrLf(Sci::Position pos) const noexcept;
-	int LenChar(Sci::Position pos, bool *invalid = nullptr) noexcept;
+	int LenChar(Sci::Position pos, bool *invalid = nullptr) const noexcept;
 	bool InGoodUTF8(Sci::Position pos, Sci::Position &start, Sci::Position &end) const noexcept;
 	Sci::Position MovePositionOutsideChar(Sci::Position pos, Sci::Position moveDir, bool checkLineEnd = true) const noexcept;
 	Sci::Position NextPosition(Sci::Position pos, int moveDir) const noexcept;
@@ -434,11 +434,11 @@ public:
 	int SCI_METHOD GetLineIndentation(Sci_Line line) const noexcept override;
 	Sci::Position SetLineIndentation(Sci::Line line, Sci::Position indent);
 	Sci::Position GetLineIndentPosition(Sci::Line line) const noexcept;
-	Sci::Position GetColumn(Sci::Position pos) noexcept;
+	Sci::Position GetColumn(Sci::Position pos) const noexcept;
 	Sci::Position CountCharacters(Sci::Position startPos, Sci::Position endPos) const noexcept;
 	void CountCharactersAndColumns(Scintilla::sptr_t lParam) const noexcept;
 	Sci::Position CountUTF16(Sci::Position startPos, Sci::Position endPos) const noexcept;
-	Sci::Position FindColumn(Sci::Line line, Sci::Position column) noexcept;
+	Sci::Position FindColumn(Sci::Line line, Sci::Position column) const noexcept;
 	void Indent(bool forwards, Sci::Line lineBottom, Sci::Line lineTop);
 	static std::string TransformLineEnds(const char *s, size_t len, Scintilla::EndOfLine eolModeWanted);
 	void ConvertLineEnds(Scintilla::EndOfLine eolModeSet);
@@ -499,7 +499,7 @@ public:
 	int SCI_METHOD GetLevel(Sci_Line line) const noexcept override;
 	Scintilla::FoldLevel GetFoldLevel(Sci_Position line) const noexcept;
 	void ClearLevels();
-	Sci::Line GetLastChild(Sci::Line lineParent, std::optional<Scintilla::FoldLevel> level = {}, Sci::Line lastLine = -1);
+	Sci::Line GetLastChild(Sci::Line lineParent, Scintilla::FoldLevel level = Scintilla::FoldLevel::None, Sci::Line lastLine = -1);
 	Sci::Line GetFoldParent(Sci::Line line) const noexcept;
 	void GetHighlightDelimiters(HighlightDelimiter &highlightDelimiter, Sci::Line line, Sci::Line lastLine);
 
@@ -507,6 +507,9 @@ public:
 	Sci::Position NextWordStart(Sci::Position pos, int delta) const noexcept;
 	Sci::Position NextWordEnd(Sci::Position pos, int delta) const noexcept;
 	Sci_Position SCI_METHOD Length() const noexcept override {
+		return cb.Length();
+	}
+	Sci::Position LengthNoExcept() const noexcept {
 		return cb.Length();
 	}
 	void Allocate(Sci::Position newSize) {
@@ -527,7 +530,9 @@ public:
 	Scintilla::LineCharacterIndexType LineCharacterIndex() const noexcept;
 	void AllocateLineCharacterIndex(Scintilla::LineCharacterIndexType lineCharacterIndex);
 	void ReleaseLineCharacterIndex(Scintilla::LineCharacterIndexType lineCharacterIndex);
-	Sci::Line LinesTotal() const noexcept;
+	Sci::Line LinesTotal() const noexcept {
+		return cb.Lines();
+	}
 	void AllocateLines(Sci::Line lines);
 
 	void SetDefaultCharClasses(bool includeWordClass) noexcept;
@@ -588,7 +593,7 @@ public:
 	bool IsWordPartSeparator(unsigned int ch) const noexcept;
 	Sci::Position WordPartLeft(Sci::Position pos) const noexcept;
 	Sci::Position WordPartRight(Sci::Position pos) const noexcept;
-	Sci::Position ExtendStyleRange(Sci::Position pos, int delta, bool singleLine = false) noexcept;
+	Sci::Position ExtendStyleRange(Sci::Position pos, int delta, bool singleLine = false) const noexcept;
 	bool IsWhiteLine(Sci::Line line) const noexcept;
 	Sci::Position ParaUp(Sci::Position pos) const noexcept;
 	Sci::Position ParaDown(Sci::Position pos) const noexcept;

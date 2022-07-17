@@ -60,7 +60,6 @@ Latest development builds (artifacts in Release configuration for each compiler 
 	* [D](tools/lang/D.d), up to D language 2.0.
 	* [Dart](tools/lang/Dart.dart), up to Dart 2.12.
 	* Diff/Patch File
-	* Doxygen
 	* F#
 	* Fortran, GNU Fortran
 	* [GN Build](tools/lang/GN.gn), up to GN 2019-03-13.
@@ -80,7 +79,7 @@ Latest development builds (artifacts in Release configuration for each compiler 
 	* [Boost Jam](tools/lang/Jamfile.jam), up to Jam 4.4.
 	* [Java](tools/lang/Java.java), up to Java 17. [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#java)
 		* [BeanShell](https://github.com/beanshell/beanshell)
-	* [JavaScript](tools/lang/JavaScript.js), up to ECMAScript 2021 (12th edition) with [JSX](https://facebook.github.io/jsx/) and [Web APIs](https://developer.mozilla.org/en-US/docs/Web/API).
+	* [JavaScript](tools/lang/JavaScript.js), up to ECMAScript 2022 with [JSX](https://facebook.github.io/jsx/) and [Web APIs](https://developer.mozilla.org/en-US/docs/Web/API).
 	* [JSON](https://www.json.org) and [JSON5](https://json5.org/) Document
 	* [Julia Script](tools/lang/Julia.jl), up to Julia 1.2. [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#julia)
 	* [Kotlin](tools/lang/Kotlin.kt), up to Kotlin 1.6.
@@ -105,7 +104,7 @@ Latest development builds (artifacts in Release configuration for each compiler 
 	* [Nullsoft Scriptable Install System](tools/lang/NSIS.nsi), up to NSIS 3.06.
 	* Pascal, Delphi
 	* Perl, [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#perl)
-	* PowerShell
+	* [PowerShell](tools/lang/PowerShell.ps1), up to PowerShell 7.2.
 	* [Python](tools/lang/Python.py), up to Python 3.10. [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#python)
 	* [PHP Script](tools/lang/PHP.php), up to PHP 8.1. [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#php)
 	* Windows Rescouce Script

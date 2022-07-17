@@ -1086,7 +1086,7 @@ SelectionPosition EditView::SPositionFromLocation(Surface *surface, const EditMo
 		return SelectionPosition(Sci::invalidPosition);
 	if (lineDoc >= model.pdoc->LinesTotal())
 		return SelectionPosition(canReturnInvalid ? Sci::invalidPosition :
-			model.pdoc->Length());
+			model.pdoc->LengthNoExcept());
 	const Sci::Position posLineStart = model.pdoc->LineStart(lineDoc);
 	if (surface) {
 		LineLayout * const ll = RetrieveLineLayout(lineDoc, model);
@@ -1205,7 +1205,7 @@ Sci::Position EditView::StartEndDisplayLine(Surface *surface, const EditModel &m
 
 namespace {
 
-constexpr ColourRGBA bugColour = ColourRGBA(0xff, 0, 0xff, 0xf0);
+constexpr ColourRGBA bugColour = ColourRGBA(0xff, 0, 0xfe, 0xf0);
 
 // Selection background colours are always defined, the value_or is to show if bug
 
@@ -2025,7 +2025,7 @@ void EditView::DrawCarets(Surface *surface, const EditModel &model, const ViewSt
 
 				const ViewStyle::CaretShape caretShape = vsDraw.CaretShapeForMode(model.inOverstrike, mainCaret, drawDrag, drawOverstrikeCaret, imeCaretBlockOverride);
 				if (caretShape != ViewStyle::CaretShape::line) {
-					if (posCaret.Position() == model.pdoc->Length()) {   // At end of document
+					if (posCaret.Position() == model.pdoc->LengthNoExcept()) {   // At end of document
 						canDrawBlockCaret = false;
 						widthOverstrikeCaret = vsDraw.aveCharWidth;
 					} else if ((posCaret.Position() - posLineStart) >= ll->numCharsInLine) {	// At end of line
@@ -2263,18 +2263,20 @@ static void DrawTranslucentSelection(Surface *surface, const EditModel &model, c
 				const ColourRGBA selectionBack = SelectionBackground(model, vsDraw, model.sel.RangeType(r));
 				const XYPOSITION spaceWidth = vsDraw.styles[ll->EndLineStyle()].spaceWidth;
 				if (model.BidirectionalEnabled()) {
-					const int selectionStart = static_cast<int>(portion.start.Position() - posLineStart - lineRange.start);
-					const int selectionEnd = static_cast<int>(portion.end.Position() - posLineStart - lineRange.start);
+					const Sci::Position selectionStart = portion.start.Position() - posLineStart - lineRange.start;
+					const Sci::Position selectionEnd = portion.end.Position() - posLineStart - lineRange.start;
 
 					const ScreenLine screenLine(ll, subLine, vsDraw, rcLine.right, tabWidthMinimumPixels);
-					std::unique_ptr<IScreenLineLayout> slLayout = surface->Layout(&screenLine);
+					const std::unique_ptr<IScreenLineLayout> slLayout = surface->Layout(&screenLine);
 
-					const std::vector<Interval> intervals = slLayout->FindRangeIntervals(selectionStart, selectionEnd);
-					for (const Interval &interval : intervals) {
-						const XYPOSITION rcRight = interval.right + xStart;
-						const XYPOSITION rcLeft = interval.left + xStart;
-						const PRectangle rcSelection(rcLeft, rcLine.top, rcRight, rcLine.bottom);
-						surface->FillRectangleAligned(rcSelection, selectionBack);
+					if (slLayout) {
+						const std::vector<Interval> intervals = slLayout->FindRangeIntervals(selectionStart, selectionEnd);
+						for (const Interval &interval : intervals) {
+							const XYPOSITION rcRight = interval.right + xStart;
+							const XYPOSITION rcLeft = interval.left + xStart;
+							const PRectangle rcSelection(rcLeft, rcLine.top, rcRight, rcLine.bottom);
+							surface->FillRectangleAligned(rcSelection, selectionBack);
+						}
 					}
 
 					if (portion.end.VirtualSpace()) {
@@ -2659,7 +2661,9 @@ void EditView::DrawLine(Surface *surface, const EditModel &model, const ViewStyl
 	}
 
 	if (FlagSet(phase, DrawPhase::text)) {
-		DrawTranslucentSelection(surface, model, vsDraw, ll, line, rcLine, subLine, lineRange, xStart, tabWidthMinimumPixels, Layer::UnderText);
+		if (!hideSelection) {
+			DrawTranslucentSelection(surface, model, vsDraw, ll, line, rcLine, subLine, lineRange, xStart, tabWidthMinimumPixels, Layer::UnderText);
+		}
 		DrawTranslucentLineState(surface, model, vsDraw, ll, line, rcLine, subLine, Layer::UnderText);
 		DrawForeground(surface, model, vsDraw, ll, lineVisible, rcLine, lineRange, posLineStart, xStart,
 			subLine, background);
@@ -2934,7 +2938,7 @@ void EditView::PaintText(Surface *surfaceWindow, const EditModel &model, PRectan
 		if (clipping)
 			surfaceWindow->PopClip();
 
-		//Platform::DebugPrintf("start display %d, offset = %d\n", model.pdoc->Length(), model.xOffset);
+		//Platform::DebugPrintf("start display %d, offset = %d\n", model.pdoc->LengthNoExcept(), model.xOffset);
 #if defined(TIME_PAINTING)
 		Platform::DebugPrintf(
 			"Layout:%9.6g    Paint:%9.6g    Ratio:%9.6g   Copy:%9.6g   Total:%9.6g\n",
@@ -2986,7 +2990,7 @@ static ColourRGBA InvertedLight(ColourRGBA orig) noexcept {
 	return ColourRGBA(std::min(r, 0xffu), std::min(g, 0xffu), std::min(b, 0xffu));
 }
 
-Sci::Position EditView::FormatRange(bool draw, const RangeToFormat *pfr, Surface *surface, Surface *surfaceMeasure,
+Sci::Position EditView::FormatRange(bool draw, CharacterRangeFull chrg, Scintilla::Rectangle rc, Surface *surface, Surface *surfaceMeasure,
 	const EditModel &model, const ViewStyle &vs) {
 	// Can't use measurements cached for screen
 	posCache.Clear();
@@ -3014,6 +3018,12 @@ Sci::Position EditView::FormatRange(bool draw, const RangeToFormat *pfr, Surface
 	// Don't show the selection when printing
 	vsPrint.elementColours.clear();
 	vsPrint.elementBaseColours.clear();
+	// Set all selection background colours to be transparent.
+	constexpr ColourRGBA transparent(0xc0, 0xc0, 0xc0, 0x0);
+	vsPrint.elementBaseColours[Element::SelectionBack] = transparent;
+	vsPrint.elementBaseColours[Element::SelectionAdditionalBack] = transparent;
+	vsPrint.elementBaseColours[Element::SelectionSecondaryBack] = transparent;
+	vsPrint.elementBaseColours[Element::SelectionInactiveBack] = transparent;
 	vsPrint.caretLine.alwaysShow = false;
 	// Don't highlight matching braces using indicators
 	vsPrint.braceHighlightIndicatorSet = false;
@@ -3053,30 +3063,30 @@ Sci::Position EditView::FormatRange(bool draw, const RangeToFormat *pfr, Surface
 		vsPrint.Refresh(*surfaceMeasure, model.pdoc->tabInChars);	// Recalculate fixedColumnWidth
 	}
 
-	const Sci::Line linePrintStart = model.pdoc->SciLineFromPosition(pfr->chrg.cpMin);
-	const Sci::Line linePrintMax = model.pdoc->SciLineFromPosition(pfr->chrg.cpMax);
-	Sci::Line linePrintLast = linePrintStart + (pfr->rc.bottom - pfr->rc.top) / vsPrint.lineHeight - 1;
+	const Sci::Line linePrintStart = model.pdoc->SciLineFromPosition(chrg.cpMin);
+	const Sci::Line linePrintMax = model.pdoc->SciLineFromPosition(chrg.cpMax);
+	Sci::Line linePrintLast = linePrintStart + (rc.bottom - rc.top) / vsPrint.lineHeight - 1;
 	linePrintLast = std::clamp(linePrintLast, linePrintStart, linePrintMax);
 	//Platform::DebugPrintf("Formatting lines=[%0d,%0d,%0d] top=%0d bottom=%0d line=%0d %.0f\n",
-	//      linePrintStart, linePrintLast, linePrintMax, pfr->rc.top, pfr->rc.bottom, vsPrint.lineHeight,
+	//      linePrintStart, linePrintLast, linePrintMax, rc.top, rc.bottom, vsPrint.lineHeight,
 	//      surfaceMeasure->Height(vsPrint.styles[StyleLineNumber].font));
-	Sci::Position endPosPrint = model.pdoc->Length();
+	Sci::Position endPosPrint = model.pdoc->LengthNoExcept();
 	if (linePrintLast < model.pdoc->LinesTotal())
 		endPosPrint = model.pdoc->LineStart(linePrintLast + 1);
 
 	// Ensure we are styled to where we are formatting.
 	model.pdoc->EnsureStyledTo(endPosPrint);
 
-	const int xStart = vsPrint.fixedColumnWidth + pfr->rc.left;
-	int ypos = pfr->rc.top;
+	const int xStart = vsPrint.fixedColumnWidth + rc.left;
+	int ypos = rc.top;
 
 	Sci::Line lineDoc = linePrintStart;
 
-	Sci::Position nPrintPos = pfr->chrg.cpMin;
+	Sci::Position nPrintPos = chrg.cpMin;
 	int visibleLine = 0;
-	const int widthPrint = (printParameters.wrapState == Wrap::None) ? LineLayout::wrapWidthInfinite : pfr->rc.right - pfr->rc.left - vsPrint.fixedColumnWidth;
+	const int widthPrint = (printParameters.wrapState == Wrap::None) ? LineLayout::wrapWidthInfinite : rc.right - rc.left - vsPrint.fixedColumnWidth;
 
-	while (lineDoc <= linePrintLast && ypos < pfr->rc.bottom) {
+	while (lineDoc <= linePrintLast && ypos < rc.bottom) {
 
 		// When printing, the hdc and hdcTarget may be the same, so
 		// changing the state of surfaceMeasure may change the underlying
@@ -3092,9 +3102,9 @@ Sci::Position EditView::FormatRange(bool draw, const RangeToFormat *pfr, Surface
 		ll.containsCaret = false;
 
 		PRectangle rcLine = PRectangle::FromInts(
-			pfr->rc.left,
+			rc.left,
 			ypos,
-			pfr->rc.right - 1,
+			rc.right - 1,
 			ypos + vsPrint.lineHeight);
 
 		// When document line is wrapped over multiple display lines, find where
@@ -3115,7 +3125,7 @@ Sci::Position EditView::FormatRange(bool draw, const RangeToFormat *pfr, Surface
 		}
 
 		if (draw && lineNumberWidth &&
-			(ypos + vsPrint.lineHeight <= pfr->rc.bottom) &&
+			(ypos + vsPrint.lineHeight <= rc.bottom) &&
 			(visibleLine >= 0)) {
 			const std::string number = std::to_string(lineDoc + 1) + lineNumberPrintSpace;
 			PRectangle rcNumber = rcLine;
@@ -3134,7 +3144,7 @@ Sci::Position EditView::FormatRange(bool draw, const RangeToFormat *pfr, Surface
 		surface->FlushCachedState();
 
 		for (int iwl = 0; iwl < ll.lines; iwl++) {
-			if (ypos + vsPrint.lineHeight <= pfr->rc.bottom) {
+			if (ypos + vsPrint.lineHeight <= rc.bottom) {
 				if (visibleLine >= 0) {
 					if (draw) {
 						rcLine.top = static_cast<XYPOSITION>(ypos);

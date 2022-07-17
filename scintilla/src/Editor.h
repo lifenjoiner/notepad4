@@ -416,7 +416,7 @@ protected:	// ScintillaBase subclass needs access to much of Editor
 	void SCICALL PaintSelMargin(Surface *surfaceWindow, PRectangle rc);
 	void RefreshPixMaps(Surface *surfaceWindow);
 	void SCICALL Paint(Surface *surfaceWindow, PRectangle rcArea);
-	Sci::Position FormatRange(bool draw, const Scintilla::RangeToFormat *pfr);
+	Sci::Position FormatRange(Scintilla::Message iMessage, Scintilla::uptr_t wParam, Scintilla::sptr_t lParam);
 	long TextWidth(Scintilla::uptr_t style, const char *text);
 
 	virtual void SetVerticalScrollPos() = 0;
@@ -527,7 +527,7 @@ protected:	// ScintillaBase subclass needs access to much of Editor
 	void Indent(bool forwards);
 
 	virtual std::unique_ptr<CaseFolder> CaseFolderForEncoding();
-	Sci::Position FindText(Scintilla::uptr_t wParam, Scintilla::sptr_t lParam);
+	Sci::Position FindTextFull(Scintilla::uptr_t wParam, Scintilla::sptr_t lParam);
 	void SearchAnchor() noexcept;
 	Sci::Position SearchText(Scintilla::Message iMessage, Scintilla::uptr_t wParam, Scintilla::sptr_t lParam);
 	Sci::Position SearchInTarget(const char *text, Sci::Position length);
@@ -599,7 +599,7 @@ protected:	// ScintillaBase subclass needs access to much of Editor
 	void SetAnnotationVisible(Scintilla::AnnotationVisible visible);
 	void SetEOLAnnotationVisible(Scintilla::EOLAnnotationVisible visible) noexcept;
 
-	Sci::Line ExpandLine(Sci::Line line);
+	Sci::Line ExpandLine(Sci::Line line, Scintilla::FoldLevel level = Scintilla::FoldLevel::None, Sci::Line *parentLine = nullptr);
 	void SetFoldExpanded(Sci::Line lineDoc, bool expanded);
 	void FoldLine(Sci::Line line, Scintilla::FoldAction action);
 	void FoldExpand(Sci::Line line, Scintilla::FoldAction action, Scintilla::FoldLevel level);
@@ -672,13 +672,6 @@ protected:	// ScintillaBase subclass needs access to much of Editor
 	}
 	Point PointFromParameters(Scintilla::uptr_t wParam, Scintilla::sptr_t lParam) const noexcept {
 		return Point(static_cast<XYPOSITION>(wParam) - vs.ExternalMarginWidth(), static_cast<XYPOSITION>(lParam));
-	}
-
-	static constexpr std::optional<FoldLevel> OptionalFoldLevel(Scintilla::sptr_t lParam) {
-		if (lParam >= 0) {
-			return static_cast<FoldLevel>(lParam);
-		}
-		return std::nullopt;
 	}
 
 	static Scintilla::sptr_t StringResult(Scintilla::sptr_t lParam, const char *val) noexcept;

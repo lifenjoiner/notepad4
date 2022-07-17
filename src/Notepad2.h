@@ -26,18 +26,19 @@
 //==== Data Type for WM_COPYDATA ==============================================
 #define DATA_NOTEPAD2_PARAMS 0xFB10
 typedef struct NP2PARAMS {
-	int		flagFileSpecified;
+	bool	flagFileSpecified;
+	bool	flagReadOnlyMode;
+	bool	flagLexerSpecified;
+	bool	flagQuietCreate;
+	bool	flagTitleExcerpt;
+	bool	flagJumpTo;
 	int		flagChangeNotify;
-	int		flagLexerSpecified;
 	int		iInitialLexer;
-	int		flagQuietCreate;
-	int		flagJumpTo;
 	Sci_Line		iInitialLine;
 	Sci_Position	iInitialColumn;
 	int		iSrcEncoding;
 	int		flagSetEncoding;
 	int		flagSetEOLMode;
-	int		flagTitleExcerpt;
 	WCHAR wchData;
 } NP2PARAMS, *LPNP2PARAMS;
 
@@ -127,35 +128,35 @@ extern WCHAR szCurFile[MAX_PATH + 40];
 //==== Function Declarations ==================================================
 BOOL InitApplication(HINSTANCE hInstance);
 void InitInstance(HINSTANCE hInstance, int nCmdShow);
-BOOL ActivatePrevInst(void);
-void GetRelaunchParameters(LPWSTR szParameters, LPCWSTR lpszFile, BOOL newWind, BOOL emptyWind);
-BOOL RelaunchMultiInst(void);
-BOOL RelaunchElevated(void);
+bool ActivatePrevInst(void);
+void GetRelaunchParameters(LPWSTR szParameters, LPCWSTR lpszFile, bool newWind, bool emptyWind);
+bool RelaunchMultiInst(void);
+bool RelaunchElevated(void);
 void SnapToDefaultPos(HWND hwnd);
-void ShowNotifyIcon(HWND hwnd, BOOL bAdd);
+void ShowNotifyIcon(HWND hwnd, bool bAdd);
 void SetNotifyIconTitle(HWND hwnd);
 
 void ShowNotificationA(int notifyPos, LPCSTR lpszText);
 void ShowNotificationW(int notifyPos, LPCWSTR lpszText);
 void ShowNotificationMessage(int notifyPos, UINT uidMessage, ...);
 
-void InstallFileWatching(BOOL terminate);
+void InstallFileWatching(bool terminate);
 void CALLBACK WatchTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
 void CALLBACK PasteBoardTimer(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
 
 void LoadSettings(void);
-void SaveSettingsNow(BOOL bOnlySaveStyle, BOOL bQuiet);
-void SaveSettings(BOOL bSaveSettingsNow);
-void SaveWindowPosition(BOOL bSaveSettingsNow, WCHAR *pIniSectionBuf);
+void SaveSettingsNow(bool bOnlySaveStyle, bool bQuiet);
+void SaveSettings(bool bSaveSettingsNow);
+void SaveWindowPosition(bool bSaveSettingsNow, WCHAR *pIniSectionBuf);
 void ClearWindowPositionHistory(void);
 void ParseCommandLine(void);
 void LoadFlags(void);
 
-BOOL CheckIniFile(LPWSTR lpszFile, LPCWSTR lpszModule);
-BOOL CheckIniFileRedirect(LPWSTR lpszFile, LPCWSTR lpszModule, LPCWSTR redirectKey);
-BOOL FindIniFile(void);
-BOOL TestIniFile(void);
-BOOL CreateIniFile(LPCWSTR lpszIniFile);
+bool CheckIniFile(LPWSTR lpszFile, LPCWSTR lpszModule);
+bool CheckIniFileRedirect(LPWSTR lpszFile, LPCWSTR lpszModule, LPCWSTR redirectKey);
+bool FindIniFile(void);
+bool TestIniFile(void);
+bool CreateIniFile(LPCWSTR lpszIniFile);
 void FindExtraIniFile(LPWSTR lpszIniFile, LPCWSTR defaultName, LPCWSTR redirectKey);
 
 void UpdateWindowTitle(void);
@@ -181,16 +182,15 @@ typedef struct EditFileIOStatus {
 	int iEncoding;		// load output, save input
 	int iEOLMode;		// load output
 
-	BOOL bFileTooBig;	// load output
-	BOOL bUnicodeErr;	// load output
+	bool bFileTooBig;	// load output
+	bool bUnicodeErr;	// load output
+	bool bCancelDataLoss;// save output
 
 	// inconsistent line endings
-	BOOL bLineEndingsDefaultNo; // set default button to "No"
-	BOOL bInconsistent;	// load output
+	bool bLineEndingsDefaultNo; // set default button to "No"
+	bool bInconsistent;	// load output
 	Sci_Line totalLineCount; // load output, sum(linesCount) + 1
 	Sci_Line linesCount[3];	// load output: CR+LF, LF, CR
-
-	BOOL bCancelDataLoss;// save output
 } EditFileIOStatus;
 
 typedef enum FileLoadFlag {
@@ -209,11 +209,11 @@ typedef enum FileSaveFlag {
 	FileSaveFlag_EndSession = 16,
 } FileSaveFlag;
 
-BOOL FileIO(BOOL fLoad, LPWSTR pszFile, int flag, EditFileIOStatus *status);
-BOOL FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile);
-BOOL FileSave(FileSaveFlag saveFlag);
+bool FileIO(bool fLoad, LPWSTR pszFile, int flag, EditFileIOStatus *status);
+bool FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile);
+bool FileSave(FileSaveFlag saveFlag);
 BOOL OpenFileDlg(HWND hwnd, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir);
-BOOL SaveFileDlg(HWND hwnd, BOOL Untitled, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir);
+BOOL SaveFileDlg(HWND hwnd, bool Untitled, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir);
 
 enum {
 	AutoSaveOption_None = 0,
@@ -224,9 +224,9 @@ enum {
 	AutoSaveDefaultPeriod = 5000,
 };
 
-void	AutoSave_Start(BOOL reset);
+void	AutoSave_Start(bool reset);
 void	AutoSave_Stop(BOOL keepBackup);
-void	AutoSave_DoWork(BOOL keepBackup);
+void	AutoSave_DoWork(bool keepBackup);
 LPCWSTR AutoSave_GetDefaultFolder(void);
 
 LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam);

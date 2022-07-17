@@ -371,7 +371,7 @@ void ScintillaBase::AutoCompleteMoveToCurrentWord() {
 void ScintillaBase::AutoCompleteSelection() {
 	const int item = ac.GetSelection();
 	std::string selected;
-	if (item != -1) {
+	if (item >= 0) {
 		selected = ac.GetValue(item);
 	}
 
@@ -411,7 +411,7 @@ void ScintillaBase::AutoCompleteCharacterDeleted() {
 
 void ScintillaBase::AutoCompleteCompleted(char ch, CompletionMethods completionMethod) {
 	const int item = ac.GetSelection();
-	if (item == -1) {
+	if (item < 0) {
 		AutoCompleteCancel();
 		return;
 	}
@@ -460,7 +460,7 @@ int ScintillaBase::AutoCompleteGetCurrent() const noexcept {
 int ScintillaBase::AutoCompleteGetCurrentText(char *buffer) const {
 	if (ac.Active()) {
 		const int item = ac.GetSelection();
-		if (item != -1) {
+		if (item >= 0) {
 			const std::string selected = ac.GetValue(item);
 			if (buffer != nullptr)
 				memcpy(buffer, selected.c_str(), selected.length() + 1);
@@ -1094,17 +1094,16 @@ sptr_t ScintillaBase::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		return DocumentLexState()->GetIdentifier();
 
 	case Message::Colourise:
-		// from Editor::FoldAll()
-		pdoc->EnsureStyledTo((lParam == -1) ? pdoc->Length() : lParam);
+		pdoc->EnsureStyledTo((lParam < 0) ? pdoc->LengthNoExcept() : pdoc->LineStart(pdoc->SciLineFromPosition(lParam - 1) + 1));
 #if 0
 		if (DocumentLexState()->UseContainerLexing()) {
 			pdoc->ModifiedAt(PositionFromUPtr(wParam));
-			NotifyStyleToNeeded((lParam == -1) ? pdoc->Length() : lParam);
+			NotifyStyleToNeeded((lParam < 0) ? pdoc->LengthNoExcept() : lParam);
 		} else {
 			DocumentLexState()->Colourise(PositionFromUPtr(wParam), lParam);
 		}
-#endif
 		Redraw();
+#endif
 		break;
 
 	case Message::SetProperty:

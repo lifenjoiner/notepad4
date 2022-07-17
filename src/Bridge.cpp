@@ -86,9 +86,9 @@ static inline UINT GetLocaleMeasurement() noexcept {
 //
 // EditPrint() - Code from SciTEWin::Print()
 //
-extern "C" BOOL EditPrint(HWND hwnd, LPCWSTR pszDocTitle) {
+extern "C" bool EditPrint(HWND hwnd, LPCWSTR pszDocTitle) {
 	PRINTDLG pdlg;
-	ZeroMemory(&pdlg, sizeof(PRINTDLG));
+	memset(&pdlg, 0, sizeof(PRINTDLG));
 	pdlg.lStructSize = sizeof(PRINTDLG);
 	pdlg.hwndOwner = GetParent(hwnd);
 	pdlg.hInstance = g_hInstance;
@@ -117,7 +117,7 @@ extern "C" BOOL EditPrint(HWND hwnd, LPCWSTR pszDocTitle) {
 	}
 #endif
 	if (!PrintDlg(&pdlg)) {
-		return TRUE; // False means error...
+		return true; // False means error...
 	}
 
 	hDevMode = pdlg.hDevMode;
@@ -252,7 +252,7 @@ extern "C" BOOL EditPrint(HWND hwnd, LPCWSTR pszDocTitle) {
 		if (fontFooter) {
 			DeleteObject(fontFooter);
 		}
-		return FALSE;
+		return false;
 	}
 
 	// Get current date...
@@ -294,7 +294,7 @@ extern "C" BOOL EditPrint(HWND hwnd, LPCWSTR pszDocTitle) {
 	}
 
 	// We must substract the physical margins from the printable area
-	struct Sci_RangeToFormat frPrint;
+	struct Sci_RangeToFormatFull frPrint;
 	frPrint.hdc = hdc;
 	frPrint.hdcTarget = hdc;
 	frPrint.rc.left		= rectMargins.left - rectPhysMargins.left;
@@ -318,10 +318,10 @@ extern "C" BOOL EditPrint(HWND hwnd, LPCWSTR pszDocTitle) {
 	// Show wait cursor...
 	BeginWaitCursor();
 
-	BOOL printEmpty = lengthPrinted == lengthDoc;
+	bool printEmpty = lengthPrinted == lengthDoc;
 	while (lengthPrinted < lengthDoc || printEmpty) {
-		printEmpty = FALSE;
-		const BOOL printPage = !(pdlg.Flags & PD_PAGENUMS) || (pageNum >= pdlg.nFromPage && pageNum <= pdlg.nToPage);
+		printEmpty = false;
+		const bool printPage = !(pdlg.Flags & PD_PAGENUMS) || (pageNum >= pdlg.nFromPage && pageNum <= pdlg.nToPage);
 		WCHAR tchNum[32];
 		_ltow(pageNum, tchNum, 10);
 		FormatNumberStr(tchNum);
@@ -382,7 +382,7 @@ extern "C" BOOL EditPrint(HWND hwnd, LPCWSTR pszDocTitle) {
 		frPrint.chrg.cpMin = lengthPrinted;
 		frPrint.chrg.cpMax = lengthDoc;
 
-		lengthPrinted = SciCall_FormatRange(printPage, &frPrint);
+		lengthPrinted = SciCall_FormatRangeFull(printPage, &frPrint);
 
 		if (printPage) {
 			SetTextColor(hdc, RGB(0, 0, 0));
@@ -422,7 +422,7 @@ extern "C" BOOL EditPrint(HWND hwnd, LPCWSTR pszDocTitle) {
 		}
 	}
 
-	SciCall_FormatRange(FALSE, nullptr);
+	SciCall_FormatRangeFull(false, nullptr);
 
 	EndDoc(hdc);
 	DeleteDC(hdc);
@@ -439,7 +439,7 @@ extern "C" BOOL EditPrint(HWND hwnd, LPCWSTR pszDocTitle) {
 	// Remove wait cursor...
 	EndWaitCursor();
 
-	return TRUE;
+	return true;
 }
 
 //=============================================================================
@@ -534,7 +534,7 @@ extern "C" void EditPrintSetup(HWND hwnd) {
 	DLGTEMPLATE *pDlgTemplate = LoadThemedDialogTemplate(MAKEINTRESOURCE(IDD_PAGESETUP), g_hInstance);
 
 	PAGESETUPDLG pdlg;
-	ZeroMemory(&pdlg, sizeof(PAGESETUPDLG));
+	memset(&pdlg, 0, sizeof(PAGESETUPDLG));
 	pdlg.lStructSize = sizeof(PAGESETUPDLG);
 	pdlg.Flags = PSD_ENABLEPAGESETUPHOOK | PSD_ENABLEPAGESETUPTEMPLATEHANDLE;
 	pdlg.lpfnPageSetupHook = PageSetupHook;
@@ -572,7 +572,7 @@ extern "C" void EditPrintSetup(HWND hwnd) {
 // EditPrintInit() - Setup default page margin if no values from registry
 //
 static void EditPrintInit() noexcept {
-	if (pageSetupMargin.left == -1 || pageSetupMargin.top == -1 || pageSetupMargin.right == -1 || pageSetupMargin.bottom == -1) {
+	if ((pageSetupMargin.left | pageSetupMargin.top | pageSetupMargin.right | pageSetupMargin.bottom) < 0) {
 		const UINT measurement = GetLocaleMeasurement();
 		if (measurement == MeasurementInternational) {
 			pageSetupMargin.left = 2000;

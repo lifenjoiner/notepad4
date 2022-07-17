@@ -39,7 +39,7 @@
 #include "Dlapi.h"
 #include "resource.h"
 
-void IniClearSectionEx(LPCWSTR lpSection, LPCWSTR lpszIniFile, BOOL bDelete) {
+void IniClearSectionEx(LPCWSTR lpSection, LPCWSTR lpszIniFile, bool bDelete) {
 	if (StrIsEmpty(lpszIniFile)) {
 		return;
 	}
@@ -47,7 +47,7 @@ void IniClearSectionEx(LPCWSTR lpSection, LPCWSTR lpszIniFile, BOOL bDelete) {
 	WritePrivateProfileSection(lpSection, (bDelete ? NULL : L""), lpszIniFile);
 }
 
-void IniClearAllSectionEx(LPCWSTR lpszPrefix, LPCWSTR lpszIniFile, BOOL bDelete) {
+void IniClearAllSectionEx(LPCWSTR lpszPrefix, LPCWSTR lpszIniFile, bool bDelete) {
 	if (StrIsEmpty(lpszIniFile)) {
 		return;
 	}
@@ -71,10 +71,10 @@ void IniClearAllSectionEx(LPCWSTR lpszPrefix, LPCWSTR lpszIniFile, BOOL bDelete)
 //
 //  Manipulation of (cached) ini file sections
 //
-BOOL IniSectionParseArray(IniSection *section, LPWSTR lpCachedIniSection) {
+bool IniSectionParseArray(IniSection *section, LPWSTR lpCachedIniSection) {
 	IniSectionClear(section);
 	if (StrIsEmpty(lpCachedIniSection)) {
-		return FALSE;
+		return false;
 	}
 
 	const int capacity = section->capacity;
@@ -98,10 +98,10 @@ BOOL IniSectionParseArray(IniSection *section, LPWSTR lpCachedIniSection) {
 	return count != 0;
 }
 
-BOOL IniSectionParse(IniSection *section, LPWSTR lpCachedIniSection) {
+bool IniSectionParse(IniSection *section, LPWSTR lpCachedIniSection) {
 	IniSectionClear(section);
 	if (StrIsEmpty(lpCachedIniSection)) {
-		return FALSE;
+		return false;
 	}
 
 	const int capacity = section->capacity;
@@ -124,7 +124,7 @@ BOOL IniSectionParse(IniSection *section, LPWSTR lpCachedIniSection) {
 	} while (*p && count < capacity);
 
 	if (count == 0) {
-		return FALSE;
+		return false;
 	}
 
 	section->count = count;
@@ -139,7 +139,7 @@ BOOL IniSectionParse(IniSection *section, LPWSTR lpCachedIniSection) {
 		section->nodeList[count - 1].next = &section->nodeList[count];
 		--count;
 	}
-	return TRUE;
+	return true;
 }
 
 LPCWSTR IniSectionUnsafeGetValue(IniSection *section, LPCWSTR key, int keyLen) {
@@ -152,7 +152,7 @@ LPCWSTR IniSectionUnsafeGetValue(IniSection *section, LPCWSTR key, int keyLen) {
 	IniKeyValueNode *prev = NULL;
 #if IniSectionImplUseSentinelNode
 	section->sentinel->hash = hash;
-	while (TRUE) {
+	while (true) {
 		if (node->hash == hash) {
 			if (node == section->sentinel) {
 				return NULL;
@@ -204,12 +204,12 @@ int IniSectionGetIntImpl(IniSection *section, LPCWSTR key, int keyLen, int iDefa
 	return iDefault;
 }
 
-BOOL IniSectionGetBoolImpl(IniSection *section, LPCWSTR key, int keyLen, BOOL bDefault) {
+bool IniSectionGetBoolImpl(IniSection *section, LPCWSTR key, int keyLen, bool bDefault) {
 	LPCWSTR value = IniSectionGetValueImpl(section, key, keyLen);
 	if (value) {
 		const UINT t = *value - L'0';
-		if (t <= 1U) {
-			return t;
+		if (t <= true) {
+			return t & true;
 		}
 	}
 	return bDefault;
@@ -292,7 +292,7 @@ int ParseCommaList(LPCWSTR str, int result[], int count) {
 	return index;
 }
 
-BOOL FindUserResourcePath(LPCWSTR path, LPWSTR outPath) {
+bool FindUserResourcePath(LPCWSTR path, LPWSTR outPath) {
 	// similar to CheckIniFile()
 	WCHAR tchFileExpanded[MAX_PATH];
 	ExpandEnvironmentStrings(path, tchFileExpanded, COUNTOF(tchFileExpanded));
@@ -305,7 +305,7 @@ BOOL FindUserResourcePath(LPCWSTR path, LPWSTR outPath) {
 			lstrcpy(PathFindFileName(tchBuild), tchFileExpanded);
 			if (PathIsFile(tchBuild)) {
 				lstrcpy(outPath, tchBuild);
-				return TRUE;
+				return true;
 			}
 		}
 
@@ -314,13 +314,13 @@ BOOL FindUserResourcePath(LPCWSTR path, LPWSTR outPath) {
 		lstrcpy(PathFindFileName(tchBuild), tchFileExpanded);
 		if (PathIsFile(tchBuild)) {
 			lstrcpy(outPath, tchBuild);
-			return TRUE;
+			return true;
 		}
 	} else if (PathIsFile(tchFileExpanded)) {
 		lstrcpy(outPath, tchFileExpanded);
-		return TRUE;
+		return true;
 	}
-	return FALSE;
+	return false;
 }
 
 HBITMAP LoadBitmapFile(LPCWSTR path) {
@@ -395,8 +395,8 @@ HRESULT PrivateSetCurrentProcessExplicitAppUserModelID(PCWSTR AppID) {
 //
 // IsElevated()
 //
-BOOL IsElevated(void) {
-	BOOL bIsElevated = FALSE;
+bool IsElevated(void) {
+	bool bIsElevated = false;
 	HANDLE hToken = NULL;
 
 	if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
@@ -405,7 +405,7 @@ BOOL IsElevated(void) {
 
 		if (GetTokenInformation(hToken, TokenElevation, &te, sizeof(te), &dwReturnLength)) {
 			if (dwReturnLength == sizeof(te)) {
-				bIsElevated = te.TokenIsElevated;
+				bIsElevated = te.TokenIsElevated != 0;
 			}
 		}
 		CloseHandle(hToken);
@@ -417,7 +417,7 @@ BOOL IsElevated(void) {
 //
 //  ExeNameFromWnd()
 //
-BOOL ExeNameFromWnd(HWND hwnd, LPWSTR szExeName, int cchExeName) {
+bool ExeNameFromWnd(HWND hwnd, LPWSTR szExeName, int cchExeName) {
 	DWORD dwProcessId;
 	GetWindowThreadProcessId(hwnd, &dwProcessId);
 	HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, dwProcessId);
@@ -427,7 +427,7 @@ BOOL ExeNameFromWnd(HWND hwnd, LPWSTR szExeName, int cchExeName) {
 	EnumProcessModules(hProcess, &hModule, sizeof(HMODULE), &cbNeeded);
 	GetModuleFileNameEx(hProcess, hModule, szExeName, cchExeName);
 	CloseHandle(hProcess);
-	return TRUE;
+	return true;
 }
 
 ////=============================================================================
@@ -435,7 +435,7 @@ BOOL ExeNameFromWnd(HWND hwnd, LPWSTR szExeName, int cchExeName) {
 ////  Is32bitExe()
 ////
 /*
-BOOL Is32bitExe(LPCWSTR lpszExeName) {
+bool Is32bitExe(LPCWSTR lpszExeName) {
 	SHFILEINFO shfi;
 	DWORD dwExeType;
 	WCHAR tch[MAX_PATH];
@@ -455,7 +455,7 @@ BOOL Is32bitExe(LPCWSTR lpszExeName) {
 //  BitmapAlphaBlend()
 //  Perform alpha blending to color channel only
 //
-BOOL BitmapAlphaBlend(HBITMAP hbmp, COLORREF crDest, BYTE alpha) {
+bool BitmapAlphaBlend(HBITMAP hbmp, COLORREF crDest, BYTE alpha) {
 	BITMAP bmp;
 	if (GetObject(hbmp, sizeof(BITMAP), &bmp)) {
 		if (bmp.bmBitsPixel == 32) {
@@ -550,29 +550,10 @@ BOOL BitmapAlphaBlend(HBITMAP hbmp, COLORREF crDest, BYTE alpha) {
 			//StopWatch_Stop(watch);
 			//StopWatch_ShowLog(&watch, "BitmapAlphaBlend " BitmapAlphaBlend_Tag);
 			#undef BitmapAlphaBlend_Tag
-			return TRUE;
+			return true;
 		}
 	}
-	return FALSE;
-}
-
-//=============================================================================
-//
-//  SetWindowPathTitle()
-//
-BOOL SetWindowPathTitle(HWND hwnd, LPCWSTR lpszFile) {
-	WCHAR szTitle[MAX_PATH] = L"";
-	if (StrNotEmpty(lpszFile)) {
-		if (!PathIsRoot(lpszFile)) {
-			SHFILEINFO shfi;
-			SHGetFileInfo(lpszFile, 0, &shfi, sizeof(SHFILEINFO), SHGFI_DISPLAYNAME);
-			lstrcpy(szTitle, shfi.szDisplayName);
-		} else {
-			lstrcpy(szTitle, lpszFile);
-		}
-	}
-
-	return SetWindowText(hwnd, szTitle);
+	return false;
 }
 
 //=============================================================================
@@ -865,7 +846,7 @@ void SetClipData(HWND hwnd, LPCWSTR pszData) {
 //
 //  SetWindowTransparentMode()
 //
-void SetWindowTransparentMode(HWND hwnd, BOOL bTransparentMode, int iOpacityLevel) {
+void SetWindowTransparentMode(HWND hwnd, bool bTransparentMode, int iOpacityLevel) {
 	// https://docs.microsoft.com/en-us/windows/win32/winmsg/using-windows#using-layered-windows
 	DWORD exStyle = GetWindowExStyle(hwnd);
 	exStyle = bTransparentMode ? (exStyle | WS_EX_LAYERED) : (exStyle & ~WS_EX_LAYERED);
@@ -878,7 +859,7 @@ void SetWindowTransparentMode(HWND hwnd, BOOL bTransparentMode, int iOpacityLeve
 	RedrawWindow(hwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
 }
 
-void SetWindowLayoutRTL(HWND hwnd, BOOL bRTL) {
+void SetWindowLayoutRTL(HWND hwnd, bool bRTL) {
 	// https://docs.microsoft.com/en-us/windows/win32/winmsg/window-features#window-layout-and-mirroring
 	DWORD exStyle = GetWindowExStyle(hwnd);
 	exStyle = bRTL ? (exStyle | WS_EX_LAYOUTRTL) : (exStyle & ~WS_EX_LAYOUTRTL);
@@ -923,7 +904,7 @@ int Toolbar_SetButtons(HWND hwnd, LPCWSTR lpszButtons, LPCTBBUTTON ptbb, int ctb
 
 	LPCWSTR p = lpszButtons;
 	--ctbb;
-	while (TRUE) {
+	while (true) {
 		LPWSTR end;
 		int iCmd = (int)wcstol(p, &end, 10);
 		if (p != end) {
@@ -1040,10 +1021,10 @@ void GetLocaleDefaultUIFont(LANGID lang, LPWSTR lpFaceName, WORD *wSize) {
 #endif
 #endif // NP2_ENABLE_APP_LOCALIZATION_DLL
 
-BOOL PathGetRealPath(HANDLE hFile, LPCWSTR lpszSrc, LPWSTR lpszDest) {
+bool PathGetRealPath(HANDLE hFile, LPCWSTR lpszSrc, LPWSTR lpszDest) {
 	WCHAR path[8 + MAX_PATH] = L"";
 	if (IsVistaAndAbove()) {
-		const BOOL closing = hFile == NULL;
+		const bool closing = hFile == NULL;
 		if (closing) {
 			hFile = CreateFile(lpszSrc, FILE_READ_ATTRIBUTES,
 				FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -1074,7 +1055,7 @@ BOOL PathGetRealPath(HANDLE hFile, LPCWSTR lpszSrc, LPWSTR lpszDest) {
 				}
 				if (cch > 0 && cch < MAX_PATH) {
 					memcpy(lpszDest, p, (cch + 1)*sizeof(WCHAR));
-					return TRUE;
+					return true;
 				}
 			}
 		}
@@ -1094,17 +1075,17 @@ BOOL PathGetRealPath(HANDLE hFile, LPCWSTR lpszSrc, LPWSTR lpszDest) {
 		}
 		if (cch > 0 && cch < MAX_PATH) {
 			memcpy(lpszDest, p, (cch + 1)*sizeof(WCHAR));
-			return TRUE;
+			return true;
 		}
 	}
-	return FALSE;
+	return false;
 }
 
 //=============================================================================
 //
 //  PathRelativeToApp()
 //
-void PathRelativeToApp(LPCWSTR lpszSrc, LPWSTR lpszDest, DWORD dwAttrTo, BOOL bUnexpandEnv, BOOL bUnexpandMyDocs) {
+void PathRelativeToApp(LPCWSTR lpszSrc, LPWSTR lpszDest, DWORD dwAttrTo, bool bUnexpandEnv, bool bUnexpandMyDocs) {
 	WCHAR wchPath[MAX_PATH];
 
 	if (!PathIsRelative(lpszSrc)) {
@@ -1152,7 +1133,7 @@ void PathRelativeToApp(LPCWSTR lpszSrc, LPWSTR lpszDest, DWORD dwAttrTo, BOOL bU
 //
 //  PathAbsoluteFromApp()
 //
-void PathAbsoluteFromApp(LPCWSTR lpszSrc, LPWSTR lpszDest, BOOL bExpandEnv) {
+void PathAbsoluteFromApp(LPCWSTR lpszSrc, LPWSTR lpszDest, bool bExpandEnv) {
 	WCHAR wchPath[MAX_PATH];
 
 	if (StrHasPrefix(lpszSrc, L"%CSIDL:MYDOCUMENTS%")) {
@@ -1200,12 +1181,12 @@ void PathAbsoluteFromApp(LPCWSTR lpszSrc, LPWSTR lpszDest, BOOL bExpandEnv) {
 //
 //  Manipulates: pszResPath
 //
-BOOL PathGetLnkPath(LPCWSTR pszLnkFile, LPWSTR pszResPath) {
+bool PathGetLnkPath(LPCWSTR pszLnkFile, LPWSTR pszResPath) {
 	if (StrIsEmpty(pszLnkFile)) {
-		return FALSE;
+		return false;
 	}
 	if (!StrCaseEqual(PathFindExtension(pszLnkFile), L".lnk")) {
-		return FALSE;
+		return false;
 	}
 
 	IShellLink *psl;
@@ -1244,10 +1225,10 @@ BOOL PathGetLnkPath(LPCWSTR pszLnkFile, LPWSTR pszResPath) {
 		if (!PathCanonicalize(pszResPath, tchPath)) {
 			lstrcpy(pszResPath, tchPath);
 		}
-		return TRUE;
+		return true;
 	}
 
-	return FALSE;
+	return false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1260,7 +1241,7 @@ BOOL PathGetLnkPath(LPCWSTR pszLnkFile, LPWSTR pszResPath) {
 //
 //  Manipulates:
 //
-BOOL PathCreateLnk(LPCWSTR pszLnkDir, LPCWSTR pszPath) {
+bool PathCreateLnk(LPCWSTR pszLnkDir, LPCWSTR pszPath) {
 	WCHAR tchLnkFileName[MAX_PATH];
 	BOOL fMustCopy;
 
@@ -1270,7 +1251,7 @@ BOOL PathCreateLnk(LPCWSTR pszLnkDir, LPCWSTR pszPath) {
 	}
 
 	IShellLink *psl;
-	BOOL bSucceeded = FALSE;
+	bool bSucceeded = false;
 
 #if defined(__cplusplus)
 	if (SUCCEEDED(CoCreateInstance(IID_IShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_IShellLink, (LPVOID *)(&psl)))) {
@@ -1280,7 +1261,7 @@ BOOL PathCreateLnk(LPCWSTR pszLnkDir, LPCWSTR pszPath) {
 			psl->SetPath(pszPath);
 
 			if (SUCCEEDED(ppf->Save(tchLnkFileName, TRUE))) {
-				bSucceeded = TRUE;
+				bSucceeded = true;
 			}
 			ppf->Release();
 		}
@@ -1294,7 +1275,7 @@ BOOL PathCreateLnk(LPCWSTR pszLnkDir, LPCWSTR pszPath) {
 			psl->lpVtbl->SetPath(psl, pszPath);
 
 			if (SUCCEEDED(ppf->lpVtbl->Save(ppf, tchLnkFileName, TRUE))) {
-				bSucceeded = TRUE;
+				bSucceeded = true;
 			}
 			ppf->lpVtbl->Release(ppf);
 		}
@@ -1305,7 +1286,7 @@ BOOL PathCreateLnk(LPCWSTR pszLnkDir, LPCWSTR pszPath) {
 	return bSucceeded;
 }
 
-void OpenContainingFolder(HWND hwnd, LPCWSTR pszFile, BOOL bSelect) {
+void OpenContainingFolder(HWND hwnd, LPCWSTR pszFile, bool bSelect) {
 	WCHAR wchDirectory[MAX_PATH];
 	lstrcpyn(wchDirectory, pszFile, COUNTOF(wchDirectory));
 
@@ -1317,7 +1298,7 @@ void OpenContainingFolder(HWND hwnd, LPCWSTR pszFile, BOOL bSelect) {
 	if (bSelect && dwAttributes != INVALID_FILE_ATTRIBUTES) {
 		// if pszFile is root, open the volume instead of open My Computer and select the volume
 		if ((dwAttributes & FILE_ATTRIBUTE_DIRECTORY) && PathIsRoot(pszFile)) {
-			bSelect = FALSE;
+			bSelect = false;
 		} else {
 			path = pszFile;
 		}
@@ -1341,7 +1322,7 @@ void OpenContainingFolder(HWND hwnd, LPCWSTR pszFile, BOOL bSelect) {
 			hr = SHOpenFolderAndSelectItems(pidl, 1, (LPCITEMIDLIST *)(&pidl), 0);
 #else
 			SHELLEXECUTEINFO sei;
-			ZeroMemory(&sei, sizeof(SHELLEXECUTEINFO));
+			memset(&sei, 0, sizeof(SHELLEXECUTEINFO));
 
 			sei.cbSize = sizeof(SHELLEXECUTEINFO);
 			sei.fMask = SEE_MASK_IDLIST;
@@ -1384,8 +1365,8 @@ void OpenContainingFolder(HWND hwnd, LPCWSTR pszFile, BOOL bSelect) {
 //
 //  ExtractFirstArgument()
 //
-BOOL ExtractFirstArgument(LPCWSTR lpArgs, LPWSTR lpArg1, LPWSTR lpArg2) {
-	BOOL bQuoted = FALSE;
+bool ExtractFirstArgument(LPCWSTR lpArgs, LPWSTR lpArg1, LPWSTR lpArg2) {
+	bool bQuoted = false;
 
 	lstrcpy(lpArg1, lpArgs);
 	if (lpArg2) {
@@ -1394,21 +1375,21 @@ BOOL ExtractFirstArgument(LPCWSTR lpArgs, LPWSTR lpArg1, LPWSTR lpArg2) {
 
 	TrimString(lpArg1);
 	if (*lpArg1 == L'\0') {
-		return FALSE;
+		return false;
 	}
 
 	LPWSTR psz = lpArg1;
 	WCHAR ch = *psz;
 	if (ch == L'\"') {
 		*psz++ = L' ';
-		bQuoted = TRUE;
+		bQuoted = true;
 	} else if (ch == L'-' || ch == L'/') {
 		// fix -appid="string with space"
 		++psz;
 		while ((ch = *psz) != L'\0' && ch != L' ') {
 			++psz;
 			if (ch == L'=' && *psz == L'\"') {
-				bQuoted = TRUE;
+				bQuoted = true;
 				++psz;
 				break;
 			}
@@ -1426,7 +1407,7 @@ BOOL ExtractFirstArgument(LPCWSTR lpArgs, LPWSTR lpArg1, LPWSTR lpArg2) {
 
 	TrimString(lpArg1);
 
-	return TRUE;
+	return true;
 }
 
 //=============================================================================
@@ -1458,15 +1439,15 @@ void StrTab2Space(LPWSTR lpsz) {
 //
 // PathFixBackslashes() - in place conversion
 //
-BOOL PathFixBackslashes(LPWSTR lpsz) {
+bool PathFixBackslashes(LPWSTR lpsz) {
 	WCHAR *c = lpsz;
-	BOOL bFixed = FALSE;
+	bool bFixed = false;
 	while ((c = StrChr(c, L'/')) != NULL) {
 		if (c != lpsz && c[-1] == L':' && c[1] == L'/') {
 			c += 2;
 		} else {
 			*c++ = L'\\';
-			bFixed = TRUE;
+			bFixed = true;
 		}
 	}
 	return bFixed;
@@ -1495,11 +1476,11 @@ void ExpandEnvironmentStringsEx(LPWSTR lpSrc, DWORD dwSrc) {
 extern WCHAR tchFavoritesDir[MAX_PATH];
 extern WCHAR szCurDir[MAX_PATH + 40];
 
-BOOL SearchPathEx(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lpBuffer) {
+bool SearchPathEx(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lpBuffer) {
 	if (StrEqualExW(lpFileName, L"..") || StrEqualExW(lpFileName, L".")) {
 		if (StrEqualExW(lpFileName, L"..") && PathIsRoot(szCurDir)) {
 			StrCpyExW(lpBuffer, L"*.*");
-			return TRUE;
+			return true;
 		}
 	}
 
@@ -1536,7 +1517,7 @@ void FormatNumberStr(LPWSTR lpNumberStr) {
 	lpNumberStr += 3;
 	do {
 		c -= 3;
-		MoveMemory(c + 1, c, sizeof(WCHAR) * (end - c + 1));
+		memmove(c + 1, c, sizeof(WCHAR) * (end - c + 1));
 		*c = sep;
 		++end;
 	} while (c > lpNumberStr);
@@ -1630,18 +1611,18 @@ HDDEDATA CALLBACK DdeCallback(UINT uType, UINT uFmt, HCONV hconv, HSZ hsz1, HSZ 
 	}
 }
 
-BOOL ExecDDECommand(LPCWSTR lpszCmdLine, LPCWSTR lpszDDEMsg, LPCWSTR lpszDDEApp, LPCWSTR lpszDDETopic) {
+bool ExecDDECommand(LPCWSTR lpszCmdLine, LPCWSTR lpszDDEMsg, LPCWSTR lpszDDEApp, LPCWSTR lpszDDETopic) {
 	if (StrIsEmpty(lpszCmdLine) || StrIsEmpty(lpszDDEMsg) || StrIsEmpty(lpszDDEApp) || StrIsEmpty(lpszDDETopic)) {
-		return FALSE;
+		return false;
 	}
 
-	BOOL bSuccess = TRUE;
+	bool bSuccess = true;
 	WCHAR lpszDDEMsgBuf[256];
-	WCHAR *pSubst;
 
 	lstrcpyn(lpszDDEMsgBuf, lpszDDEMsg, COUNTOF(lpszDDEMsgBuf));
-	if ((pSubst = StrStr(lpszDDEMsgBuf, L"%1")) != NULL) {
-		*(pSubst + 1) = L's';
+	WCHAR *pSubst = StrStr(lpszDDEMsgBuf, L"%1");
+	if (pSubst != NULL) {
+		pSubst[1] = L's';
 	}
 
 	WCHAR lpszURLExec[512];
@@ -1657,7 +1638,7 @@ BOOL ExecDDECommand(LPCWSTR lpszCmdLine, LPCWSTR lpszDDEMsg, LPCWSTR lpszDDEApp,
 				DdeClientTransaction((LPBYTE)lpszURLExec, sizeof(WCHAR) * (lstrlen(lpszURLExec) + 1), hConv, NULL, 0, XTYP_EXECUTE, TIMEOUT_ASYNC, NULL);
 				DdeDisconnect(hConv);
 			} else {
-				bSuccess = FALSE;
+				bSuccess = false;
 			}
 		}
 
@@ -1679,7 +1660,7 @@ BOOL ExecDDECommand(LPCWSTR lpszCmdLine, LPCWSTR lpszDDEMsg, LPCWSTR lpszDDEApp,
 //
 //
 void History_Init(PHISTORY ph) {
-	ZeroMemory(ph, sizeof(HISTORY));
+	memset(ph, 0, sizeof(HISTORY));
 	ph->iCurItem = -1;
 }
 
@@ -1692,11 +1673,11 @@ void History_Uninit(PHISTORY ph) {
 	}
 }
 
-BOOL History_Add(PHISTORY ph, LPCWSTR pszNew) {
+bool History_Add(PHISTORY ph, LPCWSTR pszNew) {
 	// Item to be added is equal to current item
 	if (ph->iCurItem >= 0 && ph->iCurItem < HISTORY_ITEMS) {
 		if (ph->psz[ph->iCurItem] != NULL && PathEqual(pszNew, ph->psz[ph->iCurItem])) {
-			return FALSE;
+			return false;
 		}
 	}
 
@@ -1714,56 +1695,56 @@ BOOL History_Add(PHISTORY ph, LPCWSTR pszNew) {
 			LocalFree(ph->psz[0]);
 		}
 
-		MoveMemory(ph->psz, ph->psz + 1, (HISTORY_ITEMS - 1) * sizeof(WCHAR *));
+		memmove(ph->psz, ph->psz + 1, (HISTORY_ITEMS - 1) * sizeof(WCHAR *));
 	}
 
 	ph->psz[ph->iCurItem] = StrDup(pszNew);
 
-	return TRUE;
+	return true;
 }
 
-BOOL History_Forward(PHISTORY ph, LPWSTR pszItem, int cItem) {
+bool History_Forward(PHISTORY ph, LPWSTR pszItem, int cItem) {
 	if (ph->iCurItem < (HISTORY_ITEMS - 1)) {
 		if (ph->psz[ph->iCurItem + 1]) {
 			ph->iCurItem++;
 			lstrcpyn(pszItem, ph->psz[ph->iCurItem], cItem);
-			return TRUE;
+			return true;
 		}
 	}
 
-	return FALSE;
+	return false;
 }
 
-BOOL History_Back(PHISTORY ph, LPWSTR pszItem, int cItem) {
+bool History_Back(PHISTORY ph, LPWSTR pszItem, int cItem) {
 	if (ph->iCurItem > 0) {
 		if (ph->psz[ph->iCurItem - 1]) {
 			ph->iCurItem--;
 			lstrcpyn(pszItem, ph->psz[ph->iCurItem], cItem);
-			return TRUE;
+			return true;
 		}
 	}
 
-	return FALSE;
+	return false;
 }
 
-BOOL History_CanForward(LCPHISTORY ph) {
+bool History_CanForward(LCPHISTORY ph) {
 	if (ph->iCurItem < (HISTORY_ITEMS - 1)) {
 		if (ph->psz[ph->iCurItem + 1]) {
-			return TRUE;
+			return true;
 		}
 	}
 
-	return FALSE;
+	return false;
 }
 
-BOOL History_CanBack(LCPHISTORY ph) {
+bool History_CanBack(LCPHISTORY ph) {
 	if (ph->iCurItem > 0) {
 		if (ph->psz[ph->iCurItem - 1]) {
-			return TRUE;
+			return true;
 		}
 	}
 
-	return FALSE;
+	return false;
 }
 
 void History_UpdateToolbar(LCPHISTORY ph, HWND hwnd, int cmdBack, int cmdForward) {
@@ -1799,11 +1780,11 @@ void MRU_Destroy(LPMRULIST pmru) {
 		}
 	}
 
-	ZeroMemory(pmru, sizeof(MRULIST));
+	memset(pmru, 0, sizeof(MRULIST));
 	NP2HeapFree(pmru);
 }
 
-static inline BOOL MRU_Equal(int flags, LPCWSTR psz1, LPCWSTR psz2) {
+static inline bool MRU_Equal(int flags, LPCWSTR psz1, LPCWSTR psz2) {
 #if _WIN32_WINNT >= _WIN32_WINNT_VISTA
 	return CompareStringOrdinal(psz1, -1, psz2, -1, flags & MRUFlags_FilePath) == CSTR_EQUAL;
 #else
@@ -1811,7 +1792,7 @@ static inline BOOL MRU_Equal(int flags, LPCWSTR psz1, LPCWSTR psz2) {
 #endif
 }
 
-BOOL MRU_Add(LPMRULIST pmru, LPCWSTR pszNew) {
+bool MRU_Add(LPMRULIST pmru, LPCWSTR pszNew) {
 	const int flags = pmru->iFlags;
 	int i;
 	for (i = 0; i < pmru->iSize; i++) {
@@ -1829,12 +1810,12 @@ BOOL MRU_Add(LPMRULIST pmru, LPCWSTR pszNew) {
 		pmru->pszItems[i] = pmru->pszItems[i - 1];
 	}
 	pmru->pszItems[0] = StrDup(pszNew);
-	return TRUE;
+	return true;
 }
 
-BOOL MRU_Delete(LPMRULIST pmru, int iIndex) {
+bool MRU_Delete(LPMRULIST pmru, int iIndex) {
 	if (iIndex < 0 || iIndex >= pmru->iSize) {
-		return FALSE;
+		return false;
 	}
 	if (pmru->pszItems[iIndex]) {
 		LocalFree(pmru->pszItems[iIndex]);
@@ -1843,7 +1824,7 @@ BOOL MRU_Delete(LPMRULIST pmru, int iIndex) {
 		pmru->pszItems[i] = pmru->pszItems[i + 1];
 		pmru->pszItems[i + 1] = NULL;
 	}
-	return TRUE;
+	return true;
 }
 
 void MRU_Empty(LPMRULIST pmru) {
@@ -1871,9 +1852,9 @@ int MRU_Enum(LPCMRULIST pmru, int iIndex, LPWSTR pszItem, int cchItem) {
 	return TRUE;
 }
 
-BOOL MRU_Load(LPMRULIST pmru) {
+bool MRU_Load(LPMRULIST pmru) {
 	if (StrIsEmpty(szIniFile)) {
-		return TRUE;
+		return true;
 	}
 
 	IniSection section;
@@ -1899,16 +1880,16 @@ BOOL MRU_Load(LPMRULIST pmru) {
 
 	IniSectionFree(pIniSection);
 	NP2HeapFree(pIniSectionBuf);
-	return TRUE;
+	return true;
 }
 
-BOOL MRU_Save(LPCMRULIST pmru) {
+bool MRU_Save(LPCMRULIST pmru) {
 	if (StrIsEmpty(szIniFile)) {
-		return TRUE;
+		return true;
 	}
 	if (MRU_GetCount(pmru) == 0) {
 		IniClearSection(pmru->szRegKey);
-		return TRUE;
+		return true;
 	}
 
 	WCHAR tchName[16];
@@ -1926,7 +1907,7 @@ BOOL MRU_Save(LPCMRULIST pmru) {
 
 	SaveIniSection(pmru->szRegKey, pIniSectionBuf);
 	NP2HeapFree(pIniSectionBuf);
-	return TRUE;
+	return true;
 }
 
 void MRU_LoadToCombobox(HWND hwnd, LPCWSTR pszKey) {
@@ -1964,14 +1945,14 @@ void MRU_ClearCombobox(HWND hwnd, LPCWSTR pszKey) {
   Modify dialog templates to use current theme font
   Based on code of MFC helper class CDialogTemplate
 */
-BOOL GetThemedDialogFont(LPWSTR lpFaceName, WORD *wSize) {
+bool GetThemedDialogFont(LPWSTR lpFaceName, WORD *wSize) {
 #if NP2_ENABLE_APP_LOCALIZATION_DLL && NP2_ENABLE_TEST_LOCALIZATION_LAYOUT
 	extern LANGID uiLanguage;
 	GetLocaleDefaultUIFont(uiLanguage, lpFaceName, wSize);
-	return TRUE;
+	return true;
 #else
 
-	BOOL bSucceed = FALSE;
+	bool bSucceed = false;
 	const UINT iLogPixelsY = g_uSystemDPI;
 
 	if (IsAppThemed()) {
@@ -1987,7 +1968,7 @@ BOOL GetThemedDialogFont(LPWSTR lpFaceName, WORD *wSize) {
 					*wSize = 8;
 				}
 				lstrcpyn(lpFaceName, lf.lfFaceName, LF_FACESIZE);
-				bSucceed = TRUE;
+				bSucceed = true;
 			}
 			CloseThemeData(hTheme);
 		}
@@ -1995,7 +1976,7 @@ BOOL GetThemedDialogFont(LPWSTR lpFaceName, WORD *wSize) {
 
 	if (!bSucceed) {
 		NONCLIENTMETRICS ncm;
-		ZeroMemory(&ncm, sizeof(ncm));
+		memset(&ncm, 0, sizeof(ncm));
 		ncm.cbSize = sizeof(NONCLIENTMETRICS);
 #if _WIN32_WINNT >= _WIN32_WINNT_VISTA
 		if (!IsVistaAndAbove()) {
@@ -2011,7 +1992,7 @@ BOOL GetThemedDialogFont(LPWSTR lpFaceName, WORD *wSize) {
 				*wSize = 8;
 			}
 			lstrcpyn(lpFaceName, ncm.lfMessageFont.lfFaceName, LF_FACESIZE);
-			bSucceed = TRUE;
+			bSucceed = true;
 		}
 	}
 
@@ -2023,7 +2004,7 @@ BOOL GetThemedDialogFont(LPWSTR lpFaceName, WORD *wSize) {
 #endif
 }
 
-static inline BOOL DialogTemplate_IsDialogEx(const DLGTEMPLATE *pTemplate) {
+static inline bool DialogTemplate_IsDialogEx(const DLGTEMPLATE *pTemplate) {
 	return ((DLGTEMPLATEEX *)pTemplate)->signature == 0xFFFF;
 }
 
@@ -2031,12 +2012,12 @@ static inline BOOL DialogTemplate_HasFont(const DLGTEMPLATE *pTemplate) {
 	return (DS_SETFONT & (DialogTemplate_IsDialogEx(pTemplate) ? ((DLGTEMPLATEEX *)pTemplate)->style : pTemplate->style));
 }
 
-static inline int DialogTemplate_FontAttrSize(BOOL bDialogEx) {
+static inline int DialogTemplate_FontAttrSize(bool bDialogEx) {
 	return (int)sizeof(WORD) * (bDialogEx ? 3 : 1);
 }
 
 static inline BYTE *DialogTemplate_GetFontSizeField(const DLGTEMPLATE *pTemplate) {
-	const BOOL bDialogEx = DialogTemplate_IsDialogEx(pTemplate);
+	const bool bDialogEx = DialogTemplate_IsDialogEx(pTemplate);
 	WORD *pw;
 
 	if (bDialogEx) {
@@ -2078,7 +2059,7 @@ DLGTEMPLATE *LoadThemedDialogTemplate(LPCWSTR lpDialogTemplateID, HINSTANCE hIns
 		return NULL;
 	}
 
-	CopyMemory((BYTE *)pTemplate, pRsrcMem, (size_t)dwTemplateSize);
+	memcpy((BYTE *)pTemplate, pRsrcMem, (size_t)dwTemplateSize);
 	FreeResource(hRsrcMem);
 
 	WCHAR wchFaceName[LF_FACESIZE];
@@ -2087,7 +2068,7 @@ DLGTEMPLATE *LoadThemedDialogTemplate(LPCWSTR lpDialogTemplateID, HINSTANCE hIns
 		return pTemplate;
 	}
 
-	const BOOL bDialogEx = DialogTemplate_IsDialogEx(pTemplate);
+	const bool bDialogEx = DialogTemplate_IsDialogEx(pTemplate);
 	const BOOL bHasFont = DialogTemplate_HasFont(pTemplate);
 	const int cbFontAttr = DialogTemplate_FontAttrSize(bDialogEx);
 
@@ -2109,11 +2090,11 @@ DLGTEMPLATE *LoadThemedDialogTemplate(LPCWSTR lpDialogTemplateID, HINSTANCE hIns
 	const WORD nCtrl = bDialogEx ? (WORD)((DLGTEMPLATEEX *)pTemplate)->cDlgItems : (WORD)pTemplate->cdit;
 
 	if (cbNew != cbOld && nCtrl > 0) {
-		MoveMemory(pNewControls, pOldControls, (size_t)(dwTemplateSize - (pOldControls - (BYTE *)pTemplate)));
+		memmove(pNewControls, pOldControls, (size_t)(dwTemplateSize - (pOldControls - (BYTE *)pTemplate)));
 	}
 
 	*(WORD *)pb = wFontSize;
-	MoveMemory(pb + cbFontAttr, pbNew, (size_t)(cbNew - cbFontAttr));
+	memmove(pb + cbFontAttr, pbNew, (size_t)(cbNew - cbFontAttr));
 
 	return pTemplate;
 }
@@ -2224,7 +2205,7 @@ UINT_PTR CALLBACK OpenSaveFileDlgHookProc(HWND hwnd, UINT umsg, WPARAM wParam, L
 // all current versions of the shell. If explorer isn't running, we try our
 // best to work with a 3rd party shell. If we still can't find anything, we
 // return a rect in the lower right hand corner of the screen
-static VOID GetTrayWndRect(LPRECT lpTrayRect) {
+static void GetTrayWndRect(LPRECT lpTrayRect) {
 	// First, we'll use a quick hack method. We know that the taskbar is a window
 	// of class Shell_TrayWnd, and the status tray is a child of this of class
 	// TrayNotifyWnd. This provides us a window rect to minimize to. Note, however,
@@ -2305,7 +2286,7 @@ static VOID GetTrayWndRect(LPRECT lpTrayRect) {
 }
 
 // Check to see if the animation has been disabled
-/*static */BOOL GetDoAnimateMinimize(void) {
+/*static */bool GetDoAnimateMinimize(void) {
 	ANIMATIONINFO ai;
 
 	ai.cbSize = sizeof(ai);

@@ -598,10 +598,13 @@ LexerConfigMap = {
 	'NP2LEX_POWERSHELL': {
 		'line_comment_string': '#',
 		'block_comment_string': ('<#', '#>'),
+		'default_fold_level': ['class', 'function'],
+		'default_fold_ignore_inner': 'SCE_POWERSHELL_FUNCTION_DEFINITION',
 		'escape_char_start': '`',
-		'raw_string_style': ['SCE_POWERSHELL_STRING_SQ'],
-		'operator_style': ['SCE_POWERSHELL_OPERATOR'],
-		'extra_word_char': '-$',
+		'escape_char_style': 'SCE_POWERSHELL_ESCAPECHAR',
+		'raw_string_style': ['SCE_POWERSHELL_STRING_SQ', 'SCE_POWERSHELL_HERE_STRING_SQ'],
+		'operator_style': ['SCE_POWERSHELL_OPERATOR', 'SCE_POWERSHELL_OPERATOR2'],
+		'extra_word_char': '-$:@?',
 	},
 	'NP2LEX_PYTHON': {
 		'line_comment_string': '#',
@@ -1048,7 +1051,7 @@ def BuildLexerCommentString():
 				line_comment_string = line_comment_string[0]
 			if isinstance(line_comment_string, str):
 				start = config.get('line_comment_at_line_start', False)
-				argument = 'TRUE' if start else 'FALSE'
+				argument = 'true' if start else 'false'
 				start = escape_c_string(line_comment_string)
 				code = (f'{indent}EditToggleLineComments(L"{start}", {argument});', indent + 'break;', '')
 				commentLine[rid] = code
