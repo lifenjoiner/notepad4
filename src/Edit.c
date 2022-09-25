@@ -1184,7 +1184,6 @@ bool EditSaveFile(HWND hwnd, LPCWSTR pszFile, int saveFlag, EditFileIOStatus *st
 		}
 		dwLastIOError = GetLastError();
 	} else {
-		DWORD dwBytesWritten;
 		if (cbData >= MAX_NON_UTF8_SIZE) {
 			// save as UTF-8 or ANSI
 			if (!(uFlags & (NCP_DEFAULT | NCP_UTF8))) {
@@ -1215,6 +1214,8 @@ bool EditSaveFile(HWND hwnd, LPCWSTR pszFile, int saveFlag, EditFileIOStatus *st
 			}
 		}
 #endif
+
+		DWORD dwBytesWritten;
 		if (uFlags & NCP_UNICODE) {
 			SetEndOfFile(hFile);
 
@@ -2126,7 +2127,7 @@ void EditHex2Char(void) {
 	bool changed = false;
 	while (*p) {
 		UINT wc = *p++;
-		if ((wc == L'\\' && (*p == L'x' || *p == 'u' || *p == 'U')) || (wc == L'U' && *p == L'+')) {
+		if ((wc == L'\\' && (*p == L'x' || UnsafeLower(*p) == 'u')) || (wc == L'U' && *p == L'+')) {
 			const int digitCount = (wc == L'U' || *p == L'U') ? MAX_UNICODE_HEX_DIGIT : BMP_UNICODE_HEX_DIGIT;
 			UINT value = 0;
 			int ucc = 1;
@@ -2286,7 +2287,8 @@ void EditConvertNumRadix(int radix) {
 		if (*p == '0') {
 			value = 0;
 			p++;
-			if ((*p == 'x' || *p == 'X') && radix != 16) {
+			const char prefix = UnsafeLower(*p);
+			if (prefix == 'x' && radix != 16) {
 				p++;
 				while (*p) {
 					if (*p == '_') {
@@ -2301,7 +2303,7 @@ void EditConvertNumRadix(int radix) {
 					}
 				}
 				cch += ConvertNumRadix(tch + cch, value, radix);
-			} else if ((*p == 'o' || *p == 'O') && radix != 8) {
+			} else if (prefix == 'o' && radix != 8) {
 				p++;
 				while (*p) {
 					if (*p >= '0' && *p <= '7') {
@@ -2314,7 +2316,7 @@ void EditConvertNumRadix(int radix) {
 					}
 				}
 				cch += ConvertNumRadix(tch + cch, value, radix);
-			} else if ((*p == 'b' || *p == 'B') && radix != 2) {
+			} else if (prefix == 'b' && radix != 2) {
 				p++;
 				while (*p) {
 					if (*p == '0') {
@@ -3774,13 +3776,13 @@ void EditStripTrailingBlanks(HWND hwnd, bool bIgnoreSelection) {
 	if (!bIgnoreSelection && !SciCall_IsSelectionEmpty()) {
 		if (!SciCall_IsRectangleSelection()) {
 #if NP2_USE_DESIGNATED_INITIALIZER
-			EDITFINDREPLACE efrTrim = {
+			const EDITFINDREPLACE efrTrim = {
 				.szFind = "[ \t]+$",
 				.hwnd = hwnd,
 				.fuFlags = SCFIND_REGEXP,
 			};
 #else
-			EDITFINDREPLACE efrTrim = { "[ \t]+$", "", "", "", hwnd, SCFIND_REGEXP };
+			const EDITFINDREPLACE efrTrim = { "[ \t]+$", "", "", "", hwnd, SCFIND_REGEXP };
 #endif
 			if (EditReplaceAllInSelection(hwnd, &efrTrim, false)) {
 				return;
@@ -3817,13 +3819,13 @@ void EditStripLeadingBlanks(HWND hwnd, bool bIgnoreSelection) {
 	if (!bIgnoreSelection && !SciCall_IsSelectionEmpty()) {
 		if (!SciCall_IsRectangleSelection()) {
 #if NP2_USE_DESIGNATED_INITIALIZER
-			EDITFINDREPLACE efrTrim = {
+			const EDITFINDREPLACE efrTrim = {
 				.szFind = "^[ \t]+",
 				.hwnd = hwnd,
 				.fuFlags = SCFIND_REGEXP,
 			};
 #else
-			EDITFINDREPLACE efrTrim = { "^[ \t]+", "", "", "", hwnd, SCFIND_REGEXP };
+			const EDITFINDREPLACE efrTrim = { "^[ \t]+", "", "", "", hwnd, SCFIND_REGEXP };
 #endif
 			if (EditReplaceAllInSelection(hwnd, &efrTrim, false)) {
 				return;
@@ -5996,6 +5998,7 @@ bool EditReplaceAll(HWND hwnd, LPCEDITFINDREPLACE lpefr, bool bShowInfo) {
 
 	SendMessage(hwnd, WM_SETREDRAW, TRUE, 0);
 	if (iCount) {
+		EditEnsureSelectionVisible();
 		SciCall_EndUndoAction();
 		RedrawWindow(hwnd, NULL, NULL, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
 	}
@@ -7848,7 +7851,7 @@ static FOLD_ACTION FoldToggleNode(Sci_Line line, FOLD_ACTION expanding) {
 	if ((int)action != fExpanded) {
 		SciCall_FoldLine(line, (int)action);
 		if (expanding == FOLD_ACTION_SNIFF) {
-			// empty INI section not changed after toggle (issue #48).
+			// header without children not changed after toggle (issue #48).
 			const BOOL after = SciCall_GetFoldExpanded(line);
 			if (fExpanded != after) {
 				expanding = action;
@@ -7899,7 +7902,7 @@ void FoldToggleAll(FOLD_ACTION action) {
 	StopWatch watch;
 	StopWatch_Start(watch);
 #endif
-	SciCall_FoldAll((int)action);
+	SciCall_FoldAll((int)action | SC_FOLDACTION_CONTRACT_EVERY_LEVEL);
 #if 0
 	StopWatch_Stop(watch);
 	StopWatch_ShowLog(&watch, __func__);

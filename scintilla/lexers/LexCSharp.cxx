@@ -129,7 +129,7 @@ enum class KeywordType {
 };
 
 constexpr bool IsUnicodeEscape(int ch, int chNext) noexcept {
-	return ch == '\\' && (chNext | 0x20) == 'u';
+	return ch == '\\' && UnsafeLower(chNext) == 'u';
 }
 
 constexpr bool IsCsIdentifierStart(int ch, int chNext) noexcept {
@@ -417,15 +417,6 @@ void ColouriseCSharpDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int init
 
 		case SCE_CSHARP_COMMENTLINEDOC:
 		case SCE_CSHARP_COMMENTBLOCKDOC:
-			if (docTagState != DocTagState::None) {
-				if (sc.Match('/', '>') || sc.ch == '>') {
-					docTagState = DocTagState::None;
-					const int state = sc.state;
-					sc.SetState(SCE_CSHARP_COMMENTTAG_XML);
-					sc.Forward((sc.ch == '/') ? 2 : 1);
-					sc.SetState(state);
-				}
-			}
 			if (sc.state == SCE_CSHARP_COMMENTLINEDOC) {
 				if (sc.atLineStart) {
 					sc.SetState(SCE_CSHARP_DEFAULT);
@@ -435,6 +426,15 @@ void ColouriseCSharpDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int init
 				sc.Forward();
 				sc.ForwardSetState(SCE_CSHARP_DEFAULT);
 				break;
+			}
+			if (docTagState != DocTagState::None) {
+				if (sc.Match('/', '>') || sc.ch == '>') {
+					docTagState = DocTagState::None;
+					const int state = sc.state;
+					sc.SetState(SCE_CSHARP_COMMENTTAG_XML);
+					sc.Forward((sc.ch == '/') ? 2 : 1);
+					sc.SetState(state);
+				}
 			}
 			if (docTagState == DocTagState::None) {
 				if (sc.ch == '<') {
@@ -515,7 +515,7 @@ void ColouriseCSharpDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int init
 						}
 					}
 					if (handled) {
-						if (sc.chNext == '8' && (sc.ch | 0x20) == 'u') {
+						if (sc.chNext == '8' && UnsafeLower(sc.ch) == 'u') {
 							sc.Forward(2); // C# 11 UTF-8 string literal
 						}
 						sc.SetState(SCE_CSHARP_DEFAULT);
@@ -749,7 +749,7 @@ void ColouriseCSharpDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int init
 						kwType = KeywordType::None;
 					}
 				}
-				sc.SetState(interpolating ? SCE_CSHARP_OPERATOR2 : SCE_CSHARP_OPERATOR);
+				sc.SetState(SCE_CSHARP_OPERATOR);
 			}
 		}
 
@@ -873,7 +873,7 @@ void FoldCSharpDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initStyle
 
 		case SCE_CSHARP_PREPROCESSOR:
 			if (wordLen < MaxFoldWordLength) {
-				buf[wordLen++] = MakeLowerCase(styler[i]);
+				buf[wordLen++] = styler[i];
 			}
 			if (styleNext != style) {
 				buf[wordLen] = '\0';

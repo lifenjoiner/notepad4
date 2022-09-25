@@ -161,7 +161,7 @@ public:
 	}
 	bool MatchLineEnd() const noexcept {
 		//return currentPos == lineEnd;
-		return atLineEnd;
+		return ch == '\n' || ch == '\r'; //! Unicode line ending not supported
 	}
 #if 0
 	[[deprecated]]
@@ -206,6 +206,7 @@ public:
 		return true;
 	}
 	bool MatchIgnoreCase(const char *s) const noexcept;
+	bool MatchLowerCase(const char *s) const noexcept;
 
 	void GetCurrent(char *s, Sci_PositionU len) const noexcept {
 		styler.GetRange(styler.GetStartSegment(), currentPos, s, len);

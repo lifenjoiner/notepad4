@@ -317,8 +317,8 @@ static bool fWarnedNoIniFile = false;
 static int	defaultBaseFontSize = 11*SC_FONT_SIZE_MULTIPLIER; // 11 pt
 static int iBaseFontSize = 11*SC_FONT_SIZE_MULTIPLIER;
 int		iFontQuality = SC_EFF_QUALITY_LCD_OPTIMIZED;
-int		iCaretStyle = 1; // width 1, 0 for block
-int		iOvrCaretStyle = 0; // 0 for bar, 1 for block
+CaretStyle iCaretStyle = CaretStyle_LineWidth1;
+bool bBlockCaretForOVRMode = false;
 bool bBlockCaretOutSelection = false;
 int		iCaretBlinkPeriod = -1; // system default, 0 for noblink
 static bool bBookmarkColorUpdated;
@@ -338,7 +338,7 @@ extern int	iCurrentEncoding;
 extern int	g_DOSEncoding;
 extern int	iDefaultCodePage;
 extern int	iDefaultCharSet;
-extern INT	iHighlightCurrentLine;
+extern LineHighlightMode iHighlightCurrentLine;
 extern bool	bShowBookmarkMargin;
 extern int	iZoomLevel;
 
@@ -748,7 +748,7 @@ static int __cdecl CmpEditLexerByName(const void *p1, const void *p2) {
 	// TODO: sort by localized name
 #if NP2_ENABLE_LOCALIZE_LEXER_NAME
 #endif
-	int cmp = StrCmpIW(pLex1->pszName, pLex2->pszName);
+	const int cmp = StrCmpIW(pLex1->pszName, pLex2->pszName);
 	return cmp;
 }
 
@@ -1206,10 +1206,10 @@ void Style_OnStyleThemeChanged(int theme) {
 }
 
 void Style_UpdateCaret(void) {
-	int iValue = iCaretStyle;
+	int iValue = (int)iCaretStyle;
 	// caret style and width
 	const int style = (iValue ? CARETSTYLE_LINE : CARETSTYLE_BLOCK)
-		| (iOvrCaretStyle ? CARETSTYLE_OVERSTRIKE_BLOCK : CARETSTYLE_OVERSTRIKE_BAR)
+		| (bBlockCaretForOVRMode ? CARETSTYLE_OVERSTRIKE_BLOCK : CARETSTYLE_OVERSTRIKE_BAR)
 		| (bBlockCaretOutSelection ? CARETSTYLE_BLOCK_AFTER : 0);
 	SciCall_SetCaretStyle(style);
 	// caret width
@@ -1406,6 +1406,10 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) {
 		//	//SciCall_SetProperty("fold.hypertext.comment", "1");
 		//	//SciCall_SetProperty("fold.hypertext.heredoc", "1");
 		//	break;
+
+		case NP2LEX_ACTIONSCRIPT:
+			dialect = 1; // enable ECMAScript For XML
+			break;
 
 		case NP2LEX_APDL:
 			dialect = 1;
@@ -1832,14 +1836,13 @@ PEDITLEXER Style_SniffShebang(char *pchText) {
 			}
 		}
 
-		*pch = 0;
+		*pch = '\0';
 		len = pch - name;
 		pch = name;
 		while (*pch) {
-			// to lower
-			*pch |= 32;
+			*pch = UnsafeLower(*pch);
 			if (*pch < 'a' || *pch > 'z') {
-				*pch = 0;
+				*pch = '\0';
 				len = pch - name;
 				break;
 			}
@@ -1856,6 +1859,9 @@ PEDITLEXER Style_SniffShebang(char *pchText) {
 				}
 				if (StrStartsWith(name, "scala")) {
 					return &lexScala;
+				}
+				if (StrStartsWith(name, "Rscript")) {
+					return &lexRLang;
 				}
 			}
 
@@ -2439,7 +2445,7 @@ static void Style_UpdateLexerLang(PEDITLEXER pLex, LPCWSTR lpszExt, LPCWSTR lpsz
 PEDITLEXER Style_MatchLexer(LPCWSTR lpszMatch, bool bCheckNames) {
 	if (!bCheckNames) {
 		if (bAutoSelect && lpszMatch[1] == L'\0') {
-			const WCHAR suffix = *lpszMatch | 0x20;
+			const WCHAR suffix = UnsafeLower(*lpszMatch);
 			if (suffix == L'm') {
 				PEDITLEXER lex = Style_DetectObjCAndMatlab();
 				if (lex != NULL) {
@@ -2507,8 +2513,10 @@ static PEDITLEXER Style_GetLexerFromFile(LPCWSTR lpszFile, bool bCGIGuess, LPCWS
 		if (StrCaseEqual(lpszExt, L"txt")) {
 			if (StrCaseEqual(lpszName, L"CMakeLists.txt") || StrCaseEqual(lpszName, L"CMakeCache.txt")) {
 				pLexNew = &lexCMake;
+#if 0 // LLVMBuild.txt were removed from LLVM project
 			} else if (StrCaseEqual(lpszName, L"LLVMBuild.txt")) {
 				pLexNew = &lexINI;
+#endif
 			} else {
 				pLexNew = &lexTextFile;
 			}
@@ -2569,7 +2577,7 @@ static PEDITLEXER Style_GetLexerFromFile(LPCWSTR lpszFile, bool bCGIGuess, LPCWS
 		else if (StrCaseEqual(lpszName, L"Rakefile") || StrCaseEqual(lpszName, L"Podfile")) {
 			pLexNew = &lexRuby;
 		}
-		else if (StrCaseEqual(lpszName, L"mozconfig")) {
+		else if (StrCaseEqual(lpszName, L"mozconfig") || StrCaseEqual(lpszName, L"APKBUILD") || StrCaseEqual(lpszName, L"PKGBUILD")) {
 			pLexNew = &lexBash;
 		}
 		// Boost build
@@ -2611,18 +2619,18 @@ bool Style_SetLexerFromFile(LPCWSTR lpszFile) {
 				pLexNew = &lexXML;
 			} else if (!pLexNew) {
 				if (StrStartsWithCase(p, "<!DOCTYPE")) {
-					p += CSTRLEN("<!DOCTYPE");
-					while (IsASpace(*p)) {
-						++p;
-					}
-				}
-				if (StrStartsWithCase(p, "<html")) {
+					pLexNew = &lexXML;
+				} else if (StrStartsWithCase(p, "<html")) {
 					pLexNew = &lexHTML;
 				} else if (!fNoHTMLGuess) {
 					if (StrStrIA(p, "<html")) {
 						pLexNew = &lexHTML;
 					} else {
-						pLexNew = &lexXML;
+						const uint8_t start = p[1];
+						if ((signed char)start < 0 || start == '!' || start == '?' || IsHtmlTagChar(start) || start == '/') {
+							// <!-- comment -->, <!CDATA[[]]>, <?instruction?>, <tag></tag>
+							pLexNew = &lexXML;
+						}
 					}
 				}
 			}
@@ -2722,6 +2730,15 @@ bool Style_CanOpenFile(LPCWSTR lpszFile) {
 	return pLexNew != NULL || StrIsEmpty(lpszExt) || bDotFile || StrCaseEqual(lpszExt, L"cgi") || StrCaseEqual(lpszExt, L"fcgi");
 }
 
+static inline bool IsC0ControlChar(uint8_t ch) {
+#if 1
+	return ch < 32 && ((uint8_t)(ch - 0x09)) > (0x0d - 0x09);
+#else
+	// exclude whitespace and separator
+	return ch < 0x1c && ((uint8_t)(ch - 0x09)) > (0x0d - 0x09);
+#endif
+}
+
 bool Style_MaybeBinaryFile(LPCWSTR lpszFile) {
 #if 1
 	UNREFERENCED_PARAMETER(lpszFile);
@@ -2731,8 +2748,6 @@ bool Style_MaybeBinaryFile(LPCWSTR lpszFile) {
 	Treat the file as binary when we find two adjacent C0 control characters
 	(very common in file header) or some (currently set to 8) C0 control characters. */
 
-	// see tools/GenerateTable.py for this mask.
-	const UINT C0Mask = 0x0FFFC1FFU;
 	const Sci_Position headerLen = min_pos(1023, SciCall_GetLength() - 1);
 	const uint8_t *ptr = (const uint8_t *)SciCall_GetRangePointer(0, headerLen + 1);
 	if (ptr == NULL || headerLen <= 0) {
@@ -2743,10 +2758,10 @@ bool Style_MaybeBinaryFile(LPCWSTR lpszFile) {
 	UINT count = 0;
 	while (ptr < end) {
 		uint8_t ch = *ptr++;
-		if (ch < 32 && ((C0Mask >> ch) & 1)) {
+		if (IsC0ControlChar(ch)) {
 			++count;
 			ch = *ptr++;
-			if ((count >= 8) || (ch < 32 && ((C0Mask >> ch) & 1))) {
+			if ((count >= 8) || IsC0ControlChar(ch)) {
 				return true;
 			}
 		}
@@ -3032,10 +3047,9 @@ void Style_SetLongLineColors(void) {
 // Style_HighlightCurrentLine()
 //
 void Style_HighlightCurrentLine(void) {
-	if (iHighlightCurrentLine != 0) {
+	if (iHighlightCurrentLine != LineHighlightMode_None) {
 		LPCWSTR szValue = pLexGlobal->Styles[GlobalStyleIndex_CurrentLine].szValue;
-		// 1: background color, 2: outline frame
-		const bool outline = iHighlightCurrentLine == 2;
+		const bool outline = iHighlightCurrentLine == LineHighlightMode_OutlineFrame;
 		COLORREF rgb;
 		if (Style_StrGetColor(outline, szValue, &rgb)) {
 			int size = 0;
@@ -5045,7 +5059,7 @@ static INT_PTR CALLBACK Style_SelectLexerDlgProc(HWND hwnd, UINT umsg, WPARAM wP
 			case NM_CLICK: {
 				// https://support.microsoft.com/en-us/help/261289/how-to-know-when-the-user-clicks-a-check-box-in-a-treeview-control
 				TVHITTESTINFO tvht = { { 0, 0 }, 0, NULL };
-				DWORD dwpos = GetMessagePos();
+				const DWORD dwpos = GetMessagePos();
 				tvht.pt.x = GET_X_LPARAM(dwpos);
 				tvht.pt.y = GET_Y_LPARAM(dwpos);
 				MapWindowPoints(HWND_DESKTOP, hwndTV, &tvht.pt, 1);

@@ -23,6 +23,24 @@
 #define WC_NOTEPAD2 L"Notepad2"
 #define MY_APPUSERMODELID	L"Notepad2 Text Editor"
 
+typedef enum TripleBoolean {
+	TripleBoolean_False = 0,
+	TripleBoolean_True,
+	TripleBoolean_NotSet,
+} TripleBoolean;
+
+enum {
+	ReadOnlyMode_None = 0,
+	ReadOnlyMode_Current,
+	ReadOnlyMode_AllFile,
+};
+
+typedef enum FileWatchingMode {
+	FileWatchingMode_None = 0,
+	FileWatchingMode_ShowMessage,
+	FileWatchingMode_AutoReload,
+} FileWatchingMode;
+
 //==== Data Type for WM_COPYDATA ==============================================
 #define DATA_NOTEPAD2_PARAMS 0xFB10
 typedef struct NP2PARAMS {
@@ -32,7 +50,7 @@ typedef struct NP2PARAMS {
 	bool	flagQuietCreate;
 	bool	flagTitleExcerpt;
 	bool	flagJumpTo;
-	int		flagChangeNotify;
+	TripleBoolean	flagChangeNotify;
 	int		iInitialLexer;
 	Sci_Line		iInitialLine;
 	Sci_Position	iInitialColumn;
@@ -103,6 +121,30 @@ NP2SettingsVersion_None = 0,
 NP2SettingsVersion_V1 = 1,
 NP2SettingsVersion_Current = NP2SettingsVersion_V1,
 };
+
+typedef enum EscFunction {
+	EscFunction_None = 0,
+	EscFunction_Minimize,
+	EscFunction_Exit,
+} EscFunction;
+
+typedef enum TitlePathNameFormat {
+	TitlePathNameFormat_NameOnly = 0,
+	TitlePathNameFormat_NameFirst,
+	TitlePathNameFormat_FullPath,
+} TitlePathNameFormat;
+
+typedef enum PrintHeaderOption {
+	PrintHeaderOption_FilenameAndDateTime = 0,
+	PrintHeaderOption_FilenameAndDate,
+	PrintHeaderOption_Filename,
+	PrintHeaderOption_LeaveBlank,
+} PrintHeaderOption;
+
+typedef enum PrintFooterOption {
+	PrintFooterOption_PageNumber = 0,
+	PrintFooterOption_LeaveBlank,
+} PrintFooterOption;
 
 #define INI_SECTION_NAME_NOTEPAD2				L"Notepad2"
 #define INI_SECTION_NAME_SETTINGS				L"Settings"

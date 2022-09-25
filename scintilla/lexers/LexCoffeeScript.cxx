@@ -26,16 +26,19 @@ using namespace Lexilla;
 
 namespace {
 
+// https://coffeescript.org/annotated-source/lexer.html#section-107
 struct EscapeSequence {
 	int outerState = SCE_COFFEESCRIPT_DEFAULT;
 	int digitsLeft = 0;
+	bool brace = false;
 
-	// highlight any character as escape sequence, no highlight for hex in '\u{hex}'.
+	// highlight any character as escape sequence.
 	bool resetEscapeState(int state, int chNext) noexcept {
 		if (IsEOLChar(chNext)) {
 			return false;
 		}
 		outerState = state;
+		brace = false;
 		digitsLeft = (chNext == 'x')? 3 : ((chNext == 'u') ? 5 : 1);
 		return true;
 	}
@@ -201,6 +204,11 @@ void ColouriseCoffeeScriptDoc(Sci_PositionU startPos, Sci_Position lengthDoc, in
 				if (escSeq.resetEscapeState(sc.state, sc.chNext)) {
 					sc.SetState(SCE_COFFEESCRIPT_ESCAPECHAR);
 					sc.Forward();
+					if (sc.Match('u', '{')) {
+						escSeq.brace = true;
+						escSeq.digitsLeft = 9; // Unicode code point
+						sc.Forward();
+					}
 				}
 			} else if (sc.ch == '\'' && (sc.state != SCE_COFFEESCRIPT_TRIPLE_STRING_SQ || sc.MatchNext('\'', '\''))) {
 				if (sc.state == SCE_COFFEESCRIPT_TRIPLE_STRING_SQ) {
@@ -219,6 +227,11 @@ void ColouriseCoffeeScriptDoc(Sci_PositionU startPos, Sci_Position lengthDoc, in
 				if (escSeq.resetEscapeState(sc.state, sc.chNext)) {
 					sc.SetState(SCE_COFFEESCRIPT_ESCAPECHAR);
 					sc.Forward();
+					if (sc.Match('u', '{')) {
+						escSeq.brace = true;
+						escSeq.digitsLeft = 9; // Unicode code point
+						sc.Forward();
+					}
 				}
 			} else if (sc.ch == '\"' && (sc.state != SCE_COFFEESCRIPT_TRIPLE_STRING_DQ || sc.MatchNext('\"', '\"'))) {
 				if (sc.state == SCE_COFFEESCRIPT_TRIPLE_STRING_DQ) {
@@ -238,6 +251,11 @@ void ColouriseCoffeeScriptDoc(Sci_PositionU startPos, Sci_Position lengthDoc, in
 				if (escSeq.resetEscapeState(sc.state, sc.chNext)) {
 					sc.SetState(SCE_COFFEESCRIPT_ESCAPECHAR);
 					sc.Forward();
+					if (sc.Match('u', '{')) {
+						escSeq.brace = true;
+						escSeq.digitsLeft = 9; // Unicode code point
+						sc.Forward();
+					}
 				}
 			} else if (sc.ch == '`' && (sc.state != SCE_COFFEESCRIPT_TRIPLE_BACKTICKS || sc.MatchNext('`', '`'))) {
 				if (sc.state == SCE_COFFEESCRIPT_TRIPLE_BACKTICKS) {
@@ -249,6 +267,9 @@ void ColouriseCoffeeScriptDoc(Sci_PositionU startPos, Sci_Position lengthDoc, in
 
 		case SCE_COFFEESCRIPT_ESCAPECHAR:
 			if (escSeq.atEscapeEnd(sc.ch)) {
+				if (escSeq.brace && sc.ch == '}') {
+					sc.Forward();
+				}
 				sc.SetState(escSeq.outerState);
 				continue;
 			}
@@ -256,7 +277,9 @@ void ColouriseCoffeeScriptDoc(Sci_PositionU startPos, Sci_Position lengthDoc, in
 
 		case SCE_COFFEESCRIPT_REGEX:
 		case SCE_COFFEESCRIPT_TRIPLE_REGEX:
-			if (sc.ch == '\\') {
+			if (sc.atLineStart && sc.state == SCE_COFFEESCRIPT_REGEX) {
+				sc.SetState(SCE_COFFEESCRIPT_DEFAULT);
+			} else if (sc.ch == '\\') {
 				sc.Forward();
 			} else if (sc.ch == '[' || sc.ch == ']') {
 				insideRegexRange = sc.ch == '[';
@@ -278,8 +301,6 @@ void ColouriseCoffeeScriptDoc(Sci_PositionU startPos, Sci_Position lengthDoc, in
 				while (IsLowerCase(sc.ch)) {
 					sc.Forward();
 				}
-				sc.SetState(SCE_COFFEESCRIPT_DEFAULT);
-			} else if (sc.atLineStart && sc.state == SCE_COFFEESCRIPT_REGEX) {
 				sc.SetState(SCE_COFFEESCRIPT_DEFAULT);
 			}
 			break;
@@ -423,9 +444,8 @@ void ColouriseCoffeeScriptDoc(Sci_PositionU startPos, Sci_Position lengthDoc, in
 					sc.SetState(SCE_COFFEESCRIPT_OPERATOR);
 				}
 			} else if (isoperator(sc.ch) || sc.ch == '@') {
-				const bool interpolating = !nestedState.empty();
-				sc.SetState(interpolating ? SCE_COFFEESCRIPT_OPERATOR2 : SCE_COFFEESCRIPT_OPERATOR);
-				if (interpolating) {
+				sc.SetState(SCE_COFFEESCRIPT_OPERATOR);
+				if (!nestedState.empty()) {
 					if (sc.ch == '{') {
 						nestedState.push_back(SCE_COFFEESCRIPT_DEFAULT);
 						jsxTagLevels.push_back(jsxTagLevel);
@@ -433,6 +453,9 @@ void ColouriseCoffeeScriptDoc(Sci_PositionU startPos, Sci_Position lengthDoc, in
 					} else if (sc.ch == '}') {
 						jsxTagLevel = TryTakeAndPop(jsxTagLevels);
 						const int outerState = TakeAndPop(nestedState);
+						if (outerState != SCE_COFFEESCRIPT_DEFAULT) {
+							sc.ChangeState(SCE_COFFEESCRIPT_OPERATOR2);
+						}
 						sc.ForwardSetState(outerState);
 						continue;
 					}

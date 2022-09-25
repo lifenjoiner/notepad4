@@ -308,11 +308,12 @@ protected:	// ScintillaBase subclass needs access to much of Editor
 	void SetRepresentations();
 	void DropGraphics() noexcept;
 
+	bool HasMarginWindow() const noexcept;
 	// The top left visible point in main window coordinates. Will be (0, 0) except for
 	// scroll views where it will be equivalent to the current scroll position.
 	Point GetVisibleOriginInMain() const noexcept override;
 	PointDocument SCICALL DocumentPointFromView(Point ptView) const noexcept;  // Convert a point from view space to document
-	Sci::Line TopLineOfMain() const noexcept override;   // Return the line at Main's y coordinate 0
+	Sci::Line TopLineOfMain() const noexcept final;   // Return the line at Main's y coordinate 0
 	virtual PRectangle GetClientRectangle() const noexcept;
 	virtual PRectangle GetClientDrawingRectangle() const noexcept;
 	PRectangle GetTextRectangle() const noexcept;
@@ -454,15 +455,6 @@ protected:	// ScintillaBase subclass needs access to much of Editor
 	void DelCharBack(bool allowLineStartDeletion);
 	virtual void ClaimSelection() noexcept = 0;
 
-	static constexpr Scintilla::KeyMod ModifierFlags(bool shift, bool ctrl, bool alt, bool meta = false, bool super = false) noexcept {
-		return
-			(shift ? KeyMod::Shift : KeyMod::Norm) |
-			(ctrl ? KeyMod::Ctrl : KeyMod::Norm) |
-			(alt ? KeyMod::Alt : KeyMod::Norm) |
-			(meta ? KeyMod::Meta : KeyMod::Norm) |
-			(super ? KeyMod::Super : KeyMod::Norm);
-	}
-
 	virtual void NotifyChange() noexcept = 0;
 	virtual void NotifyFocus(bool focus);
 	virtual void SetCtrlID(int identifier) noexcept;
@@ -494,7 +486,6 @@ protected:	// ScintillaBase subclass needs access to much of Editor
 	void NotifyModified(Document *document, DocModification mh, void *userData) override;
 	void NotifyDeleted(Document *document, void *userData) noexcept override;
 	void NotifyStyleNeeded(Document *doc, void *userData, Sci::Position endStyleNeeded) override;
-	void NotifyLexerChanged(Document *doc, void *userData) override;
 	void NotifyErrorOccurred(Document *doc, void *userData, Scintilla::Status status) noexcept override;
 	void NotifyMacroRecord(Scintilla::Message iMessage, Scintilla::uptr_t wParam, Scintilla::sptr_t lParam) noexcept;
 

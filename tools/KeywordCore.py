@@ -249,6 +249,9 @@ def to_lower_conditional(items):
 			result.append(item.lower())
 	return result
 
+def first_word_on_each_line(doc):
+	return re.findall(r'^\s*(\w+)', doc, re.MULTILINE)
+
 
 def parse_actionscript_api_file(path):
 	sections = read_api_file(path, '//')
@@ -292,7 +295,7 @@ def parse_autohotkey_api_file(pathList):
 				items = doc.split()
 			elif key == 'flow of control':
 				key = 'keywords'
-				items = re.findall(r'^\s*(\w+)', doc, re.MULTILINE)
+				items = first_word_on_each_line(doc)
 			elif key == 'directives':
 				items = re.findall(r'#(\w+)', doc)
 			elif key == 'script compiler directives':
@@ -385,13 +388,13 @@ def parse_avisynth_api_file(path):
 	for key, doc in sections:
 		if key == 'keywords':
 			items = doc.split()
-			items.extend([item.lower() for item in items])
+			items.extend(to_lower(items))
 			keywordMap[key] = items
 		elif key == 'functions':
 			items = re.findall(r'^(\w+\s+)?(\w+\()', doc, re.MULTILINE)
 			functions = [item[1] for item in items if 'global' not in item[0]]
 			keywordMap['functions'] = functions
-			items = re.findall(r'^global\s+(\w+\(?)', doc, re.MULTILINE)
+			items = re.findall(r'global\s+(\w+\(?)', doc)
 			keywordMap['options'] = items
 		elif key == 'properties':
 			items = re.findall(r'clip\.(\w+\(?)', doc)
@@ -467,7 +470,7 @@ def parse_batch_api_file(path):
 		if key in ('keywords', 'internal command'):
 			items = doc.split()
 			keywordMap['upper case keywords'].extend(items)
-			keywordMap[key] = [item.lower() for item in items]
+			keywordMap[key] = to_lower(items)
 		elif key == 'external command':
 			uppercase = keywordMap['upper case keywords']
 			options = keywordMap['options']
@@ -816,8 +819,8 @@ def parse_dart_api_file(path):
 			items = re.findall(r'(class|typedef)\s+(\w+)', doc)
 			keywordMap['class'] = [item[1] for item in items]
 
-			items = re.findall(r'(enum)\s+(\w+)', doc)
-			keywordMap['enumeration'] = [item[1] for item in items]
+			items = re.findall(r'enum\s+(\w+)', doc)
+			keywordMap['enumeration'] = items
 
 			items = re.findall(r'@(\w+\(?)', doc)
 			keywordMap['metadata'] = items
@@ -840,6 +843,44 @@ def parse_dart_api_file(path):
 		('enumeration', keywordMap['enumeration'], KeywordAttr.Default),
 		('metadata', keywordMap['metadata'], KeywordAttr.NoLexer | KeywordAttr.Special),
 		('function', keywordMap['function'], KeywordAttr.NoLexer),
+	]
+
+def parse_fortran_api_file(path):
+	sections = read_api_file(path, '!', commentKind=1)
+	keywordMap = {}
+	misc = []
+	for key, doc in sections:
+		if key in ('keywords', 'attribute', 'type', 'misc'):
+			items = doc.split()
+			misc.extend(items)
+			if key != 'misc':
+				keywordMap[key] = to_lower(items)
+		elif key == 'code folding':
+			items = first_word_on_each_line(doc)
+			items.extend(['TEAM', 'ENDTEAM'])
+			misc.extend(items)
+			keywordMap[key] = to_lower(items)
+		elif key == 'function':
+			items = re.findall(r'(\w+\()', doc)
+			misc.extend(items)
+			keywordMap[key] = to_lower(items)
+
+	keywordMap['misc'] = misc
+	RemoveDuplicateKeyword(keywordMap, [
+		'code folding',
+		'keywords',
+		'type',
+		'attribute',
+		'function',
+		'misc',
+	])
+	return [
+		('keywords', keywordMap['keywords'], KeywordAttr.Default),
+		('code folding', keywordMap['code folding'], KeywordAttr.Default),
+		('type', keywordMap['type'], KeywordAttr.Default),
+		('attribute', keywordMap['attribute'], KeywordAttr.Default),
+		('function', keywordMap['function'], KeywordAttr.Default),
+		('misc', keywordMap['misc'], KeywordAttr.NoLexer),
 	]
 
 def parse_gn_api_file(path):
@@ -904,16 +945,14 @@ def parse_go_api_file(path):
 			constant = set(items)
 			items = re.findall(r'const\s+\((?P<def>[^()]+)\)', doc, re.MULTILINE)
 			for item in items:
-				items = re.findall(r'^\s+(\w+)', item, re.MULTILINE)
-				constant.update(items)
+				constant.update(first_word_on_each_line(item))
 			keywordMap['constant'] = constant
 
 			items = re.findall(r'var\s+(\w+)', doc)
 			variables = set(items)
 			items = re.findall(r'var\s+\((?P<def>[^()]+)\)', doc, re.MULTILINE)
 			for item in items:
-				items = re.findall(r'^\s+(\w+)', item, re.MULTILINE)
-				variables.update(items)
+				variables.update(first_word_on_each_line(item))
 			keywordMap['variables'] = variables
 
 			items = re.findall(r'package\s+([/\w]+)', doc)
@@ -1164,7 +1203,7 @@ def parse_inno_setup_api_file(path):
 				elif key == 'constants':
 					items = doc.replace(',', ' ').split()
 				elif key in ('event', 'functions', 'classes'):
-					items = re.findall(r'^\s*(function|procedure|constructor|property)\s+(\w+\(?)', doc, re.MULTILINE | re.IGNORECASE)
+					items = re.findall(r'(function|procedure|constructor|property)\s+(\w+\(?)', doc, re.IGNORECASE)
 					functions = []
 					properties = []
 					for kind, name in items:
@@ -1384,13 +1423,13 @@ def parse_julia_api_file(path):
 	keywordMap = {}
 	for key, doc in sections:
 		if key in ('core', 'modules'):
-			items = re.findall(r'^\s*module\s+([\w.]+)', doc, re.MULTILINE)
+			items = re.findall(r'module\s+([\w.]+)', doc)
 			modules = []
 			for item in items:
 				modules.extend(item.split('.'))
 			keywordMap.setdefault('module', set()).update(modules)
 
-			items = re.findall(r'^\s+const\s+(\w+)', doc, re.MULTILINE)
+			items = re.findall(r'const\s+(\w+)', doc)
 			keywordMap.setdefault('constant', set()).update(items)
 
 			items = re.findall(r'^\s+([A-Z]\w+)', doc, re.MULTILINE)
@@ -1546,7 +1585,7 @@ def parse_llvm_api_file(path):
 			items = re.findall(r'^\s*([\w\-]+\(?)', doc, re.MULTILINE)
 			keywordMap[key] = items
 		elif key == 'instruction':
-			items = re.findall(r'^\s*(\w+)', doc, re.MULTILINE)
+			items = first_word_on_each_line(doc)
 			keywordMap[key] = items
 
 	RemoveDuplicateKeyword(keywordMap, [
@@ -1619,13 +1658,13 @@ def parse_php_api_file(path):
 			items = re.findall(r'\w+\(', doc)
 			keywordMap['magic method'] = [item for item in items if item.startswith('__')]
 			keywordMap['function'] = items
-			keywordMap['class'] = re.findall(r'\Wclass\s+(\w+)', doc)
-			keywordMap['interface'] = re.findall(r'\Winterface\s+(\w+)', doc)
+			keywordMap['class'] = re.findall(r'class\s+(\w+)', doc)
+			keywordMap['interface'] = re.findall(r'interface\s+(\w+)', doc)
 			items = re.findall(r'^\s*([_A-Z0-9]+)\s*$', doc, re.MULTILINE)
 			keywordMap['magic constant'] = [item for item in items if item.startswith('__')]
 			keywordMap['constant'] = items
 			# field
-			items = re.findall(r'\Wconst\s+\w+\s+([_A-Z0-9]+)', doc)
+			items = re.findall(r'const\s+\w+\s+([_A-Z0-9]+)', doc)
 			keywordMap['constant'].extend(items)
 			items = re.findall(r'(public|protected)\s+[\w\?\|]+\s+\$(\w+)', doc)
 			keywordMap['misc'].extend(item[1] for item in items)
@@ -1962,7 +2001,7 @@ def parse_rust_api_file(path):
 			keywordMap['enumeration'] = enums
 			keywordMap['union'] = unions
 
-			items = re.findall(r'^\s*const\s+(\w+)\s*:', doc, re.MULTILINE)
+			items = re.findall(r'const\s+(\w+)\s*:', doc)
 			keywordMap['constant'] = set(items)
 
 			items = re.findall(r'fn\s+(\w+)', doc)
@@ -2146,6 +2185,68 @@ def parse_typescript_api_file(path):
 		('TSDoc', keywordMap['tsdoc'], KeywordAttr.NoLexer | KeywordAttr.NoAutoComp),
 	]
 
+def parse_vhdl_api_file(path):
+	sections = read_api_file(path, '--')
+	keywordMap = {}
+	misc = []
+	for key, doc in sections:
+		if key == 'keywords':
+			keywordMap[key] = doc.split()
+		elif key == 'code folding':
+			items = first_word_on_each_line(doc)
+			keywordMap[key] = items
+		elif key == 'directives':
+			keywordMap[key] = re.findall(r'`(\w+)', doc)
+		elif key == 'api':
+			items = re.findall(r"'(\w\w+\(?)", doc) + re.findall(r'attribute\s+(\w+\(?)', doc)
+			keywordMap['attributes'] = items + to_lower(items)
+			functions = re.findall(r'function\s+(\w+\(?)', doc) + re.findall(r'procedure\s+(\w+\(?)', doc)
+			types = re.findall(r'type\s+(\w+)', doc)
+			alias = re.findall(r'alias\s+(\w+)\s+is\s+\w+\s*(\W)', doc)
+			for item, kind in alias:
+				if kind == ';':
+					types.append(item)
+				else:
+					functions.append(item)
+			misc.extend(functions)
+			misc.extend(types)
+			keywordMap['functions'] = to_lower(functions)
+			keywordMap['types'] = to_lower(types)
+			constant = []
+			items = re.findall(r'type\s+\w+\s+is\s*\(([\w\,\s]+)\)', doc)
+			for item in items:
+				constant.extend(item.replace(',', ' ').split())
+			items = re.findall(r'constant\s+(\w+)', doc)
+			constant.extend(items + ['INPUT', 'OUTPUT'])
+			misc.extend(constant)
+			keywordMap['constants'] = to_lower(constant)
+			packages = re.findall(r'package\s+(\w+)', doc)
+			misc.extend(packages)
+			keywordMap['packages'] = to_lower(packages) + ['ieee', 'std', 'work']
+			misc.extend(re.findall(r'context\s+(\w+)', doc))
+
+	keywordMap['misc'] = misc
+	RemoveDuplicateKeyword(keywordMap, [
+		'code folding',
+		'keywords',
+		'types',
+		'functions',
+		'constants',
+		'packages',
+		'misc',
+	])
+	return [
+		('keywords', keywordMap['keywords'], KeywordAttr.Default),
+		('code folding', keywordMap['code folding'], KeywordAttr.Default),
+		('types', keywordMap['types'], KeywordAttr.Default),
+		('directives', keywordMap['directives'], KeywordAttr.NoLexer | KeywordAttr.NoAutoComp | KeywordAttr.Special),
+		('attributes', keywordMap['attributes'], KeywordAttr.NoLexer | KeywordAttr.NoAutoComp | KeywordAttr.Special),
+		('functions', keywordMap['functions'], KeywordAttr.Default),
+		('constants', keywordMap['constants'], KeywordAttr.Default),
+		('packages', keywordMap['packages'], KeywordAttr.Default),
+		('misc', keywordMap['misc'], KeywordAttr.NoLexer),
+	]
+
 def parse_vim_api_file(path):
 	sections = read_api_file(path, '"')
 	keywordMap = {}
@@ -2170,6 +2271,46 @@ def parse_visual_basic_api_file(path):
 		('preprocessor', [], KeywordAttr.MakeLower | KeywordAttr.NoAutoComp | KeywordAttr.Special),
 		('attribute', [], KeywordAttr.MakeLower),
 		('constant', [], KeywordAttr.MakeLower),
+	]
+
+def parse_verilog_api_file(pathList):
+	keywordMap = {}
+	for path in pathList:
+		sections = read_api_file(path, '//')
+		for key, doc in sections:
+			items = []
+			if key in ('keywords', 'data types', 'misc'):
+				items = doc.split()
+			elif key == 'directives':
+				items = re.findall(r'`(\w+)', doc)
+			elif key == 'code folding':
+				items = first_word_on_each_line(doc)
+			elif key == 'system task and function':
+				items = re.findall(r'\W\$([\$\w+]+\(?)', doc)
+			elif key == 'api':
+				items = re.findall(r'\W\$([\$\w+]+\(?)', doc)
+				keywordMap.setdefault('system task and function', []).extend(items)
+				items = re.findall(r'\Wclass\s+(\w+)', doc)
+				keywordMap.setdefault('misc', []).extend(items)
+				items = re.findall(r'\s+(\w+\()', doc)
+				keywordMap.setdefault('misc', []).extend(items)
+				items = []
+			if items:
+				keywordMap.setdefault(key, []).extend(items)
+
+	RemoveDuplicateKeyword(keywordMap, [
+		'code folding',
+		'data types',
+		'keywords',
+		'misc',
+	])
+	return [
+		('keywords', keywordMap['keywords'], KeywordAttr.Default),
+		('code folding', keywordMap['code folding'], KeywordAttr.Default),
+		('data types', keywordMap['data types'], KeywordAttr.Default),
+		('directives', keywordMap['directives'], KeywordAttr.NoAutoComp | KeywordAttr.Special),
+		('system task and function', keywordMap['system task and function'], KeywordAttr.NoLexer | KeywordAttr.NoAutoComp | KeywordAttr.Special),
+		('misc', keywordMap['misc'], KeywordAttr.NoLexer),
 	]
 
 def parse_wasm_lexer_keywords(path):

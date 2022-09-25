@@ -20,7 +20,6 @@
 #include <string_view>
 #include <vector>
 #include <map>
-#include <set>
 #include <optional>
 #include <algorithm>
 #include <memory>
@@ -149,9 +148,12 @@ inline bool KeyboardIsKeyDown(int key) noexcept {
 	return (::GetKeyState(key) & 0x8000) != 0;
 }
 
+// Bit 24 is the extended keyboard flag and the numeric keypad is non-extended
+constexpr sptr_t extendedKeyboard = 1 << 24;
+
 constexpr bool KeyboardIsNumericKeypadFunction(Scintilla::uptr_t wParam, Scintilla::sptr_t lParam) noexcept {
 	// Bit 24 is the extended keyboard flag and the numeric keypad is non-extended
-	if ((lParam & (1 << 24)) != 0) {
+	if ((lParam & extendedKeyboard) != 0) {
 		// Not from the numeric keypad
 		return false;
 	}
@@ -1037,7 +1039,7 @@ Sci::Position ScintillaWin::EncodedFromUTF8(const char *utf8, char *encoded) con
 bool ScintillaWin::PaintDC(HDC hdc) {
 	//printf("%s %s\n", GetCurrentLogTime(), __func__);
 	if (technology == Technology::Default) {
-		AutoSurface surfaceWindow(hdc, this);
+		const AutoSurface surfaceWindow(hdc, this);
 		if (surfaceWindow) {
 			Paint(surfaceWindow, rcPaint);
 			surfaceWindow->Release();
@@ -1046,7 +1048,7 @@ bool ScintillaWin::PaintDC(HDC hdc) {
 		//SetLayout(hdc, LAYOUT_BITMAPORIENTATIONPRESERVED);
 		EnsureRenderTarget(hdc);
 		if (pRenderTarget) {
-			AutoSurface surfaceWindow(pRenderTarget, this);
+			const AutoSurface surfaceWindow(pRenderTarget, this);
 			if (surfaceWindow) {
 				SetRenderingParams(surfaceWindow);
 				pRenderTarget->BeginDraw();
@@ -1105,7 +1107,7 @@ sptr_t ScintillaWin::WndPaint() {
 
 sptr_t ScintillaWin::HandleCompositionWindowed(uptr_t wParam, sptr_t lParam) {
 	if (lParam & GCS_RESULTSTR) {
-		IMContext imc(MainHWND());
+		const IMContext imc(MainHWND());
 		if (imc.hIMC) {
 			AddWString(imc.GetCompositionString(GCS_RESULTSTR), CharacterSource::ImeResult);
 
@@ -1147,7 +1149,7 @@ void ScintillaWin::DrawImeIndicator(int indicator, Sci::Position len) {
 
 // See Chromium's IMM32Manager::MoveImeWindow()
 void ScintillaWin::SetCandidateWindowPos() {
-	IMContext imc(MainHWND());
+	const IMContext imc(MainHWND());
 	if (imc.hIMC) {
 		const Point pos = PointMainCaret();
 		const int x = static_cast<int>(pos.x);
@@ -1257,7 +1259,7 @@ void ScintillaWin::EscapeHanja() {
 
 	std::wstring uniChar = StringDecode(oneChar, CodePageOfDocument());
 
-	IMContext imc(MainHWND());
+	const IMContext imc(MainHWND());
 	if (imc.hIMC) {
 		// Set the candidate box position since IME may show it.
 		SetCandidateWindowPos();
@@ -1424,7 +1426,7 @@ bool ScintillaWin::HandleLaTeXTabCompletion() {
 sptr_t ScintillaWin::HandleCompositionInline(uptr_t, sptr_t lParam) {
 	// Copy & paste by johnsonj with a lot of helps of Neil.
 	// Great thanks for my foreruners, jiniya and BLUEnLIVE.
-	IMContext imc(MainHWND());
+	const IMContext imc(MainHWND());
 
 	bool initialCompose = false;
 	if (pdoc->TentativeActive()) {
@@ -1663,7 +1665,7 @@ sptr_t ScintillaWin::MouseMessage(unsigned int iMessage, uptr_t wParam, sptr_t l
 	switch (iMessage) {
 	case WM_LBUTTONDOWN: {
 		// For IME, set the composition string as the result string.
-		IMContext imc(MainHWND());
+		const IMContext imc(MainHWND());
 		if (imc.hIMC) {
 			::ImmNotifyIME(imc.hIMC, NI_COMPOSITIONSTR, CPS_COMPLETE, 0);
 		}
@@ -1891,7 +1893,7 @@ sptr_t ScintillaWin::FocusMessage(unsigned int iMessage, uptr_t wParam, sptr_t) 
 			DestroySystemCaret();
 		}
 		// Explicitly complete any IME composition
-		IMContext imc(MainHWND());
+		const IMContext imc(MainHWND());
 		if (imc.hIMC) {
 			::ImmNotifyIME(imc.hIMC, NI_COMPOSITIONSTR, CPS_COMPLETE, 0);
 		}
@@ -2374,14 +2376,18 @@ sptr_t ScintillaWin::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		case WM_WINDOWPOSCHANGING:
 			return ::DefWindowProc(MainHWND(), msg, wParam, lParam);
 
-		case WM_WINDOWPOSCHANGED:
+		case WM_WINDOWPOSCHANGED: {
+			HMONITOR current = hCurrentMonitor;
 			if (UpdateRenderingParams(false)) {
 				DropGraphics();
 				Redraw();
-				// recreate toolbar after monitor changed
-				::SendMessage(::GetParent(MainHWND()), WM_THEMECHANGED, 0, 0);
+				if (current) {
+					// recreate toolbar after monitor changed
+					::PostMessage(::GetParent(MainHWND()), WM_THEMECHANGED, 0, 0);
+				}
 			}
 			return ::DefWindowProc(MainHWND(), msg, wParam, lParam);
+		}
 
 		case WM_GETTEXTLENGTH:
 			return GetTextLength();
@@ -2462,7 +2468,7 @@ std::string ScintillaWin::UTF8FromEncoded(std::string_view encoded) const {
 		return std::string(encoded);
 	} else {
 		// Pivot through wide string
-		std::wstring ws = StringDecode(encoded, CodePageOfDocument());
+		const std::wstring ws = StringDecode(encoded, CodePageOfDocument());
 		return StringEncode(ws, CpUtf8);
 	}
 }
@@ -2472,7 +2478,7 @@ std::string ScintillaWin::EncodedFromUTF8(std::string_view utf8) const {
 		return std::string(utf8);
 	} else {
 		// Pivot through wide string
-		std::wstring ws = StringDecode(utf8, CpUtf8);
+		const std::wstring ws = StringDecode(utf8, CpUtf8);
 		return StringEncode(ws, CodePageOfDocument());
 	}
 }
@@ -2971,7 +2977,7 @@ void ScintillaWin::Paste(bool asBinary) {
 		return;
 	}
 
-	UndoGroup ug(pdoc);
+	const UndoGroup ug(pdoc);
 	//EnumAllClipboardFormat("Paste");
 	const bool isLine = SelectionEmpty() &&
 		(::IsClipboardFormatAvailable(cfLineSelect) || ::IsClipboardFormatAvailable(cfVSLineTag));
@@ -3238,7 +3244,7 @@ STDMETHODIMP DropTarget::Drop(LPDATAOBJECT pIDataSource, DWORD grfKeyState, POIN
 void ScintillaWin::ImeStartComposition() {
 	if (caret.active) {
 		// Move IME Window to current caret position
-		IMContext imc(MainHWND());
+		const IMContext imc(MainHWND());
 		const Point pos = PointMainCaret();
 		COMPOSITIONFORM CompForm;
 		CompForm.dwStyle = CFS_POINT;
@@ -3310,10 +3316,10 @@ LRESULT ScintillaWin::ImeOnReconvert(LPARAM lParam) {
 	wchar_t *rcFeedStart = reinterpret_cast<wchar_t*>(rc + 1);
 	memcpy(rcFeedStart, rcFeed.data(), rcFeedLen);
 
-	std::string rcCompString = RangeText(mainStart, mainEnd);
-	std::wstring rcCompWstring = StringDecode(rcCompString, codePage);
-	std::string rcCompStart = RangeText(baseStart, mainStart);
-	std::wstring rcCompWstart = StringDecode(rcCompStart, codePage);
+	const std::string rcCompString = RangeText(mainStart, mainEnd);
+	const std::wstring rcCompWstring = StringDecode(rcCompString, codePage);
+	const std::string rcCompStart = RangeText(baseStart, mainStart);
+	const std::wstring rcCompWstart = StringDecode(rcCompStart, codePage);
 
 	// Map selection to dwCompStr.
 	// No selection assumes current caret as rcCompString without length.
@@ -3325,7 +3331,7 @@ LRESULT ScintillaWin::ImeOnReconvert(LPARAM lParam) {
 	rc->dwTargetStrLen = rc->dwCompStrLen;
 	rc->dwTargetStrOffset = rc->dwCompStrOffset;
 
-	IMContext imc(MainHWND());
+	const IMContext imc(MainHWND());
 	if (!imc.hIMC)
 		return 0;
 
@@ -3336,8 +3342,8 @@ LRESULT ScintillaWin::ImeOnReconvert(LPARAM lParam) {
 	const DWORD tgWlen = rc->dwTargetStrLen;
 	const DWORD tgWstart = rc->dwTargetStrOffset / sizeof(wchar_t);
 
-	std::string tgCompStart = StringEncode(rcFeed.substr(0, tgWstart), codePage);
-	std::string tgComp = StringEncode(rcFeed.substr(tgWstart, tgWlen), codePage);
+	const std::string tgCompStart = StringEncode(rcFeed.substr(0, tgWstart), codePage);
+	const std::string tgComp = StringEncode(rcFeed.substr(tgWstart, tgWlen), codePage);
 
 	// No selection needs to adjust reconvert start position for IME set.
 	const Sci::Position adjust = tgCompStart.length() - rcCompStart.length();
@@ -4033,7 +4039,7 @@ LRESULT CALLBACK ScintillaWin::CTWndProc(HWND hWnd, UINT iMessage, WPARAM wParam
 			} else if (iMessage == WM_PAINT) {
 				PAINTSTRUCT ps;
 				::BeginPaint(hWnd, &ps);
-				std::unique_ptr<Surface> surfaceWindow(Surface::Allocate(sciThis->technology));
+				const std::unique_ptr<Surface> surfaceWindow(Surface::Allocate(sciThis->technology));
 				ID2D1HwndRenderTarget *pCTRenderTarget = nullptr;
 				RECT rc;
 				GetClientRect(hWnd, &rc);

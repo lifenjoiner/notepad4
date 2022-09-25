@@ -26,6 +26,15 @@ bool LexAccessor::MatchIgnoreCase(Sci_Position pos, const char *s) noexcept {
 	return true;
 }
 
+bool LexAccessor::MatchLowerCase(Sci_Position pos, const char *s) noexcept {
+	for (; *s; s++, pos++) {
+		if (*s != UnsafeLower(SafeGetCharAt(pos))) {
+			return false;
+		}
+	}
+	return true;
+}
+
 void LexAccessor::GetRange(Sci_PositionU startPos_, Sci_PositionU endPos_, char *s, Sci_PositionU len) noexcept {
 	assert(s != nullptr);
 	assert(startPos_ <= endPos_ && len != 0);
@@ -49,7 +58,7 @@ std::string LexAccessor::GetRange(Sci_PositionU startPos_, Sci_PositionU endPos_
 	assert(startPos_ < endPos_);
 	const Sci_PositionU len = endPos_ - startPos_;
 	std::string s(len, '\0');
-	GetRange(startPos_, endPos_, s.data(), len);
+	GetRange(startPos_, endPos_, s.data(), len + 1);
 	return s;
 }
 
@@ -57,7 +66,7 @@ std::string LexAccessor::GetRangeLowered(Sci_PositionU startPos_, Sci_PositionU 
 	assert(startPos_ < endPos_);
 	const Sci_PositionU len = endPos_ - startPos_;
 	std::string s(len, '\0');
-	GetRangeLowered(startPos_, endPos_, s.data(), len);
+	GetRangeLowered(startPos_, endPos_, s.data(), len + 1);
 	return s;
 }
 

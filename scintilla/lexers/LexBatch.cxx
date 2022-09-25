@@ -28,8 +28,8 @@ using namespace Lexilla;
 namespace {
 
 enum {
-	BatchLineStateMaskEmptyLine = 1 << 0,
-	BatchLineStateMaskCommentLine = 1 << 1,
+	BatchLineStateMaskCommentLine = 1 << 0,
+	BatchLineStateMaskEmptyLine = 1 << 1,
 	BatchLineStateLineContinuation = 1 << 2,
 };
 
@@ -461,7 +461,7 @@ static_assert(DefaultNestedStateBaseStyle + 2 == SCE_BAT_STRINGSQ);
 static_assert(DefaultNestedStateBaseStyle + 3 == SCE_BAT_STRINGBT);
 
 constexpr bool IsCommentLine(int lineState) noexcept {
-	return (lineState & BatchLineStateMaskCommentLine) != 0;
+	return (lineState & BatchLineStateMaskCommentLine);
 }
 
 void ColouriseBatchDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initStyle, LexerWordList keywordLists, Accessor &styler) {
@@ -483,9 +483,11 @@ void ColouriseBatchDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initS
 
 	StyleContext sc(startPos, lengthDoc, initStyle, styler);
 	std::vector<int> nestedState;
+	int levelPrev = 0;
 	int levelCurrent = SC_FOLDLEVELBASE;
 	if (sc.currentLine > 0) {
-		levelCurrent = styler.LevelAt(sc.currentLine - 1) >> 16;
+		levelPrev = styler.LevelAt(sc.currentLine - 1);
+		levelCurrent = levelPrev >> 16;
 		int lineState = styler.GetLineState(sc.currentLine - 1);
 		prevLineState = lineState;
 		prev2LineState = styler.GetLineState(sc.currentLine - 2);
@@ -538,7 +540,7 @@ void ColouriseBatchDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initS
 
 		case SCE_BAT_IDENTIFIER:
 			if (sc.ch == '.') {
-				if (sc.LengthCurrent() == 4 && styler.MatchIgnoreCase(styler.GetStartSegment(), "echo")) {
+				if (sc.LengthCurrent() == 4 && styler.MatchLowerCase(styler.GetStartSegment(), "echo")) {
 					parenBefore = parenCount;
 					command = Command::Echo;
 					sc.ChangeState(SCE_BAT_WORD);
@@ -821,7 +823,7 @@ void ColouriseBatchDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initS
 				case '@':
 					if (logicalVisibleChars == 0 && IsFileNameChar(sc.chNext)) {
 						sc.Forward();
-						if (sc.MatchIgnoreCase("rem") && !IsGraphic(sc.GetRelative(3))) {
+						if (sc.MatchLowerCase("rem") && !IsGraphic(sc.GetRelative(3))) {
 							sc.ChangeState(SCE_BAT_COMMENT);
 						} else {
 							sc.SetState(SCE_BAT_IDENTIFIER);
@@ -896,6 +898,11 @@ void ColouriseBatchDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initS
 					} else if (!IsCommentLine(lineState)) {
 						levelCurrent--;
 						levelNext--;
+						if (!IsCommentLine(prev2LineState)) {
+							styler.SetLevel(sc.currentLine - 1, levelPrev & ~SC_FOLDLEVELHEADERFLAG);
+						}
+					} else if (!IsCommentLine(prev2LineState)) {
+						styler.SetLevel(sc.currentLine - 1, levelPrev | SC_FOLDLEVELHEADERFLAG);
 					}
 				}
 
@@ -907,6 +914,7 @@ void ColouriseBatchDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initS
 				if (lev != styler.LevelAt(sc.currentLine)) {
 					styler.SetLevel(sc.currentLine, lev);
 				}
+				levelPrev = lev;
 				levelCurrent = levelNext;
 				prev2LineState = prevLineState;
 				prevLineState = lineState;

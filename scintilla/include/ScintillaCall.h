@@ -245,7 +245,6 @@ public:
 	int WhitespaceSize();
 	void SetLineState(Line line, int state);
 	int LineState(Line line);
-	int MaxLineState();
 	int CaretLineFrame();
 	void SetCaretLineFrame(int width);
 	void StyleSetChangeable(int style, bool changeable);
@@ -312,6 +311,8 @@ public:
 	Scintilla::PrintOption PrintColourMode();
 	Position FindTextFull(Scintilla::FindOption searchFlags, void *ft);
 	Position FormatRangeFull(bool draw, void *fr);
+	void SetChangeHistory(Scintilla::ChangeHistoryOption changeHistory);
+	Scintilla::ChangeHistoryOption ChangeHistory();
 	Line FirstVisibleLine();
 	Position GetLine(Line line, char *text);
 	std::string GetLine(Line line);
@@ -327,6 +328,7 @@ public:
 	std::string GetSelText();
 	Position GetTextRangeFull(void *tr);
 	void HideSelection(bool hide);
+	bool SelectionHidden();
 	int PointXFromPosition(Position pos);
 	int PointYFromPosition(Position pos);
 	Line LineFromPosition(Position pos);

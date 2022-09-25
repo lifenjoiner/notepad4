@@ -418,6 +418,22 @@ public:
 		return cb.TentativeActive();
 	}
 
+	void ChangeHistorySet(bool enable) {
+		cb.ChangeHistorySet(enable);
+	}
+	[[nodiscard]] int EditionAt(Sci::Position pos) const noexcept {
+		return cb.EditionAt(pos);
+	}
+	[[nodiscard]] Sci::Position EditionEndRun(Sci::Position pos) const noexcept {
+		return cb.EditionEndRun(pos);
+	}
+	[[nodiscard]] unsigned int EditionDeletesAt(Sci::Position pos) const noexcept {
+		return cb.EditionDeletesAt(pos);
+	}
+	[[nodiscard]] Sci::Position EditionNextDelete(Sci::Position pos) const noexcept {
+		return cb.EditionNextDelete(pos);
+	}
+
 	const char * SCI_METHOD BufferPointer() override {
 		return cb.BufferPointer();
 	}
@@ -468,13 +484,13 @@ public:
 	unsigned char SCI_METHOD StyleAt(Sci_Position position) const noexcept override {
 		return cb.StyleAt(position);
 	}
-	int StyleIndexAt(Sci_Position position) const noexcept {
-		return static_cast<unsigned char>(cb.StyleAt(position));
+	unsigned char StyleIndexAt(Sci_Position position) const noexcept {
+		return cb.StyleAt(position);
 	}
 	void GetStyleRange(unsigned char *buffer, Sci::Position position, Sci::Position lengthRetrieve) const noexcept {
 		cb.GetStyleRange(buffer, position, lengthRetrieve);
 	}
-	MarkerMask GetMark(Sci::Line line) const noexcept;
+	MarkerMask GetMark(Sci::Line line, bool includeChangeHistory) const noexcept;
 	Sci::Line MarkerNext(Sci::Line lineStart, MarkerMask mask) const noexcept;
 	int AddMark(Sci::Line line, int markerNum);
 	void AddMarkSet(Sci::Line line, MarkerMask valueSet);
@@ -500,7 +516,7 @@ public:
 	Scintilla::FoldLevel GetFoldLevel(Sci_Position line) const noexcept;
 	void ClearLevels();
 	Sci::Line GetLastChild(Sci::Line lineParent, Scintilla::FoldLevel level = Scintilla::FoldLevel::None, Sci::Line lastLine = -1);
-	Sci::Line GetFoldParent(Sci::Line line) const noexcept;
+	Sci::Line GetFoldParent(Sci::Line line, Scintilla::FoldLevel level = Scintilla::FoldLevel::None) const noexcept;
 	void GetHighlightDelimiters(HighlightDelimiter &highlightDelimiter, Sci::Line line, Sci::Line lastLine);
 
 	Sci::Position ExtendWordSelect(Sci::Position pos, int delta, bool onlyWordCharacters = false) const noexcept;
@@ -563,7 +579,6 @@ public:
 
 	int SCI_METHOD SetLineState(Sci_Line line, int state) override;
 	int SCI_METHOD GetLineState(Sci_Line line) const noexcept override;
-	Sci::Line GetMaxLineState() const noexcept;
 	void SCI_METHOD ChangeLexerState(Sci_Position start, Sci_Position end) override;
 
 	StyledText MarginStyledText(Sci::Line line) const noexcept;
@@ -694,7 +709,6 @@ public:
 	virtual void NotifyModified(Document *doc, DocModification mh, void *userData) = 0;
 	virtual void NotifyDeleted(Document *doc, void *userData) noexcept = 0;
 	virtual void NotifyStyleNeeded(Document *doc, void *userData, Sci::Position endPos) = 0;
-	virtual void NotifyLexerChanged(Document *doc, void *userData) = 0;
 	virtual void NotifyErrorOccurred(Document *doc, void *userData, Scintilla::Status status) noexcept = 0;
 };
 

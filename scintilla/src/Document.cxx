@@ -347,8 +347,31 @@ void Document::TentativeUndo(bool pendingUpdate) {
 	}
 }
 
-MarkerMask Document::GetMark(Sci::Line line) const noexcept {
-	return Markers()->MarkValue(line);
+MarkerMask Document::GetMark(Sci::Line line, bool includeChangeHistory) const noexcept {
+	MarkerMask marksHistory = 0;
+	if (includeChangeHistory && (line < LinesTotal())) {
+		MarkerMask marksEdition = 0;
+
+		const Sci::Position start = LineStart(line);
+		const Sci::Position lineNext = LineStart(line + 1);
+		for (Sci::Position position = start; position < lineNext;) {
+			const int edition = EditionAt(position);
+			if (edition) {
+				marksEdition |= 1U << (edition - 1);
+			}
+			position = EditionEndRun(position);
+		}
+		const Sci::Position lineEnd = LineEnd(line);
+		for (Sci::Position position = start; position <= lineEnd;) {
+			marksEdition |= EditionDeletesAt(position);
+			position = EditionNextDelete(position);
+		}
+
+		/* Bits: RevertedToOrigin, Saved, Modified, RevertedToModified */
+		constexpr unsigned int editionShift = static_cast<unsigned int>(MarkerOutline::HistoryRevertedToOrigin);
+		marksHistory = marksEdition << editionShift;
+	}
+	return marksHistory | Markers()->MarkValue(line);
 }
 
 Sci::Line Document::MarkerNext(Sci::Line lineStart, MarkerMask mask) const noexcept {
@@ -553,13 +576,14 @@ Sci::Line Document::GetLastChild(Sci::Line lineParent, FoldLevel level, Sci::Lin
 	if (lastLine < 0 || lastLine > maxLine) {
 		lastLine = maxLine;
 	}
-	Sci::Line lineEndStyled = SciLineFromPosition(GetEndStyled()) - 2;
+	Sci::Line lineEndStyled = SciLineFromPosition(GetEndStyled()) - 1;
 	Sci::Line lineMaxSubord = lineParent;
 	while (lineMaxSubord < maxLine) {
 		if (lineMaxSubord >= lineEndStyled) {
 			// two or more lines are required to make stable fold for most lexer
 			EnsureStyledTo(LineStart(lineMaxSubord + 2 + 1));
-			lineEndStyled = SciLineFromPosition(GetEndStyled()) - 2;
+			// LexerBase::Fold() already moved one line back
+			lineEndStyled = SciLineFromPosition(GetEndStyled()) - 1;
 		}
 		if (!IsSubordinate(levelStart, GetFoldLevel(lineMaxSubord + 1)))
 			break;
@@ -578,8 +602,14 @@ Sci::Line Document::GetLastChild(Sci::Line lineParent, FoldLevel level, Sci::Lin
 	return lineMaxSubord;
 }
 
-Sci::Line Document::GetFoldParent(Sci::Line line) const noexcept {
-	const FoldLevel level = LevelNumberPart(GetFoldLevel(line));
+Sci::Line Document::GetFoldParent(Sci::Line line, FoldLevel level) const noexcept {
+	if (level == FoldLevel::None) {
+		level = GetFoldLevel(line);
+	}
+	level = LevelNumberPart(level);
+	if (level == FoldLevel::Base) {
+		return -1;
+	}
 	for (Sci::Line lineLook = line - 1; lineLook >= 0; lineLook--) {
 		const FoldLevel levelTry = GetFoldLevel(lineLook);
 		if (LevelIsHeader(levelTry) && LevelNumberPart(levelTry) < level) {
@@ -602,7 +632,7 @@ void Document::GetHighlightDelimiters(HighlightDelimiter &highlightDelimiter, Sc
 		lookLineLevelNum = LevelNumberPart(lookLineLevel);
 	}
 
-	Sci::Line beginFoldBlock = LevelIsHeader(lookLineLevel) ? lookLine : GetFoldParent(lookLine);
+	Sci::Line beginFoldBlock = LevelIsHeader(lookLineLevel) ? lookLine : GetFoldParent(lookLine, lookLineLevel);
 	if (beginFoldBlock < 0) {
 		highlightDelimiter.Clear();
 		return;
@@ -908,7 +938,7 @@ Sci::Position Document::NextPosition(Sci::Position pos, int moveDir) const noexc
 
 bool Document::NextCharacter(Sci::Position &pos, int moveDir) const noexcept {
 	// Returns true if pos changed
-	Sci::Position posNext = NextPosition(pos, moveDir);
+	const Sci::Position posNext = NextPosition(pos, moveDir);
 	if (posNext == pos) {
 		return false;
 	} else {
@@ -1557,10 +1587,10 @@ Sci::Position Document::SetLineIndentation(Sci::Line line, Sci::Position indent)
 	const int indentOfLine = GetLineIndentation(line);
 	indent = std::max<Sci::Position>(indent, 0);
 	if (indent != indentOfLine) {
-		std::string linebuf = CreateIndentation(indent, tabInChars, !useTabs);
+		const std::string linebuf = CreateIndentation(indent, tabInChars, !useTabs);
 		const Sci::Position thisLineStart = LineStart(line);
 		const Sci::Position indentPos = GetLineIndentPosition(line);
-		UndoGroup ug(this);
+		const UndoGroup ug(this);
 		DeleteChars(thisLineStart, indentPos - thisLineStart);
 		return thisLineStart + InsertString(thisLineStart, linebuf.c_str(),
 			linebuf.length());
@@ -1727,7 +1757,7 @@ std::string Document::TransformLineEnds(const char *s, size_t len, EndOfLine eol
 }
 
 void Document::ConvertLineEnds(EndOfLine eolModeSet) {
-	UndoGroup ug(this);
+	const UndoGroup ug(this);
 
 	for (Sci::Position pos = 0; pos < LengthNoExcept(); pos++) {
 		if (cb.CharAt(pos) == '\r') {
@@ -2433,13 +2463,9 @@ void Document::StyleToAdjustingLineDuration(Sci::Position pos) {
 	durationStyleOneUnit.AddSample(bytesBeingStyled, epStyling.Duration());
 }
 
-void Document::LexerChanged(bool hasStyles_) {
+void Document::LexerChanged(bool hasStyles_) { //! removed in Scintilla 5.3
 	if (cb.EnsureStyleBuffer(hasStyles_)) {
 		endStyled = 0;
-	}
-	// Tell the watchers the lexer has changed.
-	for (const auto &watcher : watchers) {
-		watcher.watcher->NotifyLexerChanged(this, watcher.userData);
 	}
 }
 
@@ -2462,10 +2488,6 @@ int SCI_METHOD Document::SetLineState(Sci_Line line, int state) {
 
 int SCI_METHOD Document::GetLineState(Sci_Line line) const noexcept {
 	return States()->GetLineState(line);
-}
-
-Sci::Line Document::GetMaxLineState() const noexcept {
-	return States()->GetMaxLineState();
 }
 
 void SCI_METHOD Document::ChangeLexerState(Sci_Position start, Sci_Position end) {
@@ -3233,6 +3255,10 @@ Sci::Position Cxx11RegexFindText(const Document *doc, Sci::Position minPos, Sci:
 		// | std::regex::collate | std::regex::extended;
 		if (!caseSensitive)
 			flagsRe = flagsRe | std::regex::icase;
+
+#if defined(REGEX_MULTILINE)
+		flagsRe = flagsRe | std::regex::multiline;
+#endif
 
 		// Clear the RESearch so can fill in matches
 		search.Clear();
