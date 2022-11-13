@@ -13,7 +13,7 @@
 *
 *                                              (c) Florian Balmer 1996-2011
 *                                                  florian.balmer@gmail.com
-*                                               http://www.flos-freeware.ch
+*                                              https://www.flos-freeware.ch
 *
 *
 ******************************************************************************/
@@ -60,12 +60,13 @@ typedef enum EditSortFlag {
 	EditSortFlag_Descending = 1,
 	EditSortFlag_IgnoreCase = 2,
 	EditSortFlag_LogicalNumber = 4,
-	EditSortFlag_MergeDuplicate = 8,
-	EditSortFlag_RemoveDuplicate = 16,
-	EditSortFlag_RemoveUnique = 32,
+	EditSortFlag_ColumnSort = 8,
+	EditSortFlag_GroupByFileType = 16,
+	EditSortFlag_DontSort = 32,
 	EditSortFlag_Shuffle = 64,
-	EditSortFlag_ColumnSort = 128,
-	EditSortFlag_GroupByFileType = 256,
+	EditSortFlag_MergeDuplicate = 128,
+	EditSortFlag_RemoveDuplicate = 256,
+	EditSortFlag_RemoveUnique = 512,
 } EditSortFlag;
 
 // wrap indent
@@ -253,9 +254,9 @@ void EditMarkAll_ClearEx(int findFlag, Sci_Position iSelCount, LPSTR pszText);
 NP2_inline void EditMarkAll_Clear(void) {
 	EditMarkAll_ClearEx(0, 0, NULL);
 }
-bool EditMarkAll_Start(BOOL bChanged, int findFlag, Sci_Position iSelCount, LPSTR pszText);
-bool EditMarkAll_Continue(EditMarkAllStatus *status, HANDLE timer);
-bool EditMarkAll(BOOL bChanged, bool matchCase, bool wholeWord, bool bookmark);
+void EditMarkAll_Start(BOOL bChanged, int findFlag, Sci_Position iSelCount, LPSTR pszText);
+void EditMarkAll_Continue(EditMarkAllStatus *status, HANDLE timer);
+void EditMarkAll(BOOL bChanged, bool matchCase, bool wholeWord, bool bookmark);
 void EditToggleBookmarkAt(Sci_Position iPos);
 void EditBookmarkSelectAll(void);
 

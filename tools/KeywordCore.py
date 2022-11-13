@@ -25,8 +25,7 @@ JavaKeywordMap = {}
 JavaScriptKeywordMap = {}
 GroovyKeyword = []
 
-def MakeKeywordGroups(items, maxLineLength=120, prefixLen=1):
-	items = sorted(items)
+def MakeKeywordGroups(items, maxLineLength=120, prefixLen=1, makeLower=False):
 	groups = {}
 	for item in items:
 		if item.endswith('()'):
@@ -35,6 +34,8 @@ def MakeKeywordGroups(items, maxLineLength=120, prefixLen=1):
 			# 2. ')' is auto added in WordList_AddListEx()
 			item = item[:-1]
 		key = item[:prefixLen]
+		if makeLower:
+			key = key.lower()
 		if key in groups:
 			groups[key]['items'].append(item)
 			groups[key]['len'] += len(item) + 1
@@ -47,7 +48,7 @@ def MakeKeywordGroups(items, maxLineLength=120, prefixLen=1):
 		for key, group in groups.items():
 			if group['len'] > maxLineLength:
 				removed.append(key)
-				sub = MakeKeywordGroups(group['items'], maxLineLength, prefixLen + 1)
+				sub = MakeKeywordGroups(group['items'], maxLineLength, prefixLen + 1, makeLower)
 				subs.append(sub)
 		for key in removed:
 			del groups[key]
@@ -56,10 +57,10 @@ def MakeKeywordGroups(items, maxLineLength=120, prefixLen=1):
 		groups = dict(sorted(groups.items()))
 	return groups
 
-def MakeKeywordLines(items, maxLineLength=120, prefixLen=1):
+def MakeKeywordLines(items, maxLineLength=120, prefixLen=1, makeLower=False):
 	if not items:
 		return []
-	groups = MakeKeywordGroups(items, maxLineLength, prefixLen)
+	groups = MakeKeywordGroups(items, maxLineLength, prefixLen, makeLower)
 	groups = list(groups.values())
 	count = len(groups)
 	lines = []
@@ -70,7 +71,7 @@ def MakeKeywordLines(items, maxLineLength=120, prefixLen=1):
 		lineLen = group['len']
 		items = group['items']
 		if lineLen > maxLineLength and prefixLen == 1:
-			sub = MakeKeywordLines(items, maxLineLength, 2)
+			sub = MakeKeywordLines(items, maxLineLength, 2, makeLower)
 			lines.extend(sub)
 		else:
 			while index < count:
@@ -98,6 +99,16 @@ def RemoveDuplicateKeyword(keywordMap, orderedKeys):
 def to_lower(items):
 	return [item.lower() for item in items]
 
+def find_duplicate_lower(items):
+	unique = {}
+	for item in items:
+		key = item.lower()
+		if key in unique:
+			unique[key].append(item)
+		else:
+			unique[key] = [item]
+	return [sorted(item, reverse=True) for item in unique.values() if len(item) > 1]
+
 def build_enum_name(comment):
 	items = [item.replace('-', '') for item in comment.split()]
 	item = items[-1]
@@ -117,10 +128,30 @@ def BuildKeywordContent(rid, lexer, keywordList, keywordCount=16):
 	prefix = lexer[3:-4] + 'KeywordIndex_'
 	for index, item in enumerate(keywordList):
 		comment, items, attr = item
-		lines = MakeKeywordLines(set(items))
+		lines = None
+		if items:
+			items = set(items)
+			makeLower = False
+			if attr & KeywordAttr.MakeLower:
+				lowercase = to_lower(items)
+				unique = set(lowercase)
+				if unique == items:
+					attr &= ~KeywordAttr.MakeLower
+				else:
+					if len(items) != len(unique):
+						duplicate = find_duplicate_lower(items)
+						print(rid, comment, 'duplicate words:', duplicate)
+					makeLower = True
+					items = [item[1] for item in sorted(zip(lowercase, items))]
+			if not makeLower:
+				items = sorted(items)
+			lines = MakeKeywordLines(items, makeLower=makeLower)
 		if index != 0:
 			output.append(f", // {index} {comment}")
 		if lines:
+			length = len(lines) + sum(len(line) for line in lines)
+			if length >= 0xffff:
+				print(rid, comment, 'string exceeds 64 KiB:', length)
 			output.extend('"' + line + ' "' for line in lines)
 		else:
 			output.append('NULL')
@@ -145,13 +176,6 @@ def BuildKeywordContent(rid, lexer, keywordList, keywordCount=16):
 		# keyword attribute for lexer
 		if lines and (attr & KeywordAttr.NoLexer) == 0:
 			attr |= KeywordAttr.PreSorted
-			if attr & KeywordAttr.MakeLower:
-				result = sorted(to_lower(items))
-				if set(result) == set(items):
-					attr &= ~KeywordAttr.MakeLower
-				second = to_lower(sorted(items))
-				if second != result:
-					attr &= ~KeywordAttr.PreSorted
 		if attr != KeywordAttr.Default:
 			attrList.append((index, attr, comment))
 
@@ -249,6 +273,13 @@ def to_lower_conditional(items):
 			result.append(item.lower())
 	return result
 
+def remove_duplicate_lower(keywords, duplicate):
+	items = find_duplicate_lower(keywords)
+	for item in items:
+		for word in item[1:]:
+			duplicate.append(word)
+			keywords.remove(word)
+
 def first_word_on_each_line(doc):
 	return re.findall(r'^\s*(\w+)', doc, re.MULTILINE)
 
@@ -313,7 +344,9 @@ def parse_autohotkey_api_file(pathList):
 				items = doc.replace('.', ' ').split()
 			keywordMap.setdefault(key, []).extend(items)
 
-	keywordMap['keywords'].extend(to_lower_conditional(keywordMap['keywords']))
+	keywords = keywordMap['keywords']
+	keywords.extend(to_lower_conditional(keywords))
+	remove_duplicate_lower(keywords, keywordMap['misc'])
 	RemoveDuplicateKeyword(keywordMap, [
 		'keywords',
 		'objects',
@@ -329,6 +362,60 @@ def parse_autohotkey_api_file(pathList):
 		('built-in variables', keywordMap['built-in variables'], KeywordAttr.MakeLower),
 		('keys', keywordMap['keys'], KeywordAttr.MakeLower),
 		('functions', keywordMap['functions'], KeywordAttr.MakeLower),
+		('misc', keywordMap['misc'], KeywordAttr.NoLexer),
+	]
+
+def parse_autoit3_api_file(path):
+	sections = read_api_file(path, ';')
+	keywordMap = {}
+	for key, doc in sections:
+		if key in ('functions', 'user defined functions'):
+			items = re.findall(r'(\w+\()', doc)
+			if key == 'user defined functions':
+				prefixList = ['_GDIPlus_', '_GUICtrl']
+				items = set(items)
+				result = [item for item in items if item.startswith('_WinAPI_')]
+				keywordMap['user defined functions 3'] = result
+				items -= set(result)
+				result = [item for item in items if any(item.startswith(prefix) for prefix in prefixList)]
+				keywordMap['user defined functions 2'] = result
+				items -= set(result)
+				prefixList.append('_WinAPI_')
+				items |= set('^' + prefix for prefix in prefixList)
+		elif key == 'sent keys':
+			items = re.findall(r'\{(\w+)\}', doc)
+		elif key in ('directives', 'special'):
+			items = re.findall(r'#([\w\-]+)', doc)
+		elif key == 'macros':
+			items = re.findall(r'@(\w+)', doc)
+		else:
+			items = doc.split()
+		keywordMap[key] = items
+
+	RemoveDuplicateKeyword(keywordMap, [
+		'keywords',
+		'functions',
+		'user defined functions',
+		'user defined functions 2',
+		'user defined functions 3',
+		'misc',
+	])
+	RemoveDuplicateKeyword(keywordMap, [
+		'directives',
+		'special',
+	])
+	return [
+		('keywords', keywordMap['keywords'], KeywordAttr.MakeLower),
+		('functions', keywordMap['functions'], KeywordAttr.MakeLower),
+		('macros', keywordMap['macros'], KeywordAttr.MakeLower | KeywordAttr.Special),
+		('sent keys', keywordMap['sent keys'], KeywordAttr.MakeLower),
+		('directives', keywordMap['directives'], KeywordAttr.MakeLower | KeywordAttr.NoAutoComp | KeywordAttr.Special),
+		('special', keywordMap['special'], KeywordAttr.MakeLower | KeywordAttr.NoAutoComp | KeywordAttr.Special),
+		('user defined functions', keywordMap['user defined functions'], KeywordAttr.MakeLower),
+		#('user defined functions 2', keywordMap['user defined functions 2'], KeywordAttr.NoLexer),
+		('user defined functions 2', [], KeywordAttr.NoLexer),
+		#('user defined functions 3', keywordMap['user defined functions 3'], KeywordAttr.NoLexer),
+		('user defined functions 3', [], KeywordAttr.NoLexer),
 		('misc', keywordMap['misc'], KeywordAttr.NoLexer),
 	]
 
@@ -1709,9 +1796,8 @@ def parse_powershell_api_file(path):
 		elif key == 'cmdlet':
 			items = re.findall(r'^([\w\-]+)\s', doc, re.MULTILINE)
 			keywordMap[key] = items
-			# parameter
-			#items = re.findall(r'(-\w+)', doc)
-			#keywordMap['misc'].extend(items)
+			items = re.findall(r'\W(-\w+)', doc)
+			keywordMap['parameters'] = items
 		elif key == 'variables':
 			items = doc.split()
 			keywordMap[key] = [item[1:] for item in items]
@@ -1724,6 +1810,7 @@ def parse_powershell_api_file(path):
 		'type',
 		'cmdlet',
 		'alias',
+		'parameters',
 		'misc',
 	])
 	return [
@@ -1732,6 +1819,8 @@ def parse_powershell_api_file(path):
 		('cmdlet', keywordMap['cmdlet'], KeywordAttr.MakeLower),
 		('alias', keywordMap['alias'], KeywordAttr.MakeLower),
 		('pre-defined variables', keywordMap['variables'], KeywordAttr.MakeLower | KeywordAttr.Special),
+		#('parameters', keywordMap['parameters'], KeywordAttr.NoLexer),
+		('parameters', [], KeywordAttr.NoLexer),
 		('misc', keywordMap['misc'], KeywordAttr.NoLexer),
 	]
 
@@ -2032,6 +2121,36 @@ def parse_rust_api_file(path):
 		('macro', keywordMap['macros'], KeywordAttr.NoLexer),
 		('module', keywordMap['modules'], KeywordAttr.NoLexer),
 		('function', keywordMap['function'], KeywordAttr.NoLexer),
+	]
+
+def parse_scala_api_file(path):
+	sections = read_api_file(path, '//')
+	keywordMap = {}
+	for key, doc in sections:
+		if key == 'keywords':
+			keywordMap[key] = doc.split()
+		elif key == 'api':
+			items = re.findall(r'(class|object|type)\s+(\w+)', doc)
+			keywordMap['class'] = [item[1] for item in items]
+			keywordMap['trait'] = re.findall(r'trait\s+(\w+)', doc)
+			keywordMap['annotation'] = re.findall(r'@(\w+)', doc)
+			items = re.findall(r'def\s+(\w+)', doc)
+			keywordMap['function'] = [item + '()' for item in items]
+		elif key == 'scaladoc':
+			keywordMap[key] = re.findall(r'@(\w+)', doc)
+
+	RemoveDuplicateKeyword(keywordMap, [
+		'keywords',
+		'class',
+		'trait',
+	])
+	return [
+		('keywords', keywordMap['keywords'], KeywordAttr.Default),
+		('class', keywordMap['class'], KeywordAttr.Default),
+		('trait', keywordMap['trait'], KeywordAttr.Default),
+		('annotation', keywordMap['annotation'], KeywordAttr.NoLexer | KeywordAttr.NoAutoComp | KeywordAttr.Special),
+		('function', keywordMap['function'], KeywordAttr.NoLexer),
+		('scaladoc', keywordMap['scaladoc'], KeywordAttr.NoLexer | KeywordAttr.NoAutoComp | KeywordAttr.Special),
 	]
 
 def parse_smali_api_file(path):

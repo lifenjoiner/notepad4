@@ -105,7 +105,7 @@ void ColouriseVHDLDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initSt
 					kwType = KeywordType::None;
 					const bool demoted = parenCount != 0 || chBeforeIdentifier == '.'
 						|| (lineState & (VHDLLineStateMaskDirective | VHDLLineStateMaskAttribute)) != 0;
-					if (keywordLists[KeywordIndex_CodeFolding]->InList(s)) {
+					if (keywordLists[KeywordIndex_CodeFolding].InList(s)) {
 						if (!demoted) {
 							if (StrEqual(s, "end")) {
 								kwType = KeywordType::End;
@@ -121,7 +121,7 @@ void ColouriseVHDLDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initSt
 							}
 						}
 						sc.ChangeState((demoted || prevWord == KeywordType::End) ? SCE_VHDL_KEYWORD_DEMOTED : SCE_VHDL_FOLDING_KEYWORD);
-					} else if (keywordLists[KeywordIndex_Keyword]->InList(s)) {
+					} else if (keywordLists[KeywordIndex_Keyword].InList(s)) {
 						if (!demoted) {
 							if (StrEqual(s, "begin")) {
 								lineState &= ~VHDLLineStateMaskCodeFolding;
@@ -141,13 +141,13 @@ void ColouriseVHDLDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initSt
 							kwType = KeywordType::Type;
 						}
 						sc.ChangeState(demoted ? SCE_VHDL_KEYWORD_DEMOTED : SCE_VHDL_KEYWORD);
-					} else if (keywordLists[KeywordIndex_Type]->InList(s)) {
+					} else if (keywordLists[KeywordIndex_Type].InList(s)) {
 						sc.ChangeState(SCE_VHDL_STDTYPE);
-					} else if (keywordLists[KeywordIndex_Function]->InListPrefixed(s, '(')) {
+					} else if (keywordLists[KeywordIndex_Function].InListPrefixed(s, '(')) {
 						sc.ChangeState(SCE_VHDL_STDFUNCTION);
-					} else if (keywordLists[KeywordIndex_Constant]->InList(s)) {
+					} else if (keywordLists[KeywordIndex_Constant].InList(s)) {
 						sc.ChangeState(SCE_VHDL_CONSTANT);
-					} else if (keywordLists[KeywordIndex_Package]->InList(s)) {
+					} else if (keywordLists[KeywordIndex_Package].InList(s)) {
 						sc.ChangeState(SCE_VHDL_PACKAGE);
 					} else if (prevWord > KeywordType::End) {
 						sc.ChangeState(static_cast<int>(prevWord));
@@ -195,6 +195,14 @@ void ColouriseVHDLDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initSt
 			}
 			break;
 
+		case SCE_VHDL_CHARACTER:
+			if (sc.atLineStart) {
+				sc.SetState(SCE_VHDL_DEFAULT);
+			} else if (sc.ch == '\'') {
+				sc.ForwardSetState(SCE_VHDL_DEFAULT);
+			}
+			break;
+
 		case SCE_VHDL_COMMENTLINE:
 		case SCE_VHDL_COMMENTLINEDOC:
 			if (sc.atLineStart) {
@@ -224,23 +232,14 @@ void ColouriseVHDLDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initSt
 					sc.Forward();
 				}
 			} else if (sc.ch == '\'' && !IsEOLChar(sc.chNext)) {
-				Sci_Position width = sc.widthNext;
-				Sci_Position pos = sc.currentPos + 1;
-				if (sc.chNext >= 0x80 && styler.Encoding() == EncodingType::unicode) {
-					styler.GetCharacterAndWidth(pos, &width);
+				int state = SCE_VHDL_CHARACTER;
+				const int after = sc.GetCharAfterNext();
+				if (after != '\'') {
+					state = IsIdentifierStartEx(sc.chNext) ? SCE_VHDL_ATTRIBUTE : SCE_VHDL_OPERATOR;
 				}
-				pos += width;
-				const char chNext = styler.SafeGetCharAt(pos);
-				if (chNext == '\'') {
-					sc.SetState(SCE_VHDL_STRING);
-					sc.Advance(width + 1);
-					sc.ForwardSetState(SCE_VHDL_DEFAULT);
-					continue;
-				}
-				if (IsIdentifierStartEx(sc.chNext)) {
-					sc.SetState(SCE_VHDL_ATTRIBUTE);
-				} else {
-					sc.SetState(SCE_VHDL_OPERATOR);
+				sc.SetState(state);
+				if (state == SCE_VHDL_CHARACTER) {
+					sc.Forward(); // to fix '''
 				}
 			} else if (sc.ch == '\"') {
 				sc.SetState(SCE_VHDL_STRING);

@@ -35,6 +35,7 @@
 #include "ILexer.h"
 
 #include "Debugging.h"
+//#include "VectorISA.h"
 
 #include "CharacterSet.h"
 //#include "CharacterCategory.h"
@@ -1363,6 +1364,10 @@ Sci::Position Document::InsertString(Sci::Position position, const char *s, Sci:
 	return insertLength;
 }
 
+Sci::Position Document::InsertString(Sci::Position position, std::string_view sv) {
+	return InsertString(position, sv.data(), sv.length());
+}
+
 void Document::ChangeInsertion(const char *s, Sci::Position length) {
 	insertionSet = true;
 	insertion.assign(s, length);
@@ -1994,6 +1999,43 @@ constexpr bool IsWordEdge(CharacterClass cc, CharacterClass ccNext) noexcept {
 	return (cc != ccNext) && (cc >= CharacterClass::punctuation);
 }
 
+class SearchThing {
+	char *buffer = nullptr;
+	size_t length = 0;
+public:
+	Sci::Position shiftTable[256];
+	void Allocate(size_t size) {
+		length = size;
+		if (size <= sizeof(shiftTable)) {
+			buffer = reinterpret_cast<char *>(shiftTable);
+		} else {
+			buffer = new char[size];
+		}
+		memset(buffer, 0, size);
+	}
+	~SearchThing() noexcept {
+		if (length > sizeof(shiftTable)) {
+			delete[] buffer;
+		}
+	}
+
+	char& operator[](size_t index) noexcept {
+		return buffer[index];
+	}
+	const char& operator[](size_t index) const noexcept {
+		return buffer[index];
+	}
+	size_t size() const noexcept {
+		return length;
+	}
+	char* data() noexcept {
+		return buffer;
+	}
+	const char* data() const noexcept {
+		return buffer;
+	}
+};
+
 }
 
 /**
@@ -2119,19 +2161,26 @@ Sci::Position Document::FindText(Sci::Position minPos, Sci::Position maxPos, con
 			pos = NextPosition(pos, -1);
 		}
 		const SplitView cbView = cb.AllView();
+		SearchThing searchThing;
 		if (caseSensitive) {
 			const Sci::Position endSearch = (startPos <= endPos) ? endPos - lengthFind + 1 : endPos;
 			const unsigned char * const searchData = reinterpret_cast<const unsigned char *>(search);
 			const unsigned char charStartSearch = searchData[0];
 			const int safeChar = (0 == dbcsCodePage) ? safeCharSBCS : ((direction >= 0 || CpUtf8 == dbcsCodePage) ? safeCharASCII : dbcsCharClass->MinTrailByte());
 			// Boyer-Moore-Horspool-Sunday Algorithm / Quick Search Algorithm
-			// http://www-igm.univ-mlv.fr/~lecroq/string/index.html
-			// http://www-igm.univ-mlv.fr/~lecroq/string/node19.html
+			// https://www-igm.univ-mlv.fr/~lecroq/string/index.html
+			// https://www-igm.univ-mlv.fr/~lecroq/string/node19.html
 			// https://www.inf.hs-flensburg.de/lang/algorithmen/pattern/sundayen.htm
-			Sci::Position shiftTable[256];
+			auto& shiftTable = searchThing.shiftTable;
 			if (lengthFind != 1) {
 				Sci::Position shift = lengthFind;
-				std::fill_n(shiftTable, std::size(shiftTable), (shift + 1) * increment);
+				const Sci::Position value = (shift + 1) * increment;
+				//std::fill_n(shiftTable, std::size(shiftTable), value);
+				//__stosq((uint64_t *)(&shiftTable[0]), value, 256);
+				//__stosd((uint32_t *)(&shiftTable[0]), value, 256);
+				for (auto &it : shiftTable) {
+					it = value;
+				}
 				if (direction >= 0) {
 					const unsigned char *ptr = searchData;
 					while (*ptr != 0) {
@@ -2182,7 +2231,7 @@ Sci::Position Document::FindText(Sci::Position minPos, Sci::Position maxPos, con
 			}
 		} else if (CpUtf8 == dbcsCodePage) {
 			constexpr size_t maxFoldingExpansion = 4;
-			std::vector<char> searchThing((lengthFind + 1) * UTF8MaxBytes * maxFoldingExpansion + 1);
+			searchThing.Allocate((lengthFind + 1) * UTF8MaxBytes * maxFoldingExpansion + 1);
 			const size_t lenSearch = pcf->Fold(searchThing.data(), searchThing.size(), search, lengthFind);
 			const unsigned char * const searchData = reinterpret_cast<const unsigned char *>(searchThing.data());
 			//while (forward ? (pos < endPos) : (pos >= endPos)) {
@@ -2246,7 +2295,7 @@ Sci::Position Document::FindText(Sci::Position minPos, Sci::Position maxPos, con
 		} else if (dbcsCodePage) {
 			constexpr size_t maxBytesCharacter = 2;
 			constexpr size_t maxFoldingExpansion = 4;
-			std::vector<char> searchThing((lengthFind + 1) * maxBytesCharacter * maxFoldingExpansion + 1);
+			searchThing.Allocate((lengthFind + 1) * maxBytesCharacter * maxFoldingExpansion + 1);
 			const size_t lenSearch = pcf->Fold(searchThing.data(), searchThing.size(), search, lengthFind);
 			const unsigned char * const searchData = reinterpret_cast<const unsigned char *>(searchThing.data());
 			//while (forward ? (pos < endPos) : (pos >= endPos)) {
@@ -2303,7 +2352,7 @@ Sci::Position Document::FindText(Sci::Position minPos, Sci::Position maxPos, con
 			}
 		} else {
 			const Sci::Position endSearch = (startPos <= endPos) ? endPos - lengthFind + 1 : endPos;
-			std::vector<char> searchThing(lengthFind + 1);
+			searchThing.Allocate(lengthFind + 1);
 			pcf->Fold(searchThing.data(), searchThing.size(), search, lengthFind);
 			const char * const searchData = searchThing.data();
 			//while (forward ? (pos < endSearch) : (pos >= endSearch)) {

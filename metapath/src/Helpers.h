@@ -13,7 +13,7 @@
 *
 *                                              (c) Florian Balmer 1996-2011
 *                                                  florian.balmer@gmail.com
-*                                               http://www.flos-freeware.ch
+*                                              https://www.flos-freeware.ch
 *
 *
 ******************************************************************************/
@@ -353,7 +353,7 @@ void BackgroundWorker_Destroy(BackgroundWorker *worker);
 
 HRESULT PrivateSetCurrentProcessExplicitAppUserModelID(PCWSTR AppID);
 bool IsElevated(void);
-bool ExeNameFromWnd(HWND hwnd, LPWSTR szExeName, int cchExeName);
+bool ExeNameFromWnd(HWND hwnd, LPWSTR szExeName, DWORD cchExeName);
 //bool Is32bitExe(LPCWSTR lpszExeName);
 
 #define SetExplorerTheme(hwnd)		SetWindowTheme((hwnd), L"Explorer", NULL)
@@ -511,7 +511,7 @@ void StrTab2Space(LPWSTR lpsz);
 bool PathFixBackslashes(LPWSTR lpsz);
 void ExpandEnvironmentStringsEx(LPWSTR lpSrc, DWORD dwSrc);
 bool SearchPathEx(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lpBuffer);
-void FormatNumberStr(LPWSTR lpNumberStr);
+void FormatNumber(LPWSTR lpNumberStr, int value);
 
 void GetDefaultFavoritesDir(LPWSTR lpFavDir, int cchFavDir);
 void GetDefaultOpenWithDir(LPWSTR lpOpenWithDir, int cchOpenWithDir);

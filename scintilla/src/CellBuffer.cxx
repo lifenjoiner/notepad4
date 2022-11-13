@@ -27,6 +27,7 @@
 #include "VectorISA.h"
 
 #include "Position.h"
+#include "UniqueString.h"
 #include "SplitVector.h"
 #include "Partitioning.h"
 #include "RunStyles.h"
@@ -332,23 +333,15 @@ public:
 	}
 };
 
-Action::Action() noexcept {
-	at = ActionType::start;
-	position = 0;
-	lenData = 0;
-	mayCoalesce = false;
-}
-
 void Action::Create(ActionType at_, Sci::Position position_, const char *data_, Sci::Position lenData_, bool mayCoalesce_) {
-	data = nullptr;
 	position = position_;
 	at = at_;
-	if (lenData_) {
-		data = std::make_unique<char[]>(lenData_);
-		memcpy(data.get(), data_, lenData_);
-	}
-	lenData = lenData_;
 	mayCoalesce = mayCoalesce_;
+	lenData = lenData_;
+	data = nullptr;
+	if (lenData_) {
+		data = UniqueCopy(data_, lenData_);
+	}
 }
 
 void Action::Clear() noexcept {
@@ -1627,7 +1620,7 @@ void CellBuffer::PerformRedoStep() {
 
 void CellBuffer::ChangeHistorySet(bool enable) {
 	if (enable) {
-		if (!changeHistory) {
+		if (!changeHistory && !uh.CanUndo()) {
 			changeHistory = std::make_unique<ChangeHistory>(Length());
 		}
 	} else {

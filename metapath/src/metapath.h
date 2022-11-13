@@ -13,7 +13,7 @@
 *
 *                                              (c) Florian Balmer 1996-2011
 *                                                  florian.balmer@gmail.com
-*                                               http://www.flos-freeware.ch
+*                                              https://www.flos-freeware.ch
 *
 *
 ******************************************************************************/
@@ -142,7 +142,7 @@ void SetUILanguage(int resID);
 void LoadSettings(void);
 void SaveSettingsNow(void);
 void SaveSettings(bool bSaveSettingsNow);
-void SaveWindowPosition(bool bSaveSettingsNow, WCHAR *pIniSectionBuf);
+void SaveWindowPosition(WCHAR *pIniSectionBuf);
 void ClearWindowPositionHistory(void);
 void ParseCommandLine(void);
 void LoadFlags(void);

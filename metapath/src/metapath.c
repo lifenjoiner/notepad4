@@ -13,7 +13,7 @@
 *
 *                                              (c) Florian Balmer 1996-2011
 *                                                  florian.balmer@gmail.com
-*                                               http://www.flos-freeware.ch
+*                                              https://www.flos-freeware.ch
 *
 *
 ******************************************************************************/
@@ -494,16 +494,6 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 			KillTimer(hwnd, ID_TIMER);
 			FindCloseChangeNotification(hChangeHandle);
 
-			// GetWindowPlacement
-			WINDOWPLACEMENT wndpl;
-			wndpl.length = sizeof(WINDOWPLACEMENT);
-			GetWindowPlacement(hwnd, &wndpl);
-
-			wi.x = wndpl.rcNormalPosition.left;
-			wi.y = wndpl.rcNormalPosition.top;
-			wi.cx = wndpl.rcNormalPosition.right - wndpl.rcNormalPosition.left;
-			wi.cy = wndpl.rcNormalPosition.bottom - wndpl.rcNormalPosition.top;
-
 			DirList_Destroy(hwndDirList);
 			DragAcceptFiles(hwnd, FALSE);
 
@@ -944,7 +934,7 @@ void CreateBars(HWND hwnd, HINSTANCE hInstance) {
 	IniSection section;
 	WCHAR *pIniSectionBuf = (WCHAR *)NP2HeapAlloc(sizeof(WCHAR) * MAX_INI_SECTION_SIZE_TOOLBAR_LABELS);
 	const int cchIniSection = (int)NP2HeapSize(pIniSectionBuf) / sizeof(WCHAR);
-	IniSection *pIniSection = &section;
+	IniSection * const pIniSection = &section;
 
 	IniSectionInit(pIniSection, COUNTOF(tbbMainWnd));
 	LoadIniSection(INI_SECTION_NAME_TOOLBAR_LABELS, pIniSectionBuf, cchIniSection);
@@ -1089,13 +1079,13 @@ void MsgSize(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		//cy -= (rc.bottom - rc.top);
 
 		//SendMessage(hwndToolbar, TB_GETITEMRECT, 0, (LPARAM)&rc);
-		SetWindowPos(hwndReBar, NULL, 0, 0, LOWORD(lParam), cyReBar, SWP_NOZORDER);
+		SetWindowPos(hwndReBar, NULL, 0, 0, cx, cyReBar, SWP_NOZORDER);
 		// the ReBar automatically sets the correct height
 		// calling SetWindowPos() with the height of one toolbar button
 		// causes the control not to temporarily use the whole client area
 		// and prevents flickering
 
-		GetWindowRect(hwndReBar, &rc);
+		//GetWindowRect(hwndReBar, &rc);
 		y = cyReBar + cyReBarFrame;    // define
 		cy -= cyReBar + cyReBarFrame;  // border
 	}
@@ -2116,18 +2106,18 @@ LRESULT MsgNotify(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 					GetDateFormat(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, tchdate, COUNTOF(tchdate));
 					GetTimeFormat(LOCALE_USER_DEFAULT, 0, &st, NULL, tchtime, COUNTOF(tchdate));
 
-					WCHAR tchattr[64];
-					lstrcpy(tchattr, (fd.dwFileAttributes & FILE_ATTRIBUTE_ARCHIVE) ? L"A" : L"-");
-					lstrcat(tchattr, (fd.dwFileAttributes & FILE_ATTRIBUTE_READONLY) ? L"R" : L"-");
-					lstrcat(tchattr, (fd.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) ? L"H" : L"-");
-					lstrcat(tchattr, (fd.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) ? L"S" : L"-");
+					WCHAR tchattr[6];
+					tchattr[0] = (fd.dwFileAttributes & FILE_ATTRIBUTE_ARCHIVE) ? L'A' : L'-';
+					tchattr[1] = (fd.dwFileAttributes & FILE_ATTRIBUTE_READONLY) ? L'R' : L'-';
+					tchattr[2] = (fd.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) ? L'H' : L'-';
+					tchattr[3] = (fd.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) ? L'S' : L'-';
+					tchattr[4] = L'\0';
 
 					wsprintf(tch, L"%s | %s %s | %s", tchsize, tchdate, tchtime, tchattr);
 				} else {
 					WCHAR tchnum[64];
 					WCHAR fmt[64];
-					_ltow(ListView_GetItemCount(hwndDirList), tchnum, 10);
-					FormatNumberStr(tchnum);
+					FormatNumber(tchnum, ListView_GetItemCount(hwndDirList));
 					FormatString(tch, fmt, HasFilter() ? IDS_NUMFILES_FILTER : IDS_NUMFILES, tchnum);
 				}
 
@@ -2309,8 +2299,7 @@ bool ChangeDirectory(HWND hwnd, LPCWSTR lpszNewDir, bool bUpdateHistory) {
 
 		WCHAR tch[256];
 		WCHAR tchnum[64];
-		_ltow(cItems, tchnum, 10);
-		FormatNumberStr(tchnum);
+		FormatNumber(tchnum, cItems);
 		WCHAR fmt[64];
 		FormatString(tch, fmt, HasFilter() ? IDS_NUMFILES_FILTER : IDS_NUMFILES, tchnum);
 		StatusSetText(hwndStatus, ID_FILEINFO, tch);
@@ -2360,6 +2349,9 @@ void ValidateUILangauge(void) {
 	case LANG_KOREAN:
 		languageResID = IDS_LANG_KOREAN;
 		break;
+	case LANG_PORTUGUESE:
+		languageResID = IDS_LANG_PORTUGUESE_BRAZIL;
+		break;
 	case LANG_NEUTRAL:
 	default:
 		languageResID = IDS_LANG_USER_DEFAULT;
@@ -2395,6 +2387,9 @@ void SetUILanguage(int resID) {
 	case IDS_LANG_KOREAN:
 		lang = MAKELANGID(LANG_KOREAN, SUBLANG_DEFAULT);
 		break;
+	case IDS_LANG_PORTUGUESE_BRAZIL:
+		lang = MAKELANGID(LANG_PORTUGUESE, SUBLANG_PORTUGUESE_BRAZILIAN);
+		break;
 	}
 
 	if (uiLanguage == lang) {
@@ -2422,7 +2417,7 @@ void LoadSettings(void) {
 	IniSection section;
 	WCHAR *pIniSectionBuf = (WCHAR *)NP2HeapAlloc(sizeof(WCHAR) * MAX_INI_SECTION_SIZE_SETTINGS);
 	const int cchIniSection = (int)(NP2HeapSize(pIniSectionBuf) / sizeof(WCHAR));
-	IniSection *pIniSection = &section;
+	IniSection * const pIniSection = &section;
 
 	IniSectionInit(pIniSection, 128);
 	LoadIniSection(INI_SECTION_NAME_SETTINGS, pIniSectionBuf, cchIniSection);
@@ -2672,10 +2667,9 @@ void SaveSettings(bool bSaveSettingsNow) {
 	}
 
 	WCHAR wchTmp[MAX_PATH];
-	IniSectionOnSave section;
 	WCHAR *pIniSectionBuf = (WCHAR *)NP2HeapAlloc(sizeof(WCHAR) * MAX_INI_SECTION_SIZE_SETTINGS);
-	IniSectionOnSave *pIniSection = &section;
-	pIniSection->next = pIniSectionBuf;
+	IniSectionOnSave section = { pIniSectionBuf };
+	IniSectionOnSave * const pIniSection = &section;
 
 	IniSectionSetBoolEx(pIniSection, L"SaveSettings", bSaveSettings, true);
 	IniSectionSetBoolEx(pIniSection, L"SingleClick", bSingleClick, true);
@@ -2726,24 +2720,20 @@ void SaveSettings(bool bSaveSettingsNow) {
 	IniSectionSetBoolEx(pIniSection, L"ShowDriveBox", bShowDriveBox, true);
 
 	SaveIniSection(INI_SECTION_NAME_SETTINGS, pIniSectionBuf);
-	SaveWindowPosition(bSaveSettingsNow, pIniSectionBuf);
+	SaveWindowPosition(pIniSectionBuf);
+	NP2HeapFree(pIniSectionBuf);
 }
 
-void SaveWindowPosition(bool bSaveSettingsNow, WCHAR *pIniSectionBuf) {
-	IniSectionOnSave section;
-	if (pIniSectionBuf == NULL) {
-		pIniSectionBuf = (WCHAR *)NP2HeapAlloc(sizeof(WCHAR) * MAX_INI_SECTION_SIZE_SETTINGS);
-	} else {
-		memset(pIniSectionBuf, 0, NP2HeapSize(pIniSectionBuf));
-	}
-	IniSectionOnSave *pIniSection = &section;
-	pIniSection->next = pIniSectionBuf;
+void SaveWindowPosition(WCHAR *pIniSectionBuf) {
+	memset(pIniSectionBuf, 0, 2*sizeof(WCHAR));
+	IniSectionOnSave section = { pIniSectionBuf };
+	IniSectionOnSave * const pIniSection = &section;
 
 	WCHAR sectionName[96];
 	GetWindowPositionSectionName(sectionName);
 
 	// query window dimensions when window is not minimized
-	if (bSaveSettingsNow && !IsIconic(hwndMain)) {
+	if (!IsIconic(hwndMain)) {
 		WINDOWPLACEMENT wndpl;
 		wndpl.length = sizeof(WINDOWPLACEMENT);
 		GetWindowPlacement(hwndMain, &wndpl);
@@ -2771,7 +2761,6 @@ void SaveWindowPosition(bool bSaveSettingsNow, WCHAR *pIniSectionBuf) {
 	IniSectionSetIntEx(pIniSection, L"FindWindowDlgSizeX", cxFindWindowDlg, 0);
 
 	SaveIniSection(sectionName, pIniSectionBuf);
-	NP2HeapFree(pIniSectionBuf);
 }
 
 void ClearWindowPositionHistory(void) {
@@ -2974,7 +2963,7 @@ void LoadFlags(void) {
 	IniSection section;
 	WCHAR *pIniSectionBuf = (WCHAR *)NP2HeapAlloc(sizeof(WCHAR) * MAX_INI_SECTION_SIZE_FLAGS);
 	const int cchIniSection = (int)(NP2HeapSize(pIniSectionBuf) / sizeof(WCHAR));
-	IniSection *pIniSection = &section;
+	IniSection * const pIniSection = &section;
 
 	IniSectionInit(pIniSection, 16);
 	LoadIniSection(INI_SECTION_NAME_FLAGS, pIniSectionBuf, cchIniSection);
@@ -3542,7 +3531,7 @@ void LoadLaunchSetings(void) {
 	IniSection section;
 	WCHAR *pIniSectionBuf = (WCHAR *)NP2HeapAlloc(sizeof(WCHAR) * MAX_INI_SECTION_SIZE_TARGET_APPLICATION);
 	const int cchIniSection = (int)(NP2HeapSize(pIniSectionBuf) / sizeof(WCHAR));
-	IniSection *pIniSection = &section;
+	IniSection * const pIniSection = &section;
 
 	IniSectionInit(pIniSection, 16);
 	LoadIniSection(INI_SECTION_NAME_TARGET_APPLICATION, pIniSectionBuf, cchIniSection);

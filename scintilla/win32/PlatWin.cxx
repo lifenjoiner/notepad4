@@ -39,6 +39,7 @@
 #include "Debugging.h"
 #include "Geometry.h"
 #include "Platform.h"
+#include "UniqueString.h"
 #include "VectorISA.h"
 #include "GraphicUtils.h"
 #include "XPM.h"
@@ -365,9 +366,7 @@ std::shared_ptr<Font> Font::Allocate(const FontParameters &fp) {
 		HFONT hfont = ::CreateFontIndirectW(&lf);
 		return std::make_shared<FontGDI>(lf, hfont, fp.extraFontFlag);
 	} else {
-		IDWriteTextFormat *pTextFormat = nullptr;
 		std::wstring wsFamily;
-		const FLOAT fHeight = static_cast<FLOAT>(fp.size);
 		DWRITE_FONT_WEIGHT weight = static_cast<DWRITE_FONT_WEIGHT>(fp.weight);
 		DWRITE_FONT_STYLE style = fp.italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL;
 		DWRITE_FONT_STRETCH stretch = DWRITE_FONT_STRETCH_NORMAL;
@@ -376,6 +375,8 @@ std::shared_ptr<Font> Font::Allocate(const FontParameters &fp) {
 		}
 
 		const std::wstring wsLocale = WStringFromUTF8(fp.localeName);
+		const FLOAT fHeight = static_cast<FLOAT>(fp.size);
+		IDWriteTextFormat *pTextFormat = nullptr;
 		HRESULT hr = pIDWriteFactory->CreateTextFormat(wsFamily.c_str(), nullptr,
 			weight, style, stretch, fHeight, wsLocale.c_str(), &pTextFormat);
 		if (hr == E_INVALIDARG) {
@@ -426,8 +427,8 @@ class VarBuffer {
 public:
 	explicit VarBuffer(size_t length) :
 		buffer {(length > lengthStandard) ? new T[length] : bufferStandard} {
-		const T empty{};
-		std::fill_n(buffer, length, empty);
+		static_assert(__is_standard_layout(T));
+		memset(buffer, 0, length*sizeof(T));
 	}
 	const T *data() const noexcept {
 		return buffer;
@@ -2976,17 +2977,17 @@ PRectangle Window::GetMonitorRect(Point pt) const noexcept {
 
 struct ListItemData {
 	const char *text;
+	unsigned int len;
 	int pixId;
 };
 
 class LineToItem {
-	std::vector<char> words;
-
+	std::unique_ptr<char[]> words;
 	std::vector<ListItemData> data;
 
 public:
 	void Clear() noexcept {
-		words.clear();
+		words.reset();
 		data.clear();
 	}
 
@@ -2994,7 +2995,7 @@ public:
 		if (index < data.size()) {
 			return data[index];
 		} else {
-			ListItemData missing = { "", -1 };
+			ListItemData missing = { "", 0, -1 };
 			return missing;
 		}
 	}
@@ -3002,14 +3003,14 @@ public:
 		return static_cast<int>(data.size());
 	}
 
-	void AllocItem(const char *text, int pixId) {
-		const ListItemData lid = { text, pixId };
+	void AllocItem(const char *text, unsigned int len, int pixId) {
+		const ListItemData lid = { text, len, pixId };
 		data.push_back(lid);
 	}
 
 	char *SetWords(const char *s, size_t length) {
-		words = std::vector<char>(s, s + length + 1);
-		return words.data();
+		words = UniqueCopy(s, length + 1);
+		return words.get();
 	}
 };
 
@@ -3041,11 +3042,11 @@ class ListBoxX final : public ListBox {
 	PRectangle rcPreSize;
 	Point dragOffset;
 	Point location;	// Caret location at which the list is opened
-	int wheelDelta = 0; // mouse wheel residue
+	MouseWheelDelta wheelDelta;
 	DWORD frameStyle = WS_THICKFRAME;
 
 	HWND GetHWND() const noexcept;
-	void AppendListItem(const char *text, const char *numword);
+	void AppendListItem(const char *text, const char *numword, unsigned int len);
 	void AdjustWindowRect(PRectangle *rc) const noexcept;
 	int ItemHeight() const;
 	int MinClientWidth() const noexcept;
@@ -3175,11 +3176,11 @@ PRectangle ListBoxX::GetDesiredRect() {
 	HDC hdc = ::GetDC(lb);
 	HFONT oldFont = SelectFont(hdc, fontCopy);
 	SIZE textSize {};
-	int len = 0;
+	unsigned int len = 0;
 	if (widestItem) {
-		len = static_cast<int>(strlen(widestItem));
+		len = maxItemCharacters;
 		if (unicodeMode) {
-			const TextWide tbuf(widestItem, CpUtf8);
+			const TextWide tbuf(std::string_view(widestItem, len), CpUtf8);
 			::GetTextExtentPoint32W(hdc, tbuf.data(), tbuf.length(), &textSize);
 		} else {
 			::GetTextExtentPoint32A(hdc, widestItem, len, &textSize);
@@ -3192,7 +3193,7 @@ PRectangle ListBoxX::GetDesiredRect() {
 	SelectFont(hdc, oldFont);
 	::ReleaseDC(lb, hdc);
 
-	const int widthDesired = std::max(textSize.cx, (len + 1) * tm.tmAveCharWidth);
+	const int widthDesired = std::max(textSize.cx, static_cast<int>(len + 1) * tm.tmAveCharWidth);
 	if (width < widthDesired)
 		width = widthDesired;
 
@@ -3254,7 +3255,7 @@ int ListBoxX::Find(const char *) const noexcept {
 
 std::string ListBoxX::GetValue(int n) const {
 	const ListItemData item = lti.Get(n);
-	return item.text;
+	return std::string(item.text, item.len);
 }
 
 void ListBoxX::RegisterImage(int type, const char *xpm_data) {
@@ -3309,13 +3310,13 @@ void ListBoxX::Draw(const DRAWITEMSTRUCT *pDrawItem) {
 		const ListItemData item = lti.Get(pDrawItem->itemID);
 		const int pixId = item.pixId;
 		const char *text = item.text;
-		const int len = static_cast<int>(strlen(text));
+		const unsigned int len = item.len;
 
 		RECT rcText = rcBox;
 		::InsetRect(&rcText, static_cast<int>(TextInset.x), static_cast<int>(TextInset.y));
 
 		if (unicodeMode) {
-			const TextWide tbuf(text, CpUtf8);
+			const TextWide tbuf(std::string_view(text, len), CpUtf8);
 			::DrawTextW(pDrawItem->hDC, tbuf.data(), tbuf.length(), &rcText, DT_NOPREFIX | DT_END_ELLIPSIS | DT_SINGLELINE | DT_NOCLIP);
 		} else {
 			::DrawTextA(pDrawItem->hDC, text, len, &rcText, DT_NOPREFIX | DT_END_ELLIPSIS | DT_SINGLELINE | DT_NOCLIP);
@@ -3369,7 +3370,7 @@ void ListBoxX::Draw(const DRAWITEMSTRUCT *pDrawItem) {
 	}
 }
 
-void ListBoxX::AppendListItem(const char *text, const char *numword) {
+void ListBoxX::AppendListItem(const char *text, const char *numword, unsigned int len) {
 	int pixId = -1;
 	if (numword) {
 		pixId = 0;
@@ -3379,8 +3380,7 @@ void ListBoxX::AppendListItem(const char *text, const char *numword) {
 		}
 	}
 
-	lti.AllocItem(text, pixId);
-	const unsigned int len = static_cast<unsigned int>(strlen(text));
+	lti.AllocItem(text, len, pixId);
 	if (maxItemCharacters < len) {
 		maxItemCharacters = len;
 		widestItem = text;
@@ -3400,22 +3400,29 @@ void ListBoxX::SetList(const char *list, const char separator, const char typese
 	char *words = lti.SetWords(list, size);
 	char *startword = words;
 	char *numword = nullptr;
-	for (size_t i = 0; i < size; i++) {
-		if (words[i] == separator) {
-			words[i] = '\0';
-			if (numword)
+	char * const end = words + size;
+	for (; words < end; words++) {
+		if (words[0] == separator) {
+			words[0] = '\0';
+			char *endword = words;
+			if (numword) {
+				endword = numword;
 				*numword = '\0';
-			AppendListItem(startword, numword);
-			startword = words + i + 1;
+			}
+			AppendListItem(startword, numword, static_cast<unsigned int>(endword - startword));
+			startword = words + 1;
 			numword = nullptr;
-		} else if (words[i] == typesep) {
-			numword = words + i;
+		} else if (words[0] == typesep) {
+			numword = words;
 		}
 	}
 	if (startword) {
-		if (numword)
+		char *endword = end;
+		if (numword) {
+			endword = numword;
 			*numword = '\0';
-		AppendListItem(startword, numword);
+		}
+		AppendListItem(startword, numword, static_cast<unsigned int>(endword - startword));
 	}
 
 	// Finally populate the listbox itself with the correct number of items
@@ -3905,21 +3912,15 @@ LRESULT ListBoxX::WndProc(HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lParam
 		return ::DefWindowProc(hWnd, iMessage, wParam, lParam);
 
 	case WM_MOUSEWHEEL:
-		wheelDelta -= GET_WHEEL_DELTA_WPARAM(wParam);
-		if (std::abs(wheelDelta) >= WHEEL_DELTA) {
+		if (wheelDelta.Accumulate(wParam)) {
 			const int nRows = GetVisibleRows();
 			int linesToScroll = std::clamp(nRows - 1, 1, 3);
-			linesToScroll *= (wheelDelta / WHEEL_DELTA);
+			linesToScroll *= wheelDelta.Actions();
 			int top = ListBox_GetTopIndex(lb) + linesToScroll;
 			if (top < 0) {
 				top = 0;
 			}
 			ListBox_SetTopIndex(lb, top);
-			// update wheel delta residue
-			if (wheelDelta >= 0)
-				wheelDelta = wheelDelta % WHEEL_DELTA;
-			else
-				wheelDelta = -(-wheelDelta % WHEEL_DELTA);
 		}
 		break;
 

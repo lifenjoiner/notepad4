@@ -252,6 +252,7 @@ LexerConfigMap = {
 		'cpp_style_comment': True,
 		'default_fold_level': ['preprocessor', 'namespace', 'class', 'method'],
 		'printf_format_specifier': True,
+		'escape_char_style': 'SCE_C_ESCAPECHAR',
 		'raw_string_style': ['SCE_C_STRINGRAW', 'SCE_C_COMMENTDOC_TAG'],
 		'character_style': ['SCE_C_CHARACTER'],
 		'character_prefix': ['L', 'u', 'U', 'u8'],
@@ -663,6 +664,7 @@ LexerConfigMap = {
 		'cpp_style_comment': True,
 		'default_fold_level': ['preprocessor', 'resource'],
 		'printf_format_specifier': True,
+		'escape_char_style': 'SCE_C_ESCAPECHAR',
 		'raw_string_style': ['SCE_C_STRINGRAW', 'SCE_C_COMMENTDOC_TAG'],
 		'character_style': ['SCE_C_CHARACTER'],
 		'character_prefix': ['L', 'u', 'U', 'u8'],
@@ -706,12 +708,15 @@ LexerConfigMap = {
 	'NP2LEX_SCALA': {
 		'cpp_style_comment': True,
 		'shebang_exe_name': 'scala',
+		'indent_based_folding': True,
+		'indent_guide_style': 'forward',
 		'default_fold_level': ['class', 'inner class', 'method'],
-		'character_style': ['SCE_C_CHARACTER'],
-		'operator_style': ['SCE_C_OPERATOR'],
+		'default_fold_ignore_inner': 'SCE_SCALA_FUNCTION_DEFINITION',
+		'escape_char_style': 'SCE_SCALA_ESCAPECHAR',
+		'character_style': ['SCE_SCALA_CHARACTER'],
+		'operator_style': ['SCE_SCALA_OPERATOR', 'SCE_SCALA_OPERATOR2'],
 		'extra_word_char': '$@',
-		#'ignore_word_style': ['SCE_C_WORD', 'SCE_C_WORD2'],
-		'autoc_extra_keyword': 'kwJavaDoc',
+		#'ignore_word_style': ['SCE_SCALA_KEYWORD'],
 	},
 	'NP2LEX_SMALI': {
 		'line_comment_string': '#',
@@ -801,6 +806,7 @@ LexerConfigMap = {
 		'line_comment_string': '--',
 		'block_comment_string': ('/*', '*/'),
 		'escape_char_start': NoEscapeCharacter,
+		'character_style': ['SCE_VHDL_CHARACTER'],
 		'raw_string_style': ['SCE_VHDL_STRING'],
 		'operator_style': ['SCE_VHDL_OPERATOR', 'SCE_VHDL_OPERATOR2'],
 		'extra_word_char': '`',
@@ -852,8 +858,12 @@ LexerConfigMap = {
 def get_enum_flag_expr(flag, merge=True, separator='_'):
 	cls = flag.__class__
 	prefix = cls.__name__ + separator
-	if flag.name:
-		return prefix + flag.name
+	if name := flag.name:
+		if '|' in name:
+			# Python 3.11
+			result = [prefix + item.strip() for item in name.split('|')]
+			return ' | '.join(result) if merge else result
+		return prefix + name
 
 	result = []
 	values = cls.__members__.values()

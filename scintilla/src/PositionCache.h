@@ -88,7 +88,7 @@ public:
 	void Resize(int maxLineLength_);
 	void EnsureBidiData();
 	void Free() noexcept;
-	void ClearPositions() const;
+	void ClearPositions() const noexcept;
 	void Invalidate(ValidLevel validity_) noexcept;
 	Sci::Line LineNumber() const noexcept {
 		return lineNumber;
@@ -180,9 +180,9 @@ class PositionCacheEntry {
 	uint16_t styleNumber = 0;
 	uint16_t clock = 0;
 	uint32_t len = 0;
-	std::unique_ptr<XYPOSITION[]> positions;
+	std::unique_ptr<char[]> positions;
 public:
-	void Set(uint16_t styleNumber_, size_t length, std::unique_ptr<XYPOSITION[]> &positions_, uint32_t clock_) noexcept;
+	void Set(uint16_t styleNumber_, size_t length, std::unique_ptr<char[]> &positions_, uint32_t clock_) noexcept;
 	void Clear() noexcept;
 	bool Retrieve(uint16_t styleNumber_, std::string_view sv, XYPOSITION *positions_) const noexcept;
 	static size_t Hash(uint16_t styleNumber_, std::string_view sv) noexcept;
@@ -213,11 +213,6 @@ class SpecialRepresentations {
 	unsigned int maxKey = 0;
 	bool crlf = false;
 public:
-#if !defined(_MSC_VER) || (_MSC_VER >= 1920)
-	SpecialRepresentations() noexcept = default;
-#else
-	SpecialRepresentations() noexcept {} // for Visual C++ 2017
-#endif
 	void SetRepresentation(std::string_view charBytes, std::string_view value);
 	void SetRepresentationAppearance(std::string_view charBytes, RepresentationAppearance appearance);
 	void SetRepresentationColour(std::string_view charBytes, ColourRGBA colour);

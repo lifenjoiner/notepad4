@@ -13,7 +13,7 @@
 *
 *                                              (c) Florian Balmer 1996-2011
 *                                                  florian.balmer@gmail.com
-*                                               http://www.flos-freeware.ch
+*                                              https://www.flos-freeware.ch
 *
 *
 ******************************************************************************/
@@ -86,13 +86,22 @@ typedef struct NP2PARAMS {
 #define IDP_POPUP_SUBMENU_FOLD	3
 
 //==== Statusbar ==============================================================
-#define STATUS_DOCPOS		0
-#define STATUS_LEXER		1
-#define STATUS_CODEPAGE		2
-#define STATUS_EOLMODE		3
-#define STATUS_OVRMODE		4
-#define STATUS_DOCZOOM		5
-#define STATUS_DOCSIZE		6
+enum {
+	StatusItem_Line,
+	StatusItem_Column,
+	StatusItem_Character,
+	StatusItem_Selection,
+	StatusItem_SelectedLine,
+	StatusItem_Find,
+	StatusItem_Empty,
+	StatusItem_Lexer,
+	StatusItem_Encoding,
+	StatusItem_EolMode,
+	StatusItem_OvrMode,
+	StatusItem_Zoom,
+	StatusItem_DocSize,
+	StatusItem_ItemCount,
+};
 #define STATUS_HELP			(255 | SBT_NOBORDERS)
 
 /**
@@ -103,6 +112,9 @@ typedef struct NP2PARAMS {
 //#define APPM_CHANGENOTIFYCLEAR	(WM_APP + 3)
 #define APPM_TRAYMESSAGE			(WM_APP + 4)	// callback message from system tray
 #define APPM_POST_HOTSPOTCLICK		(WM_APP + 5)
+// TODO: WM_COPYDATA is blocked by the User Interface Privilege Isolation
+// https://www.codeproject.com/tips/1017834/how-to-send-data-from-one-process-to-another-in-cs
+#define APPM_COPYDATA				(WM_APP + 6)
 
 #define ID_WATCHTIMER				0xA000	// file watch timer
 #define ID_PASTEBOARDTIMER			0xA001	// paste board timer
@@ -189,7 +201,7 @@ void CALLBACK PasteBoardTimer(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTi
 void LoadSettings(void);
 void SaveSettingsNow(bool bOnlySaveStyle, bool bQuiet);
 void SaveSettings(bool bSaveSettingsNow);
-void SaveWindowPosition(bool bSaveSettingsNow, WCHAR *pIniSectionBuf);
+void SaveWindowPosition(WCHAR *pIniSectionBuf);
 void ClearWindowPositionHistory(void);
 void ParseCommandLine(void);
 void LoadFlags(void);
@@ -204,7 +216,6 @@ void FindExtraIniFile(LPWSTR lpszIniFile, LPCWSTR defaultName, LPCWSTR redirectK
 void UpdateWindowTitle(void);
 void UpdateStatusbar(void);
 void UpdateStatusBarCache(int item);
-void UpdateStatusBarWidth(void);
 void UpdateToolbar(void);
 void UpdateFoldMarginWidth(void);
 void UpdateLineNumberWidth(void);
@@ -268,7 +279,7 @@ enum {
 
 void	AutoSave_Start(bool reset);
 void	AutoSave_Stop(BOOL keepBackup);
-void	AutoSave_DoWork(bool keepBackup);
+void	AutoSave_DoWork(FileSaveFlag saveFlag);
 LPCWSTR AutoSave_GetDefaultFolder(void);
 
 LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam);

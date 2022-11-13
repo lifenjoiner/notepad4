@@ -13,7 +13,7 @@
 *
 *                                              (c) Florian Balmer 1996-2011
 *                                                  florian.balmer@gmail.com
-*                                               http://www.flos-freeware.ch
+*                                              https://www.flos-freeware.ch
 *
 *
 ******************************************************************************/
@@ -157,7 +157,7 @@ void OpenHelpLink(HWND hwnd, int cmd) {
 	LPCWSTR link = NULL;
 	switch (cmd) {
 	case IDC_WEBPAGE_LINK:
-		link = L"http://www.flos-freeware.ch";
+		link = L"https://www.flos-freeware.ch";
 		break;
 	case IDC_EMAIL_LINK:
 		link = L"mailto:florian.balmer@gmail.com";
@@ -2153,8 +2153,7 @@ static INT_PTR CALLBACK WarnLineEndingDlgProc(HWND hwnd, UINT umsg, WPARAM wPara
 		WCHAR tchFmt[128];
 		for (int i = 0; i < 3; i++) {
 			WCHAR tchLn[32];
-			PosToStrW(status->linesCount[i], tchLn);
-			FormatNumberStr(tchLn);
+			FormatNumber(tchLn, status->linesCount[i]);
 			GetDlgItemText(hwnd, IDC_EOL_SUM_CRLF + i, tchFmt, COUNTOF(tchFmt));
 			wsprintf(wch, tchFmt, tchLn);
 			SetDlgItemText(hwnd, IDC_EOL_SUM_CRLF + i, wch);
@@ -2781,6 +2780,9 @@ void UpdateSystemIntegrationStatus(int mask, LPCWSTR lpszText, LPCWSTR lpszName)
 			Registry_SetDefaultString(hKey, tchModule);
 			Registry_SetString(hKey, L"Debugger", command);
 			Registry_SetInt(hKey, L"UseFilter", 0);
+			RegDeleteValue(hKey, L"AppExecutionAliasRedirectPackages");
+			RegDeleteValue(hKey, L"AppExecutionAliasRedirect");
+#if 0
 			WCHAR num[2] = { L'0', L'\0' };
 			for (int index = 0; index < 3; index++, num[0]++) {
 #if 1
@@ -2796,19 +2798,23 @@ void UpdateSystemIntegrationStatus(int mask, LPCWSTR lpszText, LPCWSTR lpszName)
 				}
 #endif
 			}
+#endif
 			RegCloseKey(hKey);
 		}
 	} else if (mask & SystemIntegration_RestoreNotepad) {
-#if 1
+#if 0
 		Registry_DeleteTree(HKEY_LOCAL_MACHINE, NP2RegSubKey_ReplaceNotepad);
 #else
 		// on Windows 11, all keys were created by the system, we should not delete them.
 		HKEY hKey;
-		LSTATUS status = RegOpenKeyEx(HKEY_LOCAL_MACHINE, NP2RegSubKey_ReplaceNotepad, 0, KEY_WRITE, &hKey);
+		const LSTATUS status = RegOpenKeyEx(HKEY_LOCAL_MACHINE, NP2RegSubKey_ReplaceNotepad, 0, KEY_WRITE, &hKey);
 		if (status == ERROR_SUCCESS) {
 			RegDeleteValue(hKey, NULL);
 			RegDeleteValue(hKey, L"Debugger");
-			RegDeleteValue(hKey, L"UseFilter");
+			Registry_SetInt(hKey, L"UseFilter", 1);
+			Registry_SetInt(hKey, L"AppExecutionAliasRedirect", 1);
+			Registry_SetString(hKey, L"AppExecutionAliasRedirectPackages", L"*");
+#if 0
 			GetWindowsDirectory(tchModule, COUNTOF(tchModule));
 			LPCWSTR const suffix[] = {
 				L"System32\\notepad.exe",
@@ -2821,10 +2827,13 @@ void UpdateSystemIntegrationStatus(int mask, LPCWSTR lpszText, LPCWSTR lpszName)
 				status = RegOpenKeyEx(hKey, num, 0, KEY_WRITE, &hSubKey);
 				if (status == ERROR_SUCCESS) {
 					PathCombine(command, tchModule, suffix[index]);
+					Registry_SetInt(hSubKey, L"AppExecutionAliasRedirect", 1);
+					Registry_SetString(hSubKey, L"AppExecutionAliasRedirectPackages", L"*");
 					Registry_SetString(hSubKey, L"FilterFullPath", command);
 					RegCloseKey(hSubKey);
 				}
 			}
+#endif
 			RegCloseKey(hKey);
 		}
 #endif

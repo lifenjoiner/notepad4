@@ -13,7 +13,7 @@
 *
 *                                              (c) Florian Balmer 1996-2011
 *                                                  florian.balmer@gmail.com
-*                                               http://www.flos-freeware.ch
+*                                              https://www.flos-freeware.ch
 *
 *
 ******************************************************************************/
@@ -77,23 +77,6 @@ NP2_inline int clamp_i(int x, int lower, int upper) {
 NP2_inline int validate_i(int x, int lower, int upper, int defaultValue) {
 	return (x < lower || x > upper) ? defaultValue : x;
 }
-
-// required for SSE2
-#define NP2DefaultPointerAlignment		16
-
-NP2_inline unsigned int align_up(unsigned int value) {
-	return (value + NP2DefaultPointerAlignment - 1) & (~(NP2DefaultPointerAlignment - 1));
-}
-
-NP2_inline void* align_ptr_ex(const void *ptr, size_t align) {
-	return (void *)(((uintptr_t)(ptr) + align - 1) & (~(align - 1)));
-}
-
-NP2_inline void* align_ptr(const void *ptr) {
-	return align_ptr_ex(ptr, NP2DefaultPointerAlignment);
-}
-
-#define unaligned_ptr(ptr, size)	(((uintptr_t)(ptr)) & ((size) - 1))
 
 NP2_inline bool StrIsEmptyA(LPCSTR s) {
 	return s == NULL || *s == '\0';
@@ -864,7 +847,7 @@ DWORD_PTR SHGetFileInfo2(LPCWSTR pszPath, DWORD dwFileAttributes,
 void	StripMnemonic(LPWSTR pszMenu);
 
 void	FormatNumberStr(LPWSTR lpNumberStr);
-BOOL	SetDlgItemIntEx(HWND hwnd, int nIdItem, UINT uValue);
+void	FormatNumber(LPWSTR lpNumberStr, ptrdiff_t Value);
 
 UINT	GetDlgItemTextA2W(UINT uCP, HWND hDlg, int nIDDlgItem, LPSTR lpString, int nMaxCount);
 void	SetDlgItemTextA2W(UINT uCP, HWND hDlg, int nIDDlgItem, LPCSTR lpString);

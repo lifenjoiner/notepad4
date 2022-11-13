@@ -18,22 +18,17 @@
 #include "LaTeXInput.h"
 
 #define NP2_AUTOC_USE_STRING_ORDER	1
+#define NP2_AUTOC_USE_WORD_POINTER	0	// used for debug
 // scintilla/src/AutoComplete.h AutoComplete::maxItemLen
 #define NP2_AUTOC_MAX_WORD_LENGTH	(1024 - 3 - 1 - 16)	// SP + '(' + ')' + '\0'
-#define NP2_AUTOC_WORD_BUF_LENGTH	1024
-#define NP2_AUTOC_INIT_BUF_SIZE		(4096)
-#define NP2_AUTOC_MAX_BUF_COUNT		20
-#define NP2_AUTOC_INIT_CACHE_BYTES	(4096)
-#define NP2_AUTOC_MAX_CACHE_COUNT	18
-/*
-word buffer:
-(2**20 - 1)*4096 => 4 GiB
+#define NP2_AUTOC_WORD_BUFFER_SIZE	1024
+#define NP2_AUTOC_INIT_BUFFER_SIZE	(4096)
 
-node cache:
-a = [4096*2**i for i in range(18)] => 1 GiB
-x64: sum(i//40 for i in a) => 26843434 nodes
-x86: sum(i//24 for i in a) => 44739063 nodes
-*/
+// memory buffer
+struct WordListBuffer;
+struct WordListBuffer {
+	struct WordListBuffer *next;
+};
 
 struct WordNode;
 struct WordList {
@@ -42,26 +37,19 @@ struct WordList {
 #if NP2_AUTOC_USE_STRING_ORDER
 	uint32_t (*WL_OrderFunc)(const void *, uint32_t);
 #endif
+
 	struct WordNode *pListHead;
 	LPCSTR pWordStart;
-
-	char *bufferList[NP2_AUTOC_MAX_BUF_COUNT];
-	char *buffer;
-	int bufferCount;
-	UINT offset;
-	UINT capacity;
-
+	UINT iStartLen;
+#if NP2_AUTOC_USE_STRING_ORDER
+	UINT orderStart;
+#endif
 	UINT nWordCount;
 	UINT nTotalLen;
-	UINT orderStart;
-	int iStartLen;
 
-	struct WordNode *nodeCacheList[NP2_AUTOC_MAX_CACHE_COUNT];
-	struct WordNode *nodeCache;
-	int cacheCount;
-	UINT cacheIndex;
-	UINT cacheCapacity;
-	UINT cacheBytes;
+	UINT offset;
+	UINT capacity;
+	struct WordListBuffer *buffer;
 };
 
 // TODO: replace _stricmp() and _strnicmp() with other functions
@@ -132,15 +120,19 @@ struct WordNode {
 			struct WordNode *right;
 		};
 	};
+#if NP2_AUTOC_USE_WORD_POINTER
 	char *word;
+#endif
 #if NP2_AUTOC_USE_STRING_ORDER
 	UINT order;
 #endif
-	int len;
-	int level;
+	UINT len;
+	UINT level;
 };
 
 #define NP2_TREE_HEIGHT_LIMIT	32
+// store word right after the node as most word are short.
+#define WordNode_GetWord(node)		((char *)(node) + sizeof(struct WordNode))
 // TODO: since the tree is sorted, nodes greater than some level can be deleted to reduce total words.
 // or only limit word count in WordList_GetList().
 
@@ -162,34 +154,26 @@ struct WordNode {
 		++(t)->level;										\
 	}
 
+#define WordList_AddNode(pWList)	((struct WordNode *)((char *)((pWList)->buffer) + (pWList)->offset))
 static inline void WordList_AddBuffer(struct WordList *pWList) {
-	char *buffer = (char *)NP2HeapAlloc(pWList->capacity);
-	pWList->bufferList[pWList->bufferCount] = buffer;
+	struct WordListBuffer *buffer = (struct WordListBuffer *)NP2HeapAlloc(pWList->capacity);
+	buffer->next = pWList->buffer;
+	pWList->offset = NP2_align_up(sizeof(struct WordListBuffer), NP2_alignof(struct WordNode));
 	pWList->buffer = buffer;
-	pWList->bufferCount++;
-	pWList->offset = 0;
 }
 
-static inline void WordList_AddCache(struct WordList *pWList) {
-	struct WordNode *node = (struct WordNode *)NP2HeapAlloc(pWList->cacheBytes);
-	pWList->nodeCacheList[pWList->cacheCount] = node;
-	pWList->nodeCache = node;
-	pWList->cacheCount++;
-	pWList->cacheIndex = 0;
-	pWList->cacheCapacity = pWList->cacheBytes / (sizeof(struct WordNode));
-}
-
-void WordList_AddWord(struct WordList *pWList, LPCSTR pWord, int len) {
+void WordList_AddWord(struct WordList *pWList, LPCSTR pWord, UINT len) {
 	struct WordNode *root = pWList->pListHead;
 #if NP2_AUTOC_USE_STRING_ORDER
 	const UINT order = (pWList->iStartLen > NP2_AUTOC_ORDER_LENGTH) ? 0 : pWList->WL_OrderFunc(pWord, len);
 #endif
 	if (root == NULL) {
-		struct WordNode *node;
-		node = pWList->nodeCache + pWList->cacheIndex++;
-		node->word = pWList->buffer + pWList->offset;
-
-		memcpy(node->word, pWord, len);
+		struct WordNode *node = WordList_AddNode(pWList);
+		char *word = WordNode_GetWord(node);
+		memcpy(word, pWord, len);
+#if NP2_AUTOC_USE_WORD_POINTER
+		node->word = word;
+#endif
 #if NP2_AUTOC_USE_STRING_ORDER
 		node->order = order;
 #endif
@@ -208,10 +192,10 @@ void WordList_AddWord(struct WordList *pWList, LPCSTR pWord, int len) {
 #if NP2_AUTOC_USE_STRING_ORDER
 			dir = (int)(iter->order - order);
 			if (dir == 0 && (len > NP2_AUTOC_ORDER_LENGTH || iter->len > NP2_AUTOC_ORDER_LENGTH)) {
-				dir = pWList->WL_strcmp(iter->word, pWord);
+				dir = pWList->WL_strcmp(WordNode_GetWord(iter), pWord);
 			}
 #else
-			dir = pWList->WL_strcmp(iter->word, pWord);
+			dir = pWList->WL_strcmp(WordNode_GetWord(iter), pWord);
 #endif
 			if (dir == 0) {
 				return;
@@ -223,19 +207,17 @@ void WordList_AddWord(struct WordList *pWList, LPCSTR pWord, int len) {
 			iter = iter->link[dir];
 		}
 
-		if (pWList->cacheIndex + 1 > pWList->cacheCapacity) {
-			pWList->cacheBytes <<= 1;
-			WordList_AddCache(pWList);
-		}
-		if (pWList->capacity < pWList->offset + len + 1) {
+		if (pWList->capacity < pWList->offset + len + 1 + sizeof(struct WordNode)) {
 			pWList->capacity <<= 1;
 			WordList_AddBuffer(pWList);
 		}
 
-		struct WordNode *node = pWList->nodeCache + pWList->cacheIndex++;
-		node->word = pWList->buffer + pWList->offset;
-
-		memcpy(node->word, pWord, len);
+		struct WordNode *node = WordList_AddNode(pWList);
+		char *word = WordNode_GetWord(node);
+		memcpy(word, pWord, len);
+#if NP2_AUTOC_USE_WORD_POINTER
+		node->word = word;
+#endif
 #if NP2_AUTOC_USE_STRING_ORDER
 		node->order = order;
 #endif
@@ -263,15 +245,15 @@ void WordList_AddWord(struct WordList *pWList, LPCSTR pWord, int len) {
 	pWList->pListHead = root;
 	pWList->nWordCount++;
 	pWList->nTotalLen += len + 1;
-	pWList->offset += align_up(len + 1);
+	pWList->offset += NP2_align_up(len + 1 + sizeof(struct WordNode), NP2_alignof(struct WordNode));
 }
 
 void WordList_Free(struct WordList *pWList) {
-	for (int i = 0; i < pWList->cacheCount; i++) {
-		NP2HeapFree(pWList->nodeCacheList[i]);
-	}
-	for (int i = 0; i < pWList->bufferCount; i++) {
-		NP2HeapFree(pWList->bufferList[i]);
+	struct WordListBuffer *buffer = pWList->buffer;
+	while (buffer) {
+		struct WordListBuffer * const next = buffer->next;
+		NP2HeapFree(buffer);
+		buffer = next;
 	}
 }
 
@@ -288,7 +270,7 @@ char* WordList_GetList(struct WordList *pWList) {
 			root = root->left;
 		} else {
 			root = path[--top];
-			memcpy(buf, root->word, root->len);
+			memcpy(buf, WordNode_GetWord(root), root->len);
 			buf += root->len;
 			*buf++ = '\n'; // the separator char
 			root = root->right;
@@ -301,12 +283,9 @@ char* WordList_GetList(struct WordList *pWList) {
 	return pList;
 }
 
-struct WordList *WordList_Alloc(LPCSTR pRoot, int iRootLen, bool bIgnoreCase) {
-	struct WordList *pWList = (struct WordList *)NP2HeapAlloc(sizeof(struct WordList));
-	pWList->pListHead = NULL;
+void WordList_Init(struct WordList *pWList, LPCSTR pRoot, UINT iRootLen, bool bIgnoreCase) {
+	memset(pWList, 0, sizeof(struct WordList));
 	pWList->pWordStart = pRoot;
-	pWList->nWordCount = 0;
-	pWList->nTotalLen = 0;
 	pWList->iStartLen = iRootLen;
 
 	if (bIgnoreCase) {
@@ -326,14 +305,11 @@ struct WordList *WordList_Alloc(LPCSTR pRoot, int iRootLen, bool bIgnoreCase) {
 	pWList->orderStart = pWList->WL_OrderFunc(pRoot, iRootLen);
 #endif
 
-	pWList->capacity = NP2_AUTOC_INIT_BUF_SIZE;
+	pWList->capacity = NP2_AUTOC_INIT_BUFFER_SIZE;
 	WordList_AddBuffer(pWList);
-	pWList->cacheBytes = NP2_AUTOC_INIT_CACHE_BYTES;
-	WordList_AddCache(pWList);
-	return pWList;
 }
 
-static inline void WordList_UpdateRoot(struct WordList *pWList, LPCSTR pRoot, int iRootLen) {
+static inline void WordList_UpdateRoot(struct WordList *pWList, LPCSTR pRoot, UINT iRootLen) {
 	pWList->pWordStart = pRoot;
 	pWList->iStartLen = iRootLen;
 #if NP2_AUTOC_USE_STRING_ORDER
@@ -355,59 +331,91 @@ static inline bool WordList_StartsWith(const struct WordList *pWList, LPCSTR pWo
 #endif
 }
 
+static inline bool WordList_IsSeparator(uint8_t ch) {
+#if defined(_WIN64)
+	// directly complied into bit test
+#if defined(__clang__) || defined(__GNUC__)
+	if (ch > ';') {
+		return ch == '^';
+	}
+	const uint64_t mask = UINT32_MAX
+		| (UINT64_C(1) << ' ')
+		| (UINT64_C(1) << '(')
+		| (UINT64_C(1) << ')')
+		| (UINT64_C(1) << ',')
+		| (UINT64_C(1) << '.')
+		//| (UINT64_C(1) << ':')
+		| (UINT64_C(1) << ';');
+	return (mask >> ch) & true;
+#else
+	return ch <= ' '
+		|| ch == '('
+		|| ch == ')'
+		|| ch == ','
+		|| ch == '.'
+		//|| ch == ':'
+		|| ch == ';'
+		|| ch == '^';
+#endif
+#else
+	if (ch <= ' ') {
+		return true;
+	}
+	ch -= '(';
+	if (ch > ';' - '(') {
+		return ch == '^' - '(';
+	}
+	const uint32_t mask = (1 << ('(' - '('))
+		| (1 << (')' - '('))
+		| (1 << (',' - '('))
+		| (1 << ('.' - '('))
+		//| (1 << (':' - '('))
+		| (1 << (';' - '('));
+	return (mask >> ch) & true;
+#endif
+}
+
 void WordList_AddListEx(struct WordList *pWList, LPCSTR pList) {
 	//StopWatch watch;
 	//StopWatch_Start(watch);
-	char wordBuf[NP2_AUTOC_WORD_BUF_LENGTH];
-	char *word = wordBuf;
-	const int iStartLen = pWList->iStartLen;
-	int len = 0;
+	char word[NP2_AUTOC_WORD_BUFFER_SIZE];
+	const UINT iStartLen = pWList->iStartLen;
+	UINT len = 0;
 	bool ok = false;
-	do {
-		const char *sub = strpbrk(pList, " \t.,();^\n\r");
-		if (sub) {
-			int lenSub = (int)(sub - pList);
-			lenSub = min_i(NP2_AUTOC_MAX_WORD_LENGTH - len, lenSub);
-			memcpy(word + len, pList, lenSub);
-			len += lenSub;
-			if (len >= iStartLen) {
-				if (*sub == '(') {
-					word[len++] = '(';
-					word[len++] = ')';
-				}
-				word[len] = '\0';
-				if (ok || WordList_StartsWith(pWList, word)) {
-					WordList_AddWord(pWList, word, len);
-					ok = *sub == '.';
-				}
+	while (true) {
+		uint8_t ch;
+		LPCSTR sub = pList;
+		do {
+			ch = *sub++;
+		} while (!WordList_IsSeparator(ch));
+
+		UINT lenSub = (UINT)(sub - pList - 1);
+		lenSub = min_u(NP2_AUTOC_MAX_WORD_LENGTH - len, lenSub);
+		memcpy(word + len, pList, lenSub);
+		len += lenSub;
+		pList = sub;
+		if (len >= iStartLen) {
+			if (ch == '(') {
+				word[len++] = '(';
+				word[len++] = ')';
 			}
-			if (*sub == '^') {
-				word[len++] = ' ';
-			} else if (!ok && *sub != '.') {
-				len = 0;
-			} else {
-				word[len++] = '.';
+			word[len] = '\0';
+			if (ok || WordList_StartsWith(pWList, word)) {
+				WordList_AddWord(pWList, word, len);
+				ok = ch == '.';
 			}
-			pList = ++sub;
-		} else {
-			int lenSub = (int)strlen(pList);
-			lenSub = min_i(NP2_AUTOC_MAX_WORD_LENGTH - len, lenSub);
-			if (len) {
-				memcpy(word + len, pList, lenSub);
-				len += lenSub;
-				word[len] = '\0';
-				pList = word;
-			} else {
-				len = lenSub;
-			}
-			if (len >= iStartLen) {
-				if (ok || WordList_StartsWith(pWList, pList)) {
-					WordList_AddWord(pWList, pList, len);
-				}
-			}
+		}
+		if (ch == '\0') {
 			break;
 		}
-	} while (*pList);
+		if (ch == '^') {
+			word[len++] = ' ';
+		} else if (!ok && ch != '.') {
+			len = 0;
+		} else {
+			word[len++] = '.';
+		}
+	}
 
 	//StopWatch_Stop(watch);
 	//const double duration = StopWatch_Get(&watch);
@@ -420,7 +428,7 @@ static inline void WordList_AddList(struct WordList *pWList, LPCSTR pList) {
 	}
 }
 
-void WordList_AddSubWord(struct WordList *pWList, LPSTR pWord, int wordLength, int iRootLen) {
+void WordList_AddSubWord(struct WordList *pWList, LPSTR pWord, UINT wordLength, UINT iRootLen) {
 	/*
 	when pRoot is 'b', split 'bugprone-branch-clone' as following:
 	1. first hyphen: 'bugprone-branch-clone' => 'bugprone', 'branch-clone'.
@@ -428,17 +436,17 @@ void WordList_AddSubWord(struct WordList *pWList, LPSTR pWord, int wordLength, i
 	*/
 
 	LPCSTR words[8];
-	int starts[8];
+	UINT starts[8];
 	UINT count = 0;
 
-	for (int i = 0; i < wordLength - 1; i++) {
+	for (UINT i = 0; i < wordLength - 1; i++) {
 		const char ch = pWord[i];
 		if (ch == '.' || ch == '-' || ch == ':') {
 			if (i >= iRootLen) {
 				pWord[i] = '\0';
 				WordList_AddWord(pWList, pWord, i);
 				for (UINT j = 0; j < count; j++) {
-					const int subLen = i - starts[j];
+					const UINT subLen = i - starts[j];
 					if (subLen >= iRootLen) {
 						WordList_AddWord(pWList, words[j], subLen);
 					}
@@ -449,7 +457,7 @@ void WordList_AddSubWord(struct WordList *pWList, LPSTR pWord, int wordLength, i
 				++i;
 			}
 
-			const int subLen = wordLength - (i + 1);
+			const UINT subLen = wordLength - (i + 1);
 			LPCSTR pSubRoot = pWord + i + 1;
 			if (subLen >= iRootLen && WordList_StartsWith(pWList, pSubRoot)) {
 				WordList_AddWord(pWList, pSubRoot, subLen);
@@ -639,6 +647,9 @@ enum {
 	APDLKeywordIndex_StarCommand = 3,
 	AutoHotkeyKeywordIndex_Directive = 1,
 	AutoHotkeyKeywordIndex_CompilerDirective = 2,
+	AutoIt3KeywordIndex_Macro = 2,
+	AutoIt3KeywordIndex_Directive = 4,
+	AutoIt3KeywordIndex_Special = 5,
 	CPPKeywordIndex_Preprocessor = 2,
 	CPPKeywordIndex_Directive = 3,
 	CSSKeywordIndex_AtRule = 1,
@@ -671,6 +682,8 @@ enum {
 	PowerShellKeywordIndex_PredefinedVariable = 4,
 	PythonKeywordIndex_Decorator = 7,
 	RebolKeywordIndex_Directive = 1,
+	ScalaKeywordIndex_Annotation = 3,
+	ScalaKeywordIndex_Scaladoc = 5,
 	SmaliKeywordIndex_Directive = 9,
 	SwiftKeywordIndex_Directive = 1,
 	SwiftKeywordIndex_Attribute = 2,
@@ -761,7 +774,7 @@ static void AutoC_AddDocWord(struct WordList *pWList, bool bIgnoreCase, char pre
 	const int iRootLen = pWList->iStartLen;
 
 	// optimization for small string
-	char onStack[256];
+	char onStack[128];
 	char *pFind;
 	if (iRootLen * 2 + 32 < (int)sizeof(onStack)) {
 		memset(onStack, 0, sizeof(onStack));
@@ -850,7 +863,7 @@ static void AutoC_AddDocWord(struct WordList *pWList, bool bIgnoreCase, char pre
 			}
 
 			if (wordEnd - iPosFind >= iRootLen) {
-				char wordBuf[NP2_AUTOC_WORD_BUF_LENGTH];
+				char wordBuf[NP2_AUTOC_WORD_BUFFER_SIZE];
 				char *pWord = wordBuf + NP2DefaultPointerAlignment;
 				bool bChanged = false;
 				struct Sci_TextRangeFull tr = { { iPosFind, min_pos(iPosFind + NP2_AUTOC_MAX_WORD_LENGTH, wordEnd) }, pWord };
@@ -942,7 +955,7 @@ static void AutoC_AddKeyword(struct WordList *pWList, int iCurrentStyle) {
 	const int iLexer = pLexCurrent->iLexer;
 	if (iLexer != SCLEX_PHPSCRIPT) {
 		uint64_t attr = pLexCurrent->keywordAttr;
-		for (int i = 0; i < KEYWORDSET_MAX + 1; attr >>= 4, i++) {
+		for (UINT i = 0; i < KEYWORDSET_MAX + 1; attr >>= 4, i++) {
 			const char *pKeywords = pLexCurrent->pKeyWords->pszKeyWords[i];
 			if (!(attr & KeywordAttr_NoAutoComp) && StrNotEmptyA(pKeywords)) {
 				WordList_AddListEx(pWList, pKeywords);
@@ -986,7 +999,7 @@ static void AutoC_AddKeyword(struct WordList *pWList, int iCurrentStyle) {
 	}
 	if (pLex != NULL) {
 		uint64_t attr = pLex->keywordAttr;
-		for (int i = 0; i < KEYWORDSET_MAX + 1; attr >>= 4, i++) {
+		for (UINT i = 0; i < KEYWORDSET_MAX + 1; attr >>= 4, i++) {
 			const char *pKeywords = pLex->pKeyWords->pszKeyWords[i];
 			if (!(attr & KeywordAttr_NoAutoComp) && StrNotEmptyA(pKeywords)) {
 				WordList_AddListEx(pWList, pKeywords);
@@ -1053,6 +1066,18 @@ static AddWordResult AutoC_AddSpecWord(struct WordList *pWList, int iCurrentStyl
 		}
 		break;
 
+	case NP2LEX_AUTOIT3:
+		if (ch == '#' && iCurrentStyle == SCE_AU3_DEFAULT) {
+			WordList_AddList(pWList, pLex->pKeyWords->pszKeyWords[AutoIt3KeywordIndex_Directive]);
+			WordList_AddList(pWList, pLex->pKeyWords->pszKeyWords[AutoIt3KeywordIndex_Special]);
+			return AddWordResult_Finish;
+		}
+		if (ch == '@' && iCurrentStyle == SCE_AU3_DEFAULT) {
+			WordList_AddList(pWList, pLex->pKeyWords->pszKeyWords[AutoIt3KeywordIndex_Macro]);
+			return AddWordResult_Finish;
+		}
+		break;
+
 	case NP2LEX_ABAQUS:
 	case NP2LEX_APDL:
 		if (iCurrentStyle == 0 && (ch == '*' || ch == '/')) {
@@ -1081,11 +1106,8 @@ static AddWordResult AutoC_AddSpecWord(struct WordList *pWList, int iCurrentStyl
 
 	case NP2LEX_CPP:
 	case NP2LEX_RESOURCESCRIPT:
-	case NP2LEX_SCALA:
 		if (IsCppCommentStyle(iCurrentStyle) && np2_LexKeyword) {
-			if ((ch == '@' && (np2_LexKeyword == &kwJavaDoc || np2_LexKeyword == &kwDoxyDoc))
-					|| (ch == '\\' && np2_LexKeyword == &kwDoxyDoc)
-					|| ((ch == '<' || chPrev == '<') && np2_LexKeyword == &kwNETDoc)) {
+			if ((ch == '@' || ch == '\\') && (np2_LexKeyword == &kwDoxyDoc)) {
 				WordList_AddList(pWList, (*np2_LexKeyword)[0]);
 				WordList_AddList(pWList, (*np2_LexKeyword)[1]);
 				WordList_AddList(pWList, (*np2_LexKeyword)[2]);
@@ -1290,6 +1312,19 @@ static AddWordResult AutoC_AddSpecWord(struct WordList *pWList, int iCurrentStyl
 		}
 		break;
 
+	case NP2LEX_SCALA:
+		if (ch == '@') {
+			if (iCurrentStyle == SCE_SCALA_DEFAULT) {
+				WordList_AddList(pWList, pLex->pKeyWords->pszKeyWords[ScalaKeywordIndex_Annotation]);
+				return AddWordResult_IgnoreLexer;
+			}
+			if (iCurrentStyle >= SCE_SCALA_COMMENTLINE && iCurrentStyle <= SCE_SCALA_TASKMARKER) {
+				WordList_AddList(pWList, pLex->pKeyWords->pszKeyWords[ScalaKeywordIndex_Scaladoc]);
+				return AddWordResult_Finish;
+			}
+		}
+		break;
+
 	case NP2LEX_SMALI:
 		if (ch == '.' && iCurrentStyle == SCE_C_DEFAULT) {
 			WordList_AddList(pWList, pLex->pKeyWords->pszKeyWords[SmaliKeywordIndex_Directive]);
@@ -1476,7 +1511,7 @@ static bool EditCompleteWordCore(int iCondition, bool autoInsert) {
 	}
 
 	// optimization for small string
-	char onStack[128];
+	char onStack[64];
 	char *pRoot;
 	if (iCurrentPos - iStartWordPos + 1 < (Sci_Position)sizeof(onStack)) {
 		memset(onStack, 0, sizeof(onStack));
@@ -1496,7 +1531,8 @@ static bool EditCompleteWordCore(int iCondition, bool autoInsert) {
 
 	bool bIgnoreLexer = (pRoot[0] >= '0' && pRoot[0] <= '9'); // number
 	const bool bIgnoreCase = bIgnoreLexer || autoCompletionConfig.bIgnoreCase;
-	struct WordList *pWList = WordList_Alloc(pRoot, iRootLen, bIgnoreCase);
+	struct WordList pWList;
+	WordList_Init(&pWList, pRoot, iRootLen, bIgnoreCase);
 	bool bIgnoreDoc = false;
 	char prefix = '\0';
 
@@ -1507,7 +1543,7 @@ static bool EditCompleteWordCore(int iCondition, bool autoInsert) {
 			iPrevStyle = SciCall_GetStyleIndexAt(iPos);
 		}
 
-		const AddWordResult result = AutoC_AddSpecWord(pWList, iCurrentStyle, iPrevStyle, ch, chPrev);
+		const AddWordResult result = AutoC_AddSpecWord(&pWList, iCurrentStyle, iPrevStyle, ch, chPrev);
 		if (result == AddWordResult_Finish) {
 			bIgnoreLexer = true;
 			bIgnoreDoc = true;
@@ -1526,28 +1562,28 @@ static bool EditCompleteWordCore(int iCondition, bool autoInsert) {
 	do {
 		if (!bIgnoreLexer) {
 			// keywords
-			AutoC_AddKeyword(pWList, iCurrentStyle);
+			AutoC_AddKeyword(&pWList, iCurrentStyle);
 		}
 		if (bScanWordsInDocument) {
-			if (!bIgnoreDoc || pWList->nWordCount == 0) {
-				AutoC_AddDocWord(pWList, bIgnoreCase, prefix);
+			if (!bIgnoreDoc || pWList.nWordCount == 0) {
+				AutoC_AddDocWord(&pWList, bIgnoreCase, prefix);
 			}
-			if (prefix && pWList->nWordCount == 0) {
+			if (prefix && pWList.nWordCount == 0) {
 				prefix = '\0';
-				AutoC_AddDocWord(pWList, bIgnoreCase, prefix);
+				AutoC_AddDocWord(&pWList, bIgnoreCase, prefix);
 			}
 		}
 
 		retry = false;
-		if (pWList->nWordCount == 0 && iRootLen != 0) {
-			const char *pSubRoot = strpbrk(pWList->pWordStart, ":.#@<\\/->$%");
+		if (pWList.nWordCount == 0 && iRootLen != 0) {
+			const char *pSubRoot = strpbrk(pWList.pWordStart, ":.#@<\\/->$%");
 			if (pSubRoot) {
 				while (IsSpecialStart(*pSubRoot)) {
 					pSubRoot++;
 				}
 				if (*pSubRoot) {
 					iRootLen = (int)strlen(pSubRoot);
-					WordList_UpdateRoot(pWList, pSubRoot, iRootLen);
+					WordList_UpdateRoot(&pWList, pSubRoot, iRootLen);
 					retry = true;
 					bIgnoreLexer = false;
 					bIgnoreDoc = false;
@@ -1560,40 +1596,40 @@ static bool EditCompleteWordCore(int iCondition, bool autoInsert) {
 #if 0
 	StopWatch_Stop(watch);
 	const double elapsed = StopWatch_Get(&watch);
-	printf("Notepad2 AddDocWord(%u, %u): %.6f\n", pWList->nWordCount, pWList->nTotalLen, elapsed);
+	printf("Notepad2 AddDocWord(%u, %u): %.6f\n", pWList.nWordCount, pWList.nTotalLen, elapsed);
 #endif
 
-	const bool bShow = pWList->nWordCount > 0 && !(pWList->nWordCount == 1 && pWList->nTotalLen == (UINT)(iRootLen + 1));
+	const bool bShow = pWList.nWordCount > 0 && !(pWList.nWordCount == 1 && pWList.nTotalLen == (UINT)(iRootLen + 1));
 	const bool bUpdated = (autoCompletionConfig.iPreviousItemCount == 0)
 		// deleted some words. leave some words that no longer matches current input at the top.
-		|| (iCondition == AutoCompleteCondition_OnCharAdded && autoCompletionConfig.iPreviousItemCount - pWList->nWordCount > autoCompletionConfig.iVisibleItemCount)
+		|| (iCondition == AutoCompleteCondition_OnCharAdded && autoCompletionConfig.iPreviousItemCount - pWList.nWordCount > autoCompletionConfig.iVisibleItemCount)
 		// added some words. TODO: check top matched items before updating, if top items not changed, delay the update.
-		|| (iCondition == AutoCompleteCondition_OnCharDeleted && autoCompletionConfig.iPreviousItemCount < pWList->nWordCount);
+		|| (iCondition == AutoCompleteCondition_OnCharDeleted && autoCompletionConfig.iPreviousItemCount < pWList.nWordCount);
 
 	if (bShow && bUpdated) {
-		autoCompletionConfig.iPreviousItemCount = pWList->nWordCount;
-		char *pList = WordList_GetList(pWList);
+		autoCompletionConfig.iPreviousItemCount = pWList.nWordCount;
+		char *pList = WordList_GetList(&pWList);
 		SciCall_AutoCSetOptions(SC_AUTOCOMPLETE_FIXED_SIZE);
 		SciCall_AutoCSetOrder(SC_ORDER_PRESORTED); // pre-sorted
 		SciCall_AutoCSetIgnoreCase(bIgnoreCase); // case sensitivity
 		//if (bIgnoreCase) {
 		//	SciCall_AutoCSetCaseInsensitiveBehaviour(SC_CASEINSENSITIVEBEHAVIOUR_IGNORECASE);
 		//}
-		SciCall_AutoCSetSeparator('\n');
+		//SciCall_AutoCSetSeparator('\n');
+		//SciCall_AutoCSetTypeSeparator('\t');
 		SciCall_AutoCSetFillUps(autoCompletionConfig.szAutoCompleteFillUp);
 		//SciCall_AutoCSetDropRestOfWord(true); // delete orginal text: pRoot
-		SciCall_AutoCSetMaxHeight(min_u(pWList->nWordCount, autoCompletionConfig.iVisibleItemCount)); // visible rows
+		SciCall_AutoCSetMaxHeight(min_u(pWList.nWordCount, autoCompletionConfig.iVisibleItemCount)); // visible rows
 		SciCall_AutoCSetCancelAtStart(false); // don't cancel the list when deleting character
 		SciCall_AutoCSetChooseSingle(autoInsert);
-		SciCall_AutoCShow(pWList->iStartLen, pList);
+		SciCall_AutoCShow(pWList.iStartLen, pList);
 		NP2HeapFree(pList);
 	}
 
 	if (pRoot != onStack) {
 		NP2HeapFree(pRoot);
 	}
-	WordList_Free(pWList);
-	NP2HeapFree(pWList);
+	WordList_Free(&pWList);
 	return bShow;
 }
 
@@ -3074,10 +3110,10 @@ void InitAutoCompletionCache(LPCEDITLEXER pLex) {
 		break;
 
 	case NP2LEX_SCALA:
+	case NP2LEX_TCL:
 		CurrentWordCharSet['$' >> 5] |= (1 << ('$' & 31));
 		CurrentWordCharSet['.' >> 5] |= (1 << ('.' & 31));
 		CurrentWordCharSet['@' >> 5] |= (1 << ('@' & 31));
-		np2_LexKeyword = &kwJavaDoc;
 		break;
 
 	case NP2LEX_SQL:
@@ -3105,12 +3141,6 @@ void InitAutoCompletionCache(LPCEDITLEXER pLex) {
 		GenericTypeStyleMask[SCE_SWIFT_STRUCT >> 5] |= (1U << (SCE_SWIFT_STRUCT & 31));
 		GenericTypeStyleMask[SCE_SWIFT_PROTOCOL >> 5] |= (1U << (SCE_SWIFT_PROTOCOL & 31));
 		GenericTypeStyleMask[SCE_SWIFT_ENUM >> 5] |= (1U << (SCE_SWIFT_ENUM & 31));
-		break;
-
-	case NP2LEX_TCL:
-		CurrentWordCharSet['$' >> 5] |= (1 << ('$' & 31));
-		CurrentWordCharSet['.' >> 5] |= (1 << ('.' & 31));
-		CurrentWordCharSet['@' >> 5] |= (1 << ('@' & 31));
 		break;
 
 	case NP2LEX_VERILOG:

@@ -210,8 +210,8 @@ void ScintillaCall::SetSavePoint() {
 	Call(Message::SetSavePoint);
 }
 
-Position ScintillaCall::GetStyledText(void *tr) {
-	return CallPointer(Message::GetStyledText, 0, tr);
+Position ScintillaCall::GetStyledTextFull(void *tr) {
+	return CallPointer(Message::GetStyledTextFull, 0, tr);
 }
 
 bool ScintillaCall::CanRedo() {
@@ -628,6 +628,18 @@ void ScintillaCall::StyleSetCheckMonospaced(int style, bool checkMonospaced) {
 
 bool ScintillaCall::StyleGetCheckMonospaced(int style) {
 	return Call(Message::StyleGetCheckMonospaced, style);
+}
+
+void ScintillaCall::StyleSetInvisibleRepresentation(int style, const char *representation) {
+	CallString(Message::StyleSetInvisibleRepresentation, style, representation);
+}
+
+int ScintillaCall::StyleGetInvisibleRepresentation(int style, char *representation) {
+	return static_cast<int>(CallPointer(Message::StyleGetInvisibleRepresentation, style, representation));
+}
+
+std::string ScintillaCall::StyleGetInvisibleRepresentation(int style) {
+	return CallReturnString(Message::StyleGetInvisibleRepresentation, style);
 }
 
 void ScintillaCall::SetElementColour(Scintilla::Element element, ColourAlpha colourElement) {

@@ -15,7 +15,7 @@
 *
 *                                              (c) Florian Balmer 1996-2011
 *                                                  florian.balmer@gmail.com
-*                                               http://www.flos-freeware.ch
+*                                              https://www.flos-freeware.ch
 *
 *
 ******************************************************************************/
@@ -623,7 +623,7 @@ bool BitmapAlphaBlend(HBITMAP hbmp, COLORREF crDest, BYTE alpha) {
 			const ULONG count = (bmp.bmHeight * bmp.bmWidth) / 4;
 			__m128i *prgba = (__m128i *)bmp.bmBits;
 
-			const __m256i i16x16Alpha = _mm256_broadcastw_epi16(mm_setlo_epi32(alpha));
+			const __m256i i16x16Alpha = _mm256_broadcastw_epi16(_mm_cvtsi32_si128(alpha));
 			const __m256i i16x16Back = _mm256_broadcastq_epi64(_mm_mullo_epi16(rgba_to_bgra_epi16_sse4_si32(crDest), mm_xor_alpha_epi16(_mm256_castsi256_si128(i16x16Alpha))));
 			const __m256i i16x16_0x8081 = _mm256_broadcastsi128_si256(_mm_set1_epi16(-0x8000 | 0x81));
 			for (ULONG x = 0; x < count; x++, prgba++) {
@@ -641,7 +641,7 @@ bool BitmapAlphaBlend(HBITMAP hbmp, COLORREF crDest, BYTE alpha) {
 			const ULONG count = (bmp.bmHeight * bmp.bmWidth) / 2;
 			uint64_t *prgba = (uint64_t *)bmp.bmBits;
 
-			const __m128i i16x8Alpha = _mm_broadcastw_epi16(mm_setlo_epi32(alpha));
+			const __m128i i16x8Alpha = _mm_broadcastw_epi16(_mm_cvtsi32_si128(alpha));
 			const __m128i i16x8Back = _mm_mullo_epi16(rgba_to_bgra_epi16x8_sse4_si32(crDest), mm_xor_alpha_epi16(i16x8Alpha));
 			for (ULONG x = 0; x < count; x++, prgba++) {
 				const __m128i origin = unpack_color_epi16_sse4_ptr64(prgba);
@@ -1470,6 +1470,9 @@ HMODULE LoadLocalizedResourceDLL(LANGID lang, LPCWSTR dllName) {
 	case LANG_KOREAN:
 		folder = L"ko";
 		break;
+	case LANG_PORTUGUESE:
+		folder = L"pt-BR";
+		break;
 	}
 
 	if (folder == NULL) {
@@ -1696,7 +1699,16 @@ void PathRelativeToApp(LPCWSTR lpszSrc, LPWSTR lpszDest, DWORD dwAttrTo, bool bU
 		}
 	}
 
-	if (!bUnexpandEnv || !PathUnExpandEnvStrings(lpszSrc, lpszDest, MAX_PATH)) {
+	if (bUnexpandEnv) {
+		if (lpszSrc == lpszDest) {
+			lstrcpyn(wchPath, lpszSrc, COUNTOF(wchPath));
+			lpszSrc = wchPath;
+		}
+		if (PathUnExpandEnvStrings(lpszSrc, lpszDest, MAX_PATH)) {
+			return;
+		}
+	}
+	if (lpszSrc != lpszDest) {
 		lstrcpy(lpszDest, lpszSrc);
 	}
 }
@@ -2197,6 +2209,7 @@ void StripMnemonic(LPWSTR pszMenu) {
 //
 // FormatNumberStr()
 //
+#ifndef _WIN64
 void FormatNumberStr(LPWSTR lpNumberStr) {
 	const int i = lstrlen(lpNumberStr);
 	if (i <= 3) {
@@ -2222,18 +2235,35 @@ void FormatNumberStr(LPWSTR lpNumberStr) {
 		++end;
 	} while (c > lpNumberStr);
 }
+#endif
 
-//=============================================================================
-//
-// SetDlgItemIntEx()
-//
-BOOL SetDlgItemIntEx(HWND hwnd, int nIdItem, UINT uValue) {
-	WCHAR szBuf[32];
+void FormatNumber(LPWSTR lpNumberStr, ptrdiff_t value) {
+#ifdef _WIN64
+	_i64tow(value, lpNumberStr, 10);
+	if (value < 1000) {
+		return;
+	}
 
-	_ultow(uValue, szBuf, 10);
-	FormatNumberStr(szBuf);
+	WCHAR szSep[4];
+	const WCHAR sep = GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_STHOUSAND, szSep, COUNTOF(szSep))? szSep[0] : L',';
 
-	return SetDlgItemText(hwnd, nIdItem, szBuf);
+	WCHAR *c = lpNumberStr + lstrlen(lpNumberStr);
+	WCHAR *end = c;
+	lpNumberStr += 3;
+	do {
+		c -= 3;
+		memmove(c + 1, c, sizeof(WCHAR) * (end - c + 1));
+		*c = sep;
+		++end;
+	} while (c > lpNumberStr);
+
+#else
+	_ltow(value, lpNumberStr, 10);
+	if (value < 1000) {
+		return;
+	}
+	FormatNumberStr(lpNumberStr);
+#endif
 }
 
 //=============================================================================
@@ -2438,7 +2468,7 @@ bool MRU_Load(LPMRULIST pmru) {
 	IniSection section;
 	WCHAR *pIniSectionBuf = (WCHAR *)NP2HeapAlloc(sizeof(WCHAR) * MAX_INI_SECTION_SIZE_MRU);
 	const int cchIniSection = (int)(NP2HeapSize(pIniSectionBuf) / sizeof(WCHAR));
-	IniSection *pIniSection = &section;
+	IniSection * const pIniSection = &section;
 
 	MRU_Empty(pmru);
 	IniSectionInit(pIniSection, MRU_MAXITEMS);
@@ -2471,10 +2501,9 @@ bool MRU_Save(LPCMRULIST pmru) {
 	}
 
 	WCHAR tchName[16];
-	IniSectionOnSave section;
 	WCHAR *pIniSectionBuf = (WCHAR *)NP2HeapAlloc(sizeof(WCHAR) * MAX_INI_SECTION_SIZE_MRU);
-	IniSectionOnSave *pIniSection = &section;
-	pIniSection->next = pIniSectionBuf;
+	IniSectionOnSave section = { pIniSectionBuf };
+	IniSectionOnSave * const pIniSection = &section;
 	const BOOL quoted = pmru->iFlags & MRUFlags_QuoteValue;
 
 	for (int i = 0; i < pmru->iSize; i++) {
