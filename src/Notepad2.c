@@ -39,6 +39,10 @@
 #include "Dialogs.h"
 #include "resource.h"
 
+#ifndef SM_CXPADDEDBORDER
+#define SM_CXPADDEDBORDER	92
+#endif
+
 //! show fold level
 #define NP2_DEBUG_FOLD_LEVEL		0
 
@@ -57,6 +61,7 @@ static HMONITOR hCurrentMonitor = NULL;
 HWND	hwndEdit;
 static HWND hwndEditFrame;
 HWND	hwndMain;
+static HMENU hmenuMain;
 static HWND hwndNextCBChain = NULL;
 HWND	hDlgFindReplace = NULL;
 static bool bInitDone = false;
@@ -137,6 +142,7 @@ static bool bMarkOccurrencesMatchCase;
 static bool bMarkOccurrencesMatchWords;
 static bool bMarkOccurrencesBookmark;
 EditAutoCompletionConfig autoCompletionConfig;
+int iSelectOption;
 static int iLineSelectionMode;
 static bool bShowCodeFolding;
 #if NP2_ENABLE_SHOW_CALLTIPS
@@ -196,6 +202,7 @@ bool	bWindowLayoutRTL;
 static int iRenderingTechnology;
 static bool bUseInlineIME;
 static int iBidirectional;
+static bool bShowMenu;
 static bool bShowToolbar;
 static bool bAutoScaleToolbar;
 static bool bShowStatusbar;
@@ -266,7 +273,7 @@ DWORD dwAutoSavePeriod;
 static DWORD dwCurrentDocReversion = 0;
 static DWORD dwLastSavedDocReversion = 0;
 static bool bAutoSaveTimerSet = false;
-#define MaxAutoSaveCount	2	// normal
+#define MaxAutoSaveCount	6	// normal
 #define AllAutoSaveCount	(MaxAutoSaveCount + 2) // suspend, shutdown
 static LPWSTR autoSavePathList[AllAutoSaveCount];
 static int autoSaveCount = 0;
@@ -426,17 +433,6 @@ static inline bool IsDocumentModified(void) {
 
 static inline bool IsTopMost(void) {
 	return (bAlwaysOnTop || flagAlwaysOnTop == TripleBoolean_True) && flagAlwaysOnTop != TripleBoolean_False;
-}
-
-static inline void ToggleFullScreenModeConfig(int config) {
-	if (iFullScreenMode & config) {
-		iFullScreenMode &= ~config;
-	} else {
-		iFullScreenMode |= config;
-	}
-	if (bInFullScreenMode && config != FullScreenMode_OnStartup) {
-		ToggleFullScreenMode();
-	}
 }
 
 // temporary fix for https://github.com/zufuliu/notepad2/issues/77: force InvalidateStyleRedraw().
@@ -805,7 +801,7 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 		}
 	}
 
-	hwndMain = CreateWindowEx(
+	HWND hwnd = CreateWindowEx(
 				   0,
 				   wchWndClass,
 				   WC_NOTEPAD2,
@@ -818,25 +814,21 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 				   NULL,
 				   hInstance,
 				   NULL);
-
-	if (wi.max) {
-		nCmdShow = SW_SHOWMAXIMIZED;
-	}
-
 	if (IsTopMost()) {
-		SetWindowPos(hwndMain, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+		SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	}
-
 	if (bTransparentMode) {
-		SetWindowTransparentMode(hwndMain, true, iOpacityLevel);
+		SetWindowTransparentMode(hwnd, true, iOpacityLevel);
 	}
-
+	if (!bShowMenu) {
+		SetMenu(hwnd, NULL);
+	}
 	if (!flagStartAsTrayIcon) {
-		ShowWindow(hwndMain, nCmdShow);
-		UpdateWindow(hwndMain);
+		ShowWindow(hwnd, wi.max ? SW_SHOWMAXIMIZED : nCmdShow);
+		UpdateWindow(hwnd);
 	} else {
-		ShowWindow(hwndMain, SW_HIDE); // trick ShowWindow()
-		ShowNotifyIcon(hwndMain, true);
+		ShowWindow(hwnd, SW_HIDE); // trick ShowWindow()
+		ShowNotifyIcon(hwnd, true);
 	}
 
 	// Source Encoding
@@ -854,7 +846,7 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 		// Open from Directory
 		if (PathIsDirectory(lpFileArg)) {
 			WCHAR tchFile[MAX_PATH];
-			if (OpenFileDlg(hwndMain, tchFile, COUNTOF(tchFile), lpFileArg)) {
+			if (OpenFileDlg(tchFile, COUNTOF(tchFile), lpFileArg)) {
 				bOpened = FileLoad(FileLoadFlag_Default, tchFile);
 				bFileLoadCalled = true;
 			}
@@ -927,13 +919,13 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 
 	// Encoding
 	if (0 != flagSetEncoding) {
-		SendWMCommand(hwndMain, IDM_ENCODING_ANSI - 1 + flagSetEncoding);
+		SendWMCommand(hwnd, IDM_ENCODING_ANSI - 1 + flagSetEncoding);
 		flagSetEncoding = 0;
 	}
 
 	// EOL mode
 	if (0 != flagSetEOLMode) {
-		SendWMCommand(hwndMain, IDM_LINEENDINGS_CRLF - 1 + flagSetEOLMode);
+		SendWMCommand(hwnd, IDM_LINEENDINGS_CRLF - 1 + flagSetEOLMode);
 		flagSetEOLMode = 0;
 	}
 
@@ -969,11 +961,11 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 	// Check for Paste Board option -- after loading files
 	if (flagPasteBoard) {
 		bLastCopyFromMe = true;
-		hwndNextCBChain = SetClipboardViewer(hwndMain);
+		hwndNextCBChain = SetClipboardViewer(hwnd);
 		UpdateWindowTitle();
 		bLastCopyFromMe = false;
 		dwLastCopyTime = 0;
-		SetTimer(hwndMain, ID_PASTEBOARDTIMER, 100, PasteBoardTimer);
+		SetTimer(hwnd, ID_PASTEBOARDTIMER, 100, PasteBoardTimer);
 	}
 
 	// check if a lexer was specified from the command line
@@ -990,7 +982,9 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 
 	// If start as tray icon, set current filename as tooltip
 	if (flagStartAsTrayIcon) {
-		SetNotifyIconTitle(hwndMain);
+		SetNotifyIconTitle(hwnd);
+	} else if (bInFullScreenMode) {
+		ToggleFullScreenMode();
 	}
 
 	bInitDone = true;
@@ -1030,11 +1024,6 @@ static inline void EditMarkAll_Stop(void) {
 
 static inline void ExitApplication(HWND hwnd) {
 	if (FileSave(FileSaveFlag_Ask)) {
-		if (bInFullScreenMode) {
-			bInFullScreenMode = false;
-			ToggleFullScreenMode();
-		}
-		EditMarkAll_Stop();
 		DestroyWindow(hwnd);
 	}
 }
@@ -1048,7 +1037,7 @@ void OnDropOneFile(HWND hwnd, LPCWSTR szBuf) {
 	//SetForegroundWindow(hwnd);
 	if (PathIsDirectory(szBuf)) {
 		WCHAR tchFile[MAX_PATH];
-		if (OpenFileDlg(hwnd, tchFile, COUNTOF(tchFile), szBuf)) {
+		if (OpenFileDlg(tchFile, COUNTOF(tchFile), szBuf)) {
 			FileLoad(FileLoadFlag_Default, tchFile);
 		}
 	} else {
@@ -1093,13 +1082,10 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 	case WM_WINDOWPOSCHANGED: {
 		HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
 		if (monitor != hCurrentMonitor) {
-			HMONITOR previous = hCurrentMonitor;
 			hCurrentMonitor = monitor;
-			if (previous) {
-				// Direct2D: render Scintilla window with parameters for current monitor
-				SendMessage(hwndEdit, WM_SETTINGCHANGE, 0, 0);
-				Style_SetLexer(pLexCurrent, false); // override base elements
-			}
+			// Direct2D: render Scintilla window with parameters for current monitor
+			SendMessage(hwndEdit, WM_SETTINGCHANGE, 0, 0);
+			Style_SetLexer(pLexCurrent, false); // override base elements
 		}
 		return DefWindowProc(hwnd, umsg, wParam, lParam);
 	}
@@ -1224,21 +1210,19 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 
 	case WM_GETMINMAXINFO:
 		if (bInFullScreenMode) {
-			HMONITOR hMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
 			MONITORINFO mi;
 			mi.cbSize = sizeof(mi);
-			GetMonitorInfo(hMonitor, &mi);
+			GetMonitorInfo(hCurrentMonitor, &mi);
 
 			const int w = mi.rcMonitor.right - mi.rcMonitor.left;
 			const int h = mi.rcMonitor.bottom - mi.rcMonitor.top;
+			const UINT dpi = g_uCurrentDPI;
 
 			LPMINMAXINFO pmmi = (LPMINMAXINFO)lParam;
-			pmmi->ptMaxSize.x = w + 2 * SystemMetricsForDpi(SM_CXSIZEFRAME, g_uCurrentDPI);
-			pmmi->ptMaxSize.y = h + SystemMetricsForDpi(SM_CYCAPTION, g_uCurrentDPI)
-				+ SystemMetricsForDpi(SM_CYMENU, g_uCurrentDPI)
-				+ 2 * SystemMetricsForDpi(SM_CYSIZEFRAME, g_uCurrentDPI);
-			pmmi->ptMaxTrackSize.x = pmmi->ptMaxSize.x;
-			pmmi->ptMaxTrackSize.y = pmmi->ptMaxSize.y;
+			const int padding = 2*SystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+			pmmi->ptMaxSize.x = w + padding + 2*SystemMetricsForDpi(SM_CXSIZEFRAME, dpi);
+			pmmi->ptMaxSize.y = h + padding + SystemMetricsForDpi(SM_CYCAPTION, dpi) + 2*SystemMetricsForDpi(SM_CYSIZEFRAME, dpi);
+			pmmi->ptMaxTrackSize = pmmi->ptMaxSize;
 			return 0;
 		}
 		return DefWindowProc(hwnd, umsg, wParam, lParam);
@@ -1292,7 +1276,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 
 				if (PathIsDirectory(&params->wchData)) {
 					WCHAR tchFile[MAX_PATH];
-					if (OpenFileDlg(hwnd, tchFile, COUNTOF(tchFile), &params->wchData)) {
+					if (OpenFileDlg(tchFile, COUNTOF(tchFile), &params->wchData)) {
 						bOpened = FileLoad(FileLoadFlag_Default, tchFile);
 					}
 				} else {
@@ -1752,7 +1736,7 @@ static void EditFrameOnThemeChanged(void) {
 //
 // EditCreate()
 //
-HWND EditCreate(HWND hwndParent) {
+void EditCreate(HWND hwndParent) {
 	HWND hwnd = CreateWindowEx(WS_EX_CLIENTEDGE,
 						  L"Scintilla",
 						  NULL,
@@ -1762,12 +1746,14 @@ HWND EditCreate(HWND hwndParent) {
 						  (HMENU)IDC_EDIT,
 						  g_hInstance,
 						  NULL);
+	hwndEdit = hwnd;
+	efrData.hwnd = hwnd;
+	InitScintillaHandle(hwnd);
 	//SciInitThemes(hwnd);
 	if (bEditLayoutRTL) {
 		SetWindowLayoutRTL(hwnd, true);
 	}
 
-	InitScintillaHandle(hwnd);
 	Style_InitDefaultColor();
 	SciCall_SetTechnology(iRenderingTechnology);
 	SciCall_SetBidirectional(iBidirectional);
@@ -1781,7 +1767,7 @@ HWND EditCreate(HWND hwndParent) {
 	SciCall_SetCaretSticky(SC_CARETSTICKY_OFF);
 	SciCall_SetXCaretPolicy(CARET_SLOP | CARET_EVEN, 50);
 	SciCall_SetYCaretPolicy(CARET_EVEN, 0);
-	SciCall_SetMultipleSelection(true);
+	SciCall_SetMultipleSelection(iSelectOption & SelectOption_EnableMultipleSelection);
 	SciCall_SetAdditionalSelectionTyping(true);
 	SciCall_SetMultiPaste(SC_MULTIPASTE_EACH);
 	SciCall_SetVirtualSpaceOptions(SCVS_RECTANGULARSELECTION);
@@ -1874,8 +1860,6 @@ HWND EditCreate(HWND hwndParent) {
 	// Nonprinting characters
 	SciCall_SetViewWS((bViewWhiteSpace) ? SCWS_VISIBLEALWAYS : SCWS_INVISIBLE);
 	SciCall_SetViewEOL(bViewEOLs);
-
-	return hwnd;
 }
 
 void EditReplaceDocument(HANDLE pdoc) {
@@ -1894,17 +1878,18 @@ void EditReplaceDocument(HANDLE pdoc) {
 //
 LRESULT MsgCreate(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	UNREFERENCED_PARAMETER(wParam);
-
-	HINSTANCE hInstance = ((LPCREATESTRUCT)lParam)->hInstance;
+	hwndMain = hwnd;
 	g_uCurrentDPI = GetWindowDPI(hwnd);
-	Style_DetectBaseFontSize(hwnd);
+	hmenuMain = GetMenu(hwnd);
+	hCurrentMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+	Style_DetectBaseFontSize(hCurrentMonitor);
 
 	// Setup edit control
 	// create edit control and frame with zero size to avoid
 	// a white/black window fades out on startup when using Direct2D.
-	hwndEdit = EditCreate(hwnd);
-	efrData.hwnd = hwndEdit;
+	EditCreate(hwnd);
 
+	HINSTANCE hInstance = ((LPCREATESTRUCT)lParam)->hInstance;
 	hwndEditFrame = CreateWindowEx(
 						WS_EX_CLIENTEDGE,
 						WC_LISTVIEW,
@@ -1947,26 +1932,16 @@ LRESULT MsgCreate(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
 	SetDlgItemInt(hwnd, IDC_REUSELOCK, GetTickCount(), FALSE);
 
-	// Menu
-	//SetMenuDefaultItem(GetSubMenu(GetMenu(hwnd), 0), 0);
-
 	// Drag & Drop
 	DragAcceptFiles(hwnd, TRUE);
 
 	// File MRU
 	pFileMRU = MRU_Create(MRU_KEY_RECENT_FILES, MRUFlags_FilePath, MRU_MAX_RECENT_FILES);
 	MRU_Load(pFileMRU);
-
 	mruFind = MRU_Create(MRU_KEY_RECENT_FIND, MRUFlags_QuoteValue, MRU_MAX_RECENT_FIND);
 	MRU_Load(mruFind);
-
 	mruReplace = MRU_Create(MRU_KEY_RECENT_REPLACE, MRUFlags_QuoteValue, MRU_MAX_RECENT_REPLACE);
 	MRU_Load(mruReplace);
-
-	if (bInFullScreenMode) {
-		bInFullScreenMode = false;
-		PostWMCommand(hwnd, IDM_VIEW_TOGGLE_FULLSCREEN);
-	}
 	return 0;
 }
 
@@ -1996,7 +1971,7 @@ void CreateBars(HWND hwnd, HINSTANCE hInstance) {
 		hbmp = (HBITMAP)LoadImage(hInstance, MAKEINTRESOURCE(IDR_MAINWND), IMAGE_BITMAP, 0, 0, LR_CREATEDIBSECTION);
 	}
 	if (bAutoScaleToolbar) {
-		hbmp = ResizeToolbarImageForCurrentDPI(hbmp);
+		hbmp = ResizeImageForCurrentDPI(hbmp);
 	}
 	HBITMAP hbmpCopy = NULL;
 	if (!bExternalBitmap) {
@@ -2015,7 +1990,7 @@ void CreateBars(HWND hwnd, HINSTANCE hInstance) {
 		hbmp = LoadBitmapFile(tchToolbarBitmapHot);
 		if (hbmp != NULL) {
 			if (bAutoScaleToolbar) {
-				hbmp = ResizeToolbarImageForCurrentDPI(hbmp);
+				hbmp = ResizeImageForCurrentDPI(hbmp);
 			}
 			GetObject(hbmp, sizeof(BITMAP), &bmp);
 			himl = ImageList_Create(bmp.bmHeight, bmp.bmHeight, ILC_COLOR32 | ILC_MASK, 0, 0);
@@ -2030,7 +2005,7 @@ void CreateBars(HWND hwnd, HINSTANCE hInstance) {
 		hbmp = LoadBitmapFile(tchToolbarBitmapDisabled);
 		if (hbmp != NULL) {
 			if (bAutoScaleToolbar) {
-				hbmp = ResizeToolbarImageForCurrentDPI(hbmp);
+				hbmp = ResizeImageForCurrentDPI(hbmp);
 			}
 			GetObject(hbmp, sizeof(BITMAP), &bmp);
 			himl = ImageList_Create(bmp.bmHeight, bmp.bmHeight, ILC_COLOR32 | ILC_MASK, 0, 0);
@@ -2165,7 +2140,7 @@ void MsgDPIChanged(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		SetWindowPos(hwndReBar, NULL, 0, 0, cx, cyReBar, SWP_NOZORDER);
 	}
 
-	Style_DetectBaseFontSize(hwnd);
+	Style_DetectBaseFontSize(hCurrentMonitor);
 	Style_OnDPIChanged(pLexCurrent);
 	SendMessage(hwndEdit, WM_DPICHANGED, wParam, lParam);
 	UpdateLineNumberWidth();
@@ -2186,12 +2161,11 @@ void MsgThemeChanged(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	UNREFERENCED_PARAMETER(wParam);
 	UNREFERENCED_PARAMETER(lParam);
 
-	HINSTANCE hInstance = GetWindowInstance(hwnd);
-
 	// reinitialize edit frame
 	EditFrameOnThemeChanged();
 
 	// recreate toolbar and statusbar
+	HINSTANCE hInstance = GetWindowInstance(hwnd);
 	RecreateBars(hwnd, hInstance);
 
 	RECT rc;
@@ -2201,7 +2175,7 @@ void MsgThemeChanged(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	UpdateStatusbar();
 }
 
-static void OnStyleThemeChanged(int theme) {
+static inline void OnStyleThemeChanged(int theme) {
 	if (theme == np2StyleTheme) {
 		return;
 	}
@@ -2301,6 +2275,9 @@ void ValidateUILangauge(void) {
 	case LANG_CHINESE:
 		languageMenu = IsChineseTraditionalSubLang(subLang)? IDM_LANG_CHINESE_TRADITIONAL : IDM_LANG_CHINESE_SIMPLIFIED;
 		break;
+	case LANG_FRENCH:
+		languageMenu = IDM_LANG_FRENCH_FRANCE;
+		break;
 	case LANG_GERMAN:
 		languageMenu = IDM_LANG_GERMAN;
 		break;
@@ -2338,6 +2315,9 @@ void SetUILanguage(int menu) {
 		break;
 	case IDM_LANG_CHINESE_TRADITIONAL:
 		lang = MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_TRADITIONAL);
+		break;
+	case IDM_LANG_FRENCH_FRANCE:
+		lang = MAKELANGID(LANG_FRENCH, SUBLANG_FRENCH);
 		break;
 	case IDM_LANG_GERMAN:
 		lang = MAKELANGID(LANG_GERMAN, SUBLANG_GERMAN);
@@ -2540,6 +2520,12 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	EnableCmd(hmenu, IDM_EDIT_HEX2CHAR, i);
 	EnableCmd(hmenu, IDM_EDIT_SHOW_HEX, i);
 
+	EnableCmd(hmenu, IDM_EDIT_BASE64_ENCODE, i);
+	EnableCmd(hmenu, IDM_EDIT_BASE64_SAFE_ENCODE, i);
+	EnableCmd(hmenu, IDM_EDIT_BASE64_HTML_EMBEDDED_IMAGE, i);
+	EnableCmd(hmenu, IDM_EDIT_BASE64_DECODE, i);
+	EnableCmd(hmenu, IDM_EDIT_BASE64_DECODE_AS_HEX, i);
+
 	EnableCmd(hmenu, IDM_EDIT_NUM2HEX, i);
 	EnableCmd(hmenu, IDM_EDIT_NUM2DEC, i);
 	EnableCmd(hmenu, IDM_EDIT_NUM2BIN, i);
@@ -2625,6 +2611,9 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	EnableCmd(hmenu, IDM_EDIT_COMPLETEWORD, i);
 	CheckCmd(hmenu, IDM_VIEW_AUTOCOMPLETION_IGNORECASE, autoCompletionConfig.bIgnoreCase);
 	CheckCmd(hmenu, IDM_SET_LATEX_INPUT_METHOD, autoCompletionConfig.bLaTeXInputMethod);
+	CheckCmd(hmenu, IDM_SET_MULTIPLE_SELECTION, iSelectOption & SelectOption_EnableMultipleSelection);
+	CheckCmd(hmenu, IDM_SET_SELECTIONASFINDTEXT, iSelectOption & SelectOption_CopySelectionAsFindText);
+	CheckCmd(hmenu, IDM_SET_PASTEBUFFERASFINDTEXT, iSelectOption & SelectOption_CopyPasteBufferAsFindText);
 	i = IDM_LINE_SELECTION_MODE_NONE + iLineSelectionMode;
 	CheckMenuRadioItem(hmenu, IDM_LINE_SELECTION_MODE_NONE, IDM_LINE_SELECTION_MODE_NORMAL, i, MF_BYCOMMAND);
 
@@ -2644,6 +2633,7 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 #if NP2_ENABLE_SHOW_CALLTIPS
 	CheckCmd(hmenu, IDM_VIEW_SHOWCALLTIPS, bShowCallTips);
 #endif
+	CheckCmd(hmenu, IDM_VIEW_MENU, bShowMenu);
 	CheckCmd(hmenu, IDM_VIEW_TOOLBAR, bShowToolbar);
 	EnableCmd(hmenu, IDM_VIEW_CUSTOMIZE_TOOLBAR, bShowToolbar);
 	CheckCmd(hmenu, IDM_VIEW_AUTO_SCALE_TOOLBAR, bAutoScaleToolbar);
@@ -2653,7 +2643,6 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 #endif
 	CheckCmd(hmenu, IDM_VIEW_FULLSCREEN_ON_START, iFullScreenMode & FullScreenMode_OnStartup);
 	CheckCmd(hmenu, IDM_VIEW_FULLSCREEN_HIDE_TITLE, iFullScreenMode & FullScreenMode_HideCaption);
-	CheckCmd(hmenu, IDM_VIEW_FULLSCREEN_HIDE_MENU, iFullScreenMode & FullScreenMode_HideMenu);
 
 	CheckCmd(hmenu, IDM_VIEW_MATCHBRACES, bMatchBraces);
 	CheckCmd(hmenu, IDM_VIEW_HIGHLIGHTCURRENT_BLOCK, bHighlightCurrentBlock);
@@ -2990,7 +2979,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 				if (PathIsDirectory(tchSelItem)) {
 					WCHAR tchFile[MAX_PATH];
 
-					if (OpenFileDlg(hwnd, tchFile, COUNTOF(tchFile), tchSelItem)) {
+					if (OpenFileDlg(tchFile, COUNTOF(tchFile), tchSelItem)) {
 						FileLoad(FileLoadFlag_DontSave, tchFile);
 					}
 				} else {
@@ -3218,16 +3207,18 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 			if (flagPasteBoard) {
 				bLastCopyFromMe = true;
 			}
-			const Sci_Position iPos = SciCall_GetCurrentPos();
-			const Sci_Position iAnchor = SciCall_GetAnchor();
+			Sci_Position iPos = SciCall_GetCurrentPos();
+			Sci_Position iAnchor = SciCall_GetAnchor();
 			SciCall_BeginUndoAction();
 			SciCall_Cut(false);
 			SciCall_ReplaceSel(pClip);
+			const size_t len = strlen(pClip);
 			if (iPos > iAnchor) {
-				SciCall_SetSel(iAnchor, iAnchor + strlen(pClip));
+				iPos = iAnchor + len;
 			} else {
-				SciCall_SetSel(iPos + strlen(pClip), iPos);
+				iAnchor = iPos + len;
 			}
+			SciCall_SetSel(iAnchor, iPos);
 			SciCall_EndUndoAction();
 			LocalFree(pClip);
 		}
@@ -3350,9 +3341,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		break;
 
 	case IDM_EDIT_SELECTIONDUPLICATE:
-		SciCall_BeginUndoAction();
 		SciCall_SelectionDuplicate();
-		SciCall_EndUndoAction();
 		break;
 
 	case IDM_EDIT_PADWITHSPACES:
@@ -3760,6 +3749,21 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		EndWaitCursor();
 		break;
 
+	case IDM_EDIT_BASE64_ENCODE:
+	case IDM_EDIT_BASE64_SAFE_ENCODE:
+	case IDM_EDIT_BASE64_HTML_EMBEDDED_IMAGE:
+		BeginWaitCursor();
+		EditBase64Encode((Base64EncodingFlag)(LOWORD(wParam) - IDM_EDIT_BASE64_ENCODE));
+		EndWaitCursor();
+		break;
+
+	case IDM_EDIT_BASE64_DECODE:
+	case IDM_EDIT_BASE64_DECODE_AS_HEX:
+		BeginWaitCursor();
+		EditBase64Decode(LOWORD(wParam) == IDM_EDIT_BASE64_DECODE_AS_HEX);
+		EndWaitCursor();
+		break;
+
 	case IDM_EDIT_NUM2HEX:
 		BeginWaitCursor();
 		EditConvertNumRadix(16);
@@ -3950,20 +3954,11 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		break;
 
 	case IDM_EDIT_SELTODOCEND:
-	case IDM_EDIT_SELTODOCSTART: {
-		Sci_Position selStart;
-		Sci_Position selEnd;
-		if (LOWORD(wParam) == IDM_EDIT_SELTODOCEND) {
-			selStart = SciCall_GetSelectionStart();
-			selEnd = SciCall_GetLength();
-		} else {
-			selStart = 0;
-			selEnd = SciCall_GetSelectionEnd();
-		}
-		SciCall_SetSelectionStart(selStart);
-		SciCall_SetSelectionEnd(selEnd);
-	}
-	break;
+		SciCall_SetSelectionEnd(SciCall_GetLength());
+		break;
+	case IDM_EDIT_SELTODOCSTART:
+		SciCall_SetSelectionStart(0);
+		break;
 
 	case IDM_EDIT_COMPLETEWORD:
 		EditCompleteWord(AutoCompleteCondition_Normal, true);
@@ -4100,6 +4095,20 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	case IDM_SET_LATEX_INPUT_METHOD:
 		autoCompletionConfig.bLaTeXInputMethod = !autoCompletionConfig.bLaTeXInputMethod;
 		break;
+
+	case IDM_SET_MULTIPLE_SELECTION:
+	case IDM_SET_SELECTIONASFINDTEXT:
+	case IDM_SET_PASTEBUFFERASFINDTEXT: {
+		const int option = 1 << (LOWORD(wParam) - IDM_SET_MULTIPLE_SELECTION);
+		if (iSelectOption & option) {
+			iSelectOption &= ~option;
+		} else {
+			iSelectOption |= option;
+		}
+		if (option == SelectOption_EnableMultipleSelection) {
+			SciCall_SetMultipleSelection(iSelectOption & SelectOption_EnableMultipleSelection);
+		}
+	} break;
 
 	case IDM_LINE_SELECTION_MODE_NONE:
 	case IDM_LINE_SELECTION_MODE_VS:
@@ -4260,6 +4269,11 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		SciCall_SetZoom(100);
 		break;
 
+	case IDM_VIEW_MENU:
+		bShowMenu = !bShowMenu;
+		SetMenu(hwnd, bShowMenu ? hmenuMain : NULL);
+		break;
+
 	case IDM_VIEW_TOOLBAR:
 		bShowToolbar = !bShowToolbar;
 		if (bShowToolbar) {
@@ -4277,9 +4291,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
 	case IDM_VIEW_AUTO_SCALE_TOOLBAR:
 		bAutoScaleToolbar = !bAutoScaleToolbar;
-		if (g_uCurrentDPI > USER_DEFAULT_SCREEN_DPI) {
-			MsgThemeChanged(hwnd, 0, 0);
-		}
+		MsgThemeChanged(hwnd, 0, 0);
 		break;
 
 	case IDM_VIEW_STATUSBAR:
@@ -4506,16 +4518,17 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		break;
 
 	case IDM_VIEW_FULLSCREEN_ON_START:
-		ToggleFullScreenModeConfig(FullScreenMode_OnStartup);
-		break;
-
-	case IDM_VIEW_FULLSCREEN_HIDE_TITLE:
-		ToggleFullScreenModeConfig(FullScreenMode_HideCaption);
-		break;
-
-	case IDM_VIEW_FULLSCREEN_HIDE_MENU:
-		ToggleFullScreenModeConfig(FullScreenMode_HideMenu);
-		break;
+	case IDM_VIEW_FULLSCREEN_HIDE_TITLE: {
+		const int config = 1 << (LOWORD(wParam) - IDM_VIEW_FULLSCREEN_ON_START);
+		if (iFullScreenMode & config) {
+			iFullScreenMode &= ~config;
+		} else {
+			iFullScreenMode |= config;
+		}
+		if (config != FullScreenMode_OnStartup && bInFullScreenMode) {
+			ToggleFullScreenMode();
+		}
+	} break;
 
 	case CMD_ESCAPE:
 		if (SciCall_AutoCActive()) {
@@ -4670,6 +4683,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	case IDM_LANG_ITALIAN:
 	case IDM_LANG_KOREAN:
 	case IDM_LANG_PORTUGUESE_BRAZIL:
+	case IDM_LANG_FRENCH_FRANCE:
 		SetUILanguage(LOWORD(wParam));
 		break;
 #endif
@@ -4677,7 +4691,12 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	// Text File
 	case IDM_LEXER_TEXTFILE:
 	case IDM_LEXER_2NDTEXTFILE:
-	case IDM_LEXER_APACHE:
+	case IDM_LEXER_CSV:
+	// CSS Style Sheet
+	case IDM_LEXER_CSS:
+	case IDM_LEXER_SCSS:
+	case IDM_LEXER_LESS:
+	case IDM_LEXER_HSS:
 	// Web Source Code
 	case IDM_LEXER_WEB:
 	case IDM_LEXER_PHP:
@@ -4686,6 +4705,18 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	case IDM_LEXER_ASPX_VB:
 	case IDM_LEXER_ASP_VBS:
 	case IDM_LEXER_ASP_JS:
+	// Markdown
+	case IDM_LEXER_MARKDOWN_GITHUB:
+	case IDM_LEXER_MARKDOWN_GITLAB:
+	case IDM_LEXER_MARKDOWN_PANDOC:
+	// Math
+	case IDM_LEXER_MATLAB:
+	case IDM_LEXER_OCTAVE:
+	case IDM_LEXER_SCILAB:
+	// Shell Script
+	case IDM_LEXER_BASH:
+	case IDM_LEXER_CSHELL:
+	case IDM_LEXER_M4:
 	// XML Document
 	case IDM_LEXER_XML:
 	case IDM_LEXER_XSD:
@@ -4712,23 +4743,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	case IDM_LEXER_ANDROID_MANIFEST:
 	case IDM_LEXER_ANDROID_LAYOUT:
 	case IDM_LEXER_SVG:
-	// Shell Script
-	case IDM_LEXER_BASH:
-	case IDM_LEXER_CSHELL:
-	case IDM_LEXER_M4:
-	// Markdown
-	case IDM_LEXER_MARKDOWN_GITHUB:
-	case IDM_LEXER_MARKDOWN_GITLAB:
-	case IDM_LEXER_MARKDOWN_PANDOC:
-	// Math
-	case IDM_LEXER_MATLAB:
-	case IDM_LEXER_OCTAVE:
-	case IDM_LEXER_SCILAB:
-	// CSS Style Sheet
-	case IDM_LEXER_CSS:
-	case IDM_LEXER_SCSS:
-	case IDM_LEXER_LESS:
-	case IDM_LEXER_HSS:
+	case IDM_LEXER_APACHE:
 		Style_SetLexerByLangIndex(LOWORD(wParam));
 		break;
 
@@ -5283,7 +5298,7 @@ LRESULT MsgNotify(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 			break;
 
 		case SCN_HOTSPOTCLICK:
-			if (scn->modifiers & SCMOD_CTRL) {
+			if ((scn->modifiers & SCMOD_CTRL) && (iSelectOption & SelectOption_EnableMultipleSelection)) {
 				// disable multiple selection to avoid two carets after Ctrl + click
 				SciCall_SetMultipleSelection(false);
 				SciCall_SetSel(scn->position, scn->position);
@@ -5390,7 +5405,7 @@ LRESULT MsgNotify(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 			}
 
 			case StatusItem_Lexer:
-				SendWMCommand(hwnd, IDM_VIEW_SCHEME);
+				SendWMCommand(hwnd, (pLexCurrent->iLexer == SCLEX_CSV) ? IDM_LEXER_CSV : IDM_VIEW_SCHEME);
 				return TRUE;
 
 			case StatusItem_OvrMode:
@@ -5427,8 +5442,7 @@ LRESULT MsgNotify(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	return 0;
 }
 
-static void GetWindowPositionSectionName(WCHAR sectionName[96]) {
-	HMONITOR hMonitor = MonitorFromWindow(hwndMain, MONITOR_DEFAULTTONEAREST);
+static void GetWindowPositionSectionName(HMONITOR hMonitor, WCHAR sectionName[96]) {
 	MONITORINFO mi;
 	mi.cbSize = sizeof(mi);
 	GetMonitorInfo(hMonitor, &mi);
@@ -5567,6 +5581,7 @@ void LoadSettings(void) {
 	}
 	EditCompleteUpdateConfig();
 
+	iSelectOption = IniSectionGetInt(pIniSection, L"SelectOption", SelectOption_Default);
 	iLineSelectionMode = IniSectionGetInt(pIniSection, L"LineSelection", LineSelectionMode_VisualStudio);
 #if NP2_ENABLE_SHOW_CALLTIPS
 	bShowCallTips = IniSectionGetBool(pIniSection, L"ShowCallTips", true);
@@ -5619,7 +5634,7 @@ void LoadSettings(void) {
 	iDefaultEOLMode = clamp_i(iValue, SC_EOL_CRLF, SC_EOL_LF);
 
 	bWarnLineEndings = IniSectionGetBool(pIniSection, L"WarnLineEndings", true);
-	bFixLineEndings = IniSectionGetBool(pIniSection, L"FixLineEndings", true);
+	bFixLineEndings = IniSectionGetBool(pIniSection, L"FixLineEndings", false);
 	bAutoStripBlanks = IniSectionGetBool(pIniSection, L"FixTrailingBlanks", false);
 
 	iValue = IniSectionGetInt(pIniSection, L"PrintHeader", PrintHeaderOption_FilenameAndDate);
@@ -5694,6 +5709,7 @@ void LoadSettings(void) {
 		lstrcpyn(tchToolbarButtons, strValue, COUNTOF(tchToolbarButtons));
 	}
 
+	bShowMenu = IniSectionGetBool(pIniSection, L"ShowMenu", true);
 	bShowToolbar = IniSectionGetBool(pIniSection, L"ShowToolbar", true);
 	bAutoScaleToolbar = IniSectionGetBool(pIniSection, L"AutoScaleToolbar", true);
 	bShowStatusbar = IniSectionGetBool(pIniSection, L"ShowStatusbar", true);
@@ -5724,7 +5740,8 @@ void LoadSettings(void) {
 	// window position section
 	{
 		WCHAR sectionName[96];
-		GetWindowPositionSectionName(sectionName);
+		HMONITOR hMonitor = MonitorFromWindow(NULL, MONITOR_DEFAULTTONEAREST);
+		GetWindowPositionSectionName(hMonitor, sectionName);
 		LoadIniSection(sectionName, pIniSectionBuf, cchIniSection);
 		IniSectionParse(pIniSection, pIniSectionBuf);
 
@@ -5895,6 +5912,7 @@ void SaveSettings(bool bSaveSettingsNow) {
 	IniSectionSetIntEx(pIniSection, L"AutoInsertMask", autoCompletionConfig.fAutoInsertMask, AutoInsertDefaultMask);
 	IniSectionSetIntEx(pIniSection, L"AsmLineCommentChar", autoCompletionConfig.iAsmLineCommentChar, AsmLineCommentCharSemicolon);
 	IniSectionSetStringEx(pIniSection, L"AutoCFillUpPunctuation", autoCompletionConfig.wszAutoCompleteFillUp, AUTO_COMPLETION_FILLUP_DEFAULT);
+	IniSectionSetIntEx(pIniSection, L"SelectOption", iSelectOption, SelectOption_Default);
 	IniSectionSetIntEx(pIniSection, L"LineSelection", iLineSelectionMode, LineSelectionMode_VisualStudio);
 #if NP2_ENABLE_SHOW_CALLTIPS
 	IniSectionSetBoolEx(pIniSection, L"ShowCallTips", bShowCallTips, true);
@@ -5932,7 +5950,7 @@ void SaveSettings(bool bSaveSettingsNow) {
 
 	IniSectionSetIntEx(pIniSection, L"DefaultEOLMode", iDefaultEOLMode, 0);
 	IniSectionSetBoolEx(pIniSection, L"WarnLineEndings", bWarnLineEndings, true);
-	IniSectionSetBoolEx(pIniSection, L"FixLineEndings", bFixLineEndings, true);
+	IniSectionSetBoolEx(pIniSection, L"FixLineEndings", bFixLineEndings, false);
 	IniSectionSetBoolEx(pIniSection, L"FixTrailingBlanks", bAutoStripBlanks, false);
 
 	IniSectionSetIntEx(pIniSection, L"PrintHeader", (int)iPrintHeader, PrintHeaderOption_FilenameAndDate);
@@ -5970,6 +5988,7 @@ void SaveSettings(bool bSaveSettingsNow) {
 	IniSectionSetBoolEx(pIniSection, L"UseInlineIME", bUseInlineIME, false);
 	Toolbar_GetButtons(hwndToolbar, TOOLBAR_COMMAND_BASE, tchToolbarButtons, COUNTOF(tchToolbarButtons));
 	IniSectionSetStringEx(pIniSection, L"ToolbarButtons", tchToolbarButtons, DefaultToolbarButtons);
+	IniSectionSetBoolEx(pIniSection, L"ShowMenu", bShowMenu, true);
 	IniSectionSetBoolEx(pIniSection, L"ShowToolbar", bShowToolbar, true);
 	IniSectionSetBoolEx(pIniSection, L"AutoScaleToolbar", bAutoScaleToolbar, true);
 	IniSectionSetBoolEx(pIniSection, L"ShowStatusbar", bShowStatusbar, true);
@@ -5990,10 +6009,10 @@ void SaveWindowPosition(WCHAR *pIniSectionBuf) {
 	IniSectionOnSave *const pIniSection = &section;
 
 	WCHAR sectionName[96];
-	GetWindowPositionSectionName(sectionName);
+	GetWindowPositionSectionName(hCurrentMonitor, sectionName);
 
 	// query window dimensions when window is not minimized
-	if (!IsIconic(hwndMain)) {
+	if (!bInFullScreenMode && !IsIconic(hwndMain)) {
 		WINDOWPLACEMENT wndpl;
 		wndpl.length = sizeof(WINDOWPLACEMENT);
 		GetWindowPlacement(hwndMain, &wndpl);
@@ -7282,42 +7301,28 @@ void UpdateLineNumberWidth(void) {
 void ToggleFullScreenMode(void) {
 	static bool bSaved;
 	static WINDOWPLACEMENT wndpl;
-	static RECT rcWorkArea;
 	static DWORD mainStyle;
 
-	HWND wTaskBar = FindWindow(L"Shell_TrayWnd", L"");
-	HWND wStartButton = FindWindow(L"Button", NULL);
 	HWND hwnd = hwndMain;
 	if (bInFullScreenMode) {
 		if (!bSaved) {
 			bSaved = true;
-			SystemParametersInfo(SPI_GETWORKAREA, 0, &rcWorkArea, 0);
 			wndpl.length = sizeof(WINDOWPLACEMENT);
 			GetWindowPlacement(hwnd, &wndpl);
 			mainStyle = GetWindowStyle(hwnd);
 		}
 
-		HMONITOR hMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
 		MONITORINFO mi;
 		mi.cbSize = sizeof(mi);
-		GetMonitorInfo(hMonitor, &mi);
+		GetMonitorInfo(hCurrentMonitor, &mi);
 
-		int cx = 0;
-		int cy = 0;
-		int style = mainStyle;
 		const UINT dpi = g_uCurrentDPI;
-		int top = SystemMetricsForDpi(SM_CYCAPTION, dpi);
-		if (iFullScreenMode & FullScreenMode_HideMenu) {
-			style &= ~WS_OVERLAPPEDWINDOW;
-		} else {
-			style &= ~WS_THICKFRAME;
-			cx = SystemMetricsForDpi(SM_CXSIZEFRAME, dpi);
-			cy = SystemMetricsForDpi(SM_CYSIZEFRAME, dpi);
-			if (iFullScreenMode & FullScreenMode_HideCaption) {
-				top += cy;
-			} else {
-				top = cy;
-			}
+		const int padding = SystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+		const int cx = SystemMetricsForDpi(SM_CXSIZEFRAME, dpi) + padding;
+		const int cy = SystemMetricsForDpi(SM_CYSIZEFRAME, dpi) + padding;
+		int top = cy;
+		if (iFullScreenMode & FullScreenMode_HideCaption) {
+			top += SystemMetricsForDpi(SM_CYCAPTION, dpi);
 		}
 
 		const int x = mi.rcMonitor.left - cx;
@@ -7325,25 +7330,15 @@ void ToggleFullScreenMode(void) {
 		const int w = mi.rcMonitor.right - x + cx;
 		const int h = mi.rcMonitor.bottom - y + cy;
 
-		SystemParametersInfo(SPI_SETWORKAREA, 0, NULL, SPIF_SENDCHANGE);
-		if (wStartButton) {
-			ShowWindow(wStartButton, SW_HIDE);
-		}
-		ShowWindow(wTaskBar, SW_HIDE);
-		SetWindowStyle(hwnd, style);
-		SetWindowPos(hwnd, (IsTopMost() ? HWND_TOPMOST : HWND_TOP), x, y, w , h, 0);
+		SetWindowStyle(hwnd, mainStyle & ~WS_THICKFRAME);
+		SetWindowPos(hwnd, (IsTopMost() ? HWND_TOPMOST : HWND_TOP), x, y, w, h, 0);
 	} else {
 		bSaved = false;
-		ShowWindow(wTaskBar, SW_SHOW);
-		if (wStartButton) {
-			ShowWindow(wStartButton, SW_SHOW);
-		}
 		SetWindowStyle(hwnd, mainStyle);
 		if (!IsTopMost()) {
 			SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 		}
 		if (wndpl.length) {
-			SystemParametersInfo(SPI_SETWORKAREA, 0, &rcWorkArea, 0);
 			if (wndpl.showCmd == SW_SHOWMAXIMIZED) {
 				ShowWindow(hwnd, SW_RESTORE);
 				ShowWindow(hwnd, SW_SHOWMAXIMIZED);
@@ -7465,7 +7460,7 @@ bool FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile) {
 	}
 
 	if (!fSuccess) {
-		if (!OpenFileDlg(hwndMain, tch, COUNTOF(tch), NULL)) {
+		if (!OpenFileDlg(tch, COUNTOF(tch), NULL)) {
 			return false;
 		}
 	}
@@ -7581,9 +7576,7 @@ bool FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile) {
 		}
 		InstallFileWatching(false);
 
-		// check for binary file (file with unknown encoding: ANSI)
-		const bool binary = (iCurrentEncoding == CPI_DEFAULT) && Style_MaybeBinaryFile(szCurFile);
-		if (binary || pLexCurrent->iLexer == SCLEX_DIFF) {
+		if (status.bBinaryFile || pLexCurrent->iLexer == SCLEX_DIFF) {
 			// ignore auto "detected" Tab settings for binary file and diff file.
 			if (fvCurFile.mask & FV_MaskHasFileTabSettings) {
 				fvCurFile.mask &= ~FV_MaskHasFileTabSettings;
@@ -7592,7 +7585,7 @@ bool FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile) {
 			}
 		}
 		// open file in read only mode
-		if (binary || flagReadOnlyMode != ReadOnlyMode_None || bReadOnlyFile) {
+		if (status.bBinaryFile || flagReadOnlyMode != ReadOnlyMode_None || bReadOnlyFile) {
 			bReadOnlyMode = true;
 			flagReadOnlyMode &= ReadOnlyMode_AllFile;
 			SciCall_SetReadOnly(true);
@@ -7634,7 +7627,7 @@ bool FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile) {
 			MsgBoxWarn(MB_OK, IDS_ERR_UNICODE);
 		}
 		// notify binary file opened in read only mode
-		if (binary) {
+		if (status.bBinaryFile) {
 			ShowNotificationMessage(SC_NOTIFICATIONPOSITION_BOTTOMRIGHT, IDS_BINARY_FILE_OPENED);
 			return fSuccess;
 		}
@@ -7745,7 +7738,7 @@ bool FileSave(FileSaveFlag saveFlag) {
 			lstrcpy(tchFile, szCurFile);
 		}
 
-		if (SaveFileDlg(hwndMain, Untitled, tchFile, COUNTOF(tchFile), tchInitialDir)) {
+		if (SaveFileDlg(Untitled, tchFile, COUNTOF(tchFile), tchInitialDir)) {
 			fSuccess = FileIO(false, tchFile, saveFlag & (FileSaveFlag_SaveCopy | FileSaveFlag_EndSession), &status);
 			if (fSuccess) {
 				if (!(saveFlag & FileSaveFlag_SaveCopy)) {
@@ -7877,7 +7870,7 @@ void EditApplyDefaultEncoding(PEDITLEXER pLex, BOOL bLexerChanged) {
 // OpenFileDlg()
 //
 //
-BOOL OpenFileDlg(HWND hwnd, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir) {
+BOOL OpenFileDlg(LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir) {
 	WCHAR tchInitialDir[MAX_PATH] = L"";
 	if (!lpstrInitialDir) {
 		if (StrNotEmpty(szCurFile)) {
@@ -7905,7 +7898,7 @@ BOOL OpenFileDlg(HWND hwnd, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialD
 	OPENFILENAME ofn;
 	memset(&ofn, 0, sizeof(OPENFILENAME));
 	ofn.lStructSize = sizeof(OPENFILENAME);
-	ofn.hwndOwner = hwnd;
+	ofn.hwndOwner = hwndMain;
 	ofn.lpstrFilter = szFilter;
 	ofn.lpstrFile = szFile;
 	ofn.lpstrInitialDir = (lpstrInitialDir) ? lpstrInitialDir : tchInitialDir;
@@ -7935,7 +7928,7 @@ BOOL OpenFileDlg(HWND hwnd, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialD
 // SaveFileDlg()
 //
 //
-BOOL SaveFileDlg(HWND hwnd, bool Untitled, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir) {
+BOOL SaveFileDlg(bool Untitled, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir) {
 	WCHAR tchInitialDir[MAX_PATH] = L"";
 	if (StrNotEmpty(lpstrInitialDir)) {
 		lstrcpy(tchInitialDir, lpstrInitialDir);
@@ -7963,7 +7956,7 @@ BOOL SaveFileDlg(HWND hwnd, bool Untitled, LPWSTR lpstrFile, int cchFile, LPCWST
 	OPENFILENAME ofn;
 	memset(&ofn, 0, sizeof(OPENFILENAME));
 	ofn.lStructSize = sizeof(OPENFILENAME);
-	ofn.hwndOwner = hwnd;
+	ofn.hwndOwner = hwndMain;
 	ofn.lpstrFilter = szFilter;
 	ofn.lpstrFile = szNewFile;
 	ofn.lpstrInitialDir = tchInitialDir;
@@ -8476,10 +8469,9 @@ void SnapToDefaultPos(HWND hwnd) {
 	RECT rcOld;
 	GetWindowRect(hwnd, &rcOld);
 
-	HMONITOR hMonitor = MonitorFromRect(&rcOld, MONITOR_DEFAULTTONEAREST);
 	MONITORINFO mi;
 	mi.cbSize = sizeof(mi);
-	GetMonitorInfo(hMonitor, &mi);
+	GetMonitorInfo(hCurrentMonitor, &mi);
 
 	const int y = mi.rcWork.top + 16;
 	const int cy = mi.rcWork.bottom - mi.rcWork.top - 32;
@@ -8517,7 +8509,6 @@ void SnapToDefaultPos(HWND hwnd) {
 //
 void ShowNotifyIcon(HWND hwnd, bool bAdd) {
 	static HICON hIcon;
-
 	if (!hIcon) {
 		hIcon = (HICON)LoadImage(g_hInstance, MAKEINTRESOURCE(IDR_MAINWND), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
 	}
@@ -8531,12 +8522,7 @@ void ShowNotifyIcon(HWND hwnd, bool bAdd) {
 	nid.uCallbackMessage = APPM_TRAYMESSAGE;
 	nid.hIcon = hIcon;
 	lstrcpy(nid.szTip, WC_NOTEPAD2);
-
-	if (bAdd) {
-		Shell_NotifyIcon(NIM_ADD, &nid);
-	} else {
-		Shell_NotifyIcon(NIM_DELETE, &nid);
-	}
+	Shell_NotifyIcon(bAdd ? NIM_ADD : NIM_DELETE, &nid);
 }
 
 //=============================================================================
@@ -8568,7 +8554,6 @@ void SetNotifyIconTitle(HWND hwnd) {
 		StrCpyExW(nid.szTip, L"* ");
 	}
 	StrCatBuff(nid.szTip, tchTitle, COUNTOF(nid.szTip));
-
 	Shell_NotifyIcon(NIM_MODIFY, &nid);
 }
 
@@ -8768,6 +8753,7 @@ void AutoSave_Stop(BOOL keepBackup) {
 		KillTimer(hwndMain, ID_AUTOSAVETIMER);
 	}
 	if (autoSaveCount) {
+		keepBackup |= iAutoSaveOption & AutoSaveOption_ManuallyDelete;
 		for (int i = 0; i < autoSaveCount; i++) {
 			LPWSTR path = autoSavePathList[i];
 			if (path) {
@@ -8828,10 +8814,16 @@ void AutoSave_DoWork(FileSaveFlag saveFlag) {
 
 	WCHAR tchPath[MAX_PATH + 40];
 	const bool Untitled = StrIsEmpty(szCurFile);
+	LPCWSTR extension = L"bak";
 	if (Untitled) {
 		lstrcpy(tchPath, L"Untitled");
 	} else {
 		lstrcpy(tchPath, szCurFile);
+		LPWSTR lpszExt = StrChr(tchPath, L'.'); // address for first file extension
+		if (lpszExt) {
+			lpszExt[0] = L'\0';
+			extension = lpszExt + 1;
+		}
 	}
 
 	// add timestamp + pid unique suffix
@@ -8841,10 +8833,10 @@ void AutoSave_DoWork(FileSaveFlag saveFlag) {
 	SYSTEMTIME lt;
 	GetLocalTime(&lt);
 	//printf("%u AutoSave at %02d:%02d:%02d.%03d\n", pid, lt.wHour, lt.wMinute, lt.wSecond, lt.wMilliseconds);
-	wsprintf(suffix, L" %04d%02d%02d %02d%02d%02d %03d%u.bak",
+	wsprintf(suffix, L" %04d%02d%02d %02d%02d%02d %03d%u.%s",
 		lt.wYear, lt.wMonth, lt.wDay,
 		lt.wHour, lt.wMinute, lt.wSecond,
-		lt.wMilliseconds, pid);
+		lt.wMilliseconds, pid, extension);
 	lstrcat(tchPath, suffix);
 
 	// TODO: check free space with GetDiskFreeSpaceExW()
@@ -8913,11 +8905,17 @@ void AutoSave_DoWork(FileSaveFlag saveFlag) {
 	NP2HeapFree(lpData);
 
 	if (bWriteSuccess) {
+		if (saveFlag & FileSaveFlag_SaveAlways) {
+			dwLastSavedDocReversion = dwCurrentDocReversion;
+			return; // treat "Save Backup" as "Save As" with generated file name
+		}
 		if (!(saveFlag & FileSaveFlag_SaveCopy) && autoSaveCount == MaxAutoSaveCount) {
 			// delete oldest backup
 			LPWSTR old = autoSavePathList[0];
 			if (old) {
-				DeleteFile(old);
+				if (!(iAutoSaveOption & AutoSaveOption_ManuallyDelete)) {
+					DeleteFile(old);
+				}
 				LocalFree(old);
 			}
 			memmove(autoSavePathList, autoSavePathList + 1, (AllAutoSaveCount - 1) * sizeof(LPWSTR));

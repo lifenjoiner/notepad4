@@ -224,7 +224,6 @@ void UpdateBookmarkMarginWidth(void);
 enum {
 	FullScreenMode_OnStartup = 1,
 	FullScreenMode_HideCaption = 2,
-	FullScreenMode_HideMenu = 4,
 
 	FullScreenMode_Default = FullScreenMode_HideCaption,
 };
@@ -237,6 +236,7 @@ typedef struct EditFileIOStatus {
 
 	bool bFileTooBig;	// load output
 	bool bUnicodeErr;	// load output
+	bool bBinaryFile;	// load output
 	bool bCancelDataLoss;// save output
 
 	// inconsistent line endings
@@ -265,14 +265,15 @@ typedef enum FileSaveFlag {
 bool FileIO(bool fLoad, LPWSTR pszFile, int flag, EditFileIOStatus *status);
 bool FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile);
 bool FileSave(FileSaveFlag saveFlag);
-BOOL OpenFileDlg(HWND hwnd, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir);
-BOOL SaveFileDlg(HWND hwnd, bool Untitled, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir);
+BOOL OpenFileDlg(LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir);
+BOOL SaveFileDlg(bool Untitled, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir);
 
 enum {
 	AutoSaveOption_None = 0,
 	AutoSaveOption_Periodic = 1,
 	AutoSaveOption_Suspend = 2,
 	AutoSaveOption_Shutdown = 4,
+	AutoSaveOption_ManuallyDelete = 8,
 	AutoSaveOption_Default = AutoSaveOption_Suspend | AutoSaveOption_Shutdown,
 	AutoSaveDefaultPeriod = 5000,
 };

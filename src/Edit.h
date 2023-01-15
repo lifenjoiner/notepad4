@@ -104,7 +104,7 @@ enum {
 };
 
 void	Edit_ReleaseResources(void);
-HWND	EditCreate(HWND hwndParent);
+void	EditCreate(HWND hwndParent);
 void	EditSetNewText(LPCSTR lpstrText, DWORD cbText, Sci_Line lineCount);
 
 static inline void EditSetEmptyText(void) {
@@ -145,6 +145,14 @@ void	EditUnescapeXHTMLChars(HWND hwnd);
 void	EditChar2Hex(void);
 void	EditHex2Char(void);
 void	EditShowHex(void);
+
+typedef enum Base64EncodingFlag {
+	Base64EncodingFlag_Default,
+	Base64EncodingFlag_UrlSafe,
+	Base64EncodingFlag_HtmlEmbeddedImage,
+} Base64EncodingFlag;
+void	EditBase64Encode(Base64EncodingFlag encodingFlag);
+void	EditBase64Decode(bool decodeAsHex);
 void	EditConvertNumRadix(int radix);
 void	EditModifyNumber(bool bIncrease);
 
@@ -206,7 +214,7 @@ typedef enum OpenSelectionType {
 } OpenSelectionType;
 void EditOpenSelection(OpenSelectionType type);
 
-// in Print.cpp
+// in Bridge.cpp
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -373,9 +381,10 @@ void	EditShowCallTips(Sci_Position position);
 
 enum {
 	EncodingFlag_None = 0,
-	EncodingFlag_Invalid = 1,
+	EncodingFlag_Binary = 1,
 	EncodingFlag_UTF7 = 2,
 	EncodingFlag_Reversed = 4,
+	EncodingFlag_Invalid = 8,
 };
 
 typedef struct NP2ENCODING {
@@ -574,6 +583,14 @@ void FoldToggleDefault(FOLD_ACTION action);
 void FoldClickAt(Sci_Position pos, int mode);
 void FoldAltArrow(int key, int mode);
 void EditGotoBlock(int menu);
+
+enum SelectOption {
+	SelectOption_None,
+	SelectOption_EnableMultipleSelection = 1,
+	SelectOption_CopySelectionAsFindText = 2,
+	SelectOption_CopyPasteBufferAsFindText = 4,
+	SelectOption_Default = 7,
+};
 
 enum LineSelectionMode {
 	LineSelectionMode_None,
