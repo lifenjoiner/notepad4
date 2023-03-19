@@ -409,6 +409,7 @@ void WordList_AddListEx(struct WordList *pWList, LPCSTR pList) {
 			break;
 		}
 		if (ch == '^') {
+			// ^ is used for prefix match in lexer (see scintilla/lexlib/WordList.cxx)
 			word[len++] = ' ';
 		} else if (!ok && ch != '.') {
 			len = 0;
@@ -866,7 +867,7 @@ static void AutoC_AddDocWord(struct WordList *pWList, bool bIgnoreCase, char pre
 				char wordBuf[NP2_AUTOC_WORD_BUFFER_SIZE];
 				char *pWord = wordBuf + NP2DefaultPointerAlignment;
 				bool bChanged = false;
-				struct Sci_TextRangeFull tr = { { iPosFind, min_pos(iPosFind + NP2_AUTOC_MAX_WORD_LENGTH, wordEnd) }, pWord };
+				const struct Sci_TextRangeFull tr = { { iPosFind, min_pos(iPosFind + NP2_AUTOC_MAX_WORD_LENGTH, wordEnd) }, pWord };
 				int wordLength = (int)SciCall_GetTextRangeFull(&tr);
 
 				const Sci_Position before = SciCall_PositionBefore(iPosFind);
@@ -1240,6 +1241,9 @@ static AddWordResult AutoC_AddSpecWord(struct WordList *pWList, int iCurrentStyl
 		if (ch == '@' || (ch == '<' && rid == NP2LEX_TYPESCRIPT)) {
 			if (iCurrentStyle >= SCE_JS_COMMENTLINE && iCurrentStyle <= SCE_JS_TASKMARKER) {
 				WordList_AddList(pWList, pLex->pKeyWords->pszKeyWords[JavaScriptKeywordIndex_Jsdoc]);
+				if (rid != NP2LEX_JAVASCRIPT) {
+					WordList_AddList(pWList, lexJavaScript.pKeyWords->pszKeyWords[JavaScriptKeywordIndex_Jsdoc]);
+				}
 				return AddWordResult_Finish;
 			}
 #if 0
@@ -1520,7 +1524,7 @@ static bool EditCompleteWordCore(int iCondition, bool autoInsert) {
 		pRoot = (char *)NP2HeapAlloc(iCurrentPos - iStartWordPos + 1);
 	}
 
-	struct Sci_TextRangeFull tr = { { iStartWordPos, iCurrentPos }, pRoot };
+	const struct Sci_TextRangeFull tr = { { iStartWordPos, iCurrentPos }, pRoot };
 	SciCall_GetTextRangeFull(&tr);
 	iRootLen = (int)strlen(pRoot);
 
@@ -1881,7 +1885,7 @@ void EditAutoCloseXMLTag(void) {
 	}
 
 	if (shouldAutoClose) {
-		struct Sci_TextRangeFull tr = { { iStartPos, iCurPos }, tchBuf };
+		const struct Sci_TextRangeFull tr = { { iStartPos, iCurPos }, tchBuf };
 		SciCall_GetTextRangeFull(&tr);
 
 		if (tchBuf[iSize - 2] != '/') {
@@ -2102,8 +2106,6 @@ static const char *EditKeywordIndent(LPCEDITLEXER pLex, const char *head, AutoIn
 	}
 	return endPart;
 }
-
-extern FILEVARS fvCurFile;
 
 void EditAutoIndent(void) {
 	const Sci_Position iCurPos = SciCall_GetCurrentPos();

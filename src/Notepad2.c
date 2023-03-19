@@ -27,7 +27,6 @@
 #include <commdlg.h>
 #include <uxtheme.h>
 #include <stdio.h>
-#include <time.h>
 #include <inttypes.h>
 #include "SciCall.h"
 #include "VectorISA.h"
@@ -67,6 +66,8 @@ HWND	hDlgFindReplace = NULL;
 static bool bInitDone = false;
 static HACCEL hAccMain;
 static HACCEL hAccFindReplace;
+static HICON hTrayIcon = NULL;
+static UINT uTrayIconDPI = 0;
 
 // tab width for notification text
 #define TAB_WIDTH_NOTIFICATION		8
@@ -342,6 +343,9 @@ static struct CachedStatusItem cachedStatusItem;
 #define DisableDelayedStatusBarRedraw()		cachedStatusItem.updateMask |= (1 << StatusItem_ItemCount)
 
 HINSTANCE	g_hInstance;
+#if NP2_ENABLE_APP_LOCALIZATION_DLL
+HINSTANCE	g_exeInstance;
+#endif
 HANDLE		g_hDefaultHeap;
 HANDLE		g_hScintilla;
 #if _WIN32_WINNT < _WIN32_WINNT_WIN8
@@ -473,6 +477,9 @@ static void CleanUpResources(bool initialized) {
 	Edit_ReleaseResources();
 	Scintilla_ReleaseResources();
 
+	if (hTrayIcon) {
+		DestroyIcon(hTrayIcon);
+	}
 	if (initialized) {
 		UnregisterClass(wchWndClass, g_hInstance);
 	}
@@ -522,6 +529,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 
 	// Set global variable g_hInstance
 	g_hInstance = hInstance;
+#if NP2_ENABLE_APP_LOCALIZATION_DLL
+	g_exeInstance = hInstance;
+#endif
 #if _WIN32_WINNT < _WIN32_WINNT_WIN8
 	// Set the Windows version global variable
 	NP2_COMPILER_WARNING_PUSH
@@ -1968,7 +1978,8 @@ void CreateBars(HWND hwnd, HINSTANCE hInstance) {
 	if (hbmp != NULL) {
 		bExternalBitmap = true;
 	} else {
-		hbmp = (HBITMAP)LoadImage(hInstance, MAKEINTRESOURCE(IDR_MAINWND), IMAGE_BITMAP, 0, 0, LR_CREATEDIBSECTION);
+		const int resource = GetBitmapResourceIdForCurrentDPI(IDB_TOOLBAR16);
+		hbmp = (HBITMAP)LoadImage(g_exeInstance, MAKEINTRESOURCE(resource), IMAGE_BITMAP, 0, 0, LR_CREATEDIBSECTION);
 	}
 	if (bAutoScaleToolbar) {
 		hbmp = ResizeImageForCurrentDPI(hbmp);
@@ -2038,9 +2049,9 @@ void CreateBars(HWND hwnd, HINSTANCE hInstance) {
 	IniSectionInit(pIniSection, COUNTOF(tbbMainWnd));
 	LoadIniSection(INI_SECTION_NAME_TOOLBAR_LABELS, pIniSectionBuf, cchIniSection);
 	IniSectionParseArray(pIniSection, pIniSectionBuf, FALSE);
-	const int count = pIniSection->count;
+	const UINT count = pIniSection->count;
 
-	for (int i = 0; i < count; i++) {
+	for (UINT i = 0; i < count; i++) {
 		const IniKeyValueNode *node = &pIniSection->nodeList[i];
 		const UINT n = (UINT)wcstol(node->key, NULL, 10);
 		if (n == 0 || n >= COUNTOF(tbbMainWnd)) {
@@ -3185,6 +3196,10 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		}
 		EditCopyAppend(hwndEdit);
 		UpdateToolbar();
+		break;
+
+	case IDM_EDIT_COPYRTF:
+		EditCopyAsRTF(hwndMain);
 		break;
 
 	case IDM_EDIT_PASTE:
@@ -8508,9 +8523,18 @@ void SnapToDefaultPos(HWND hwnd) {
 //
 //
 void ShowNotifyIcon(HWND hwnd, bool bAdd) {
-	static HICON hIcon;
-	if (!hIcon) {
-		hIcon = (HICON)LoadImage(g_hInstance, MAKEINTRESOURCE(IDR_MAINWND), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+	if (bAdd && (hTrayIcon == NULL || uTrayIconDPI != g_uCurrentDPI)) {
+		if (hTrayIcon) {
+			DestroyIcon(hTrayIcon);
+			hTrayIcon = NULL;
+		}
+		uTrayIconDPI = g_uCurrentDPI;
+#if _WIN32_WINNT >= _WIN32_WINNT_VISTA
+		LoadIconMetric(g_exeInstance, MAKEINTRESOURCE(IDR_MAINWND), LIM_SMALL, &hTrayIcon);
+#else
+		const int size = SystemMetricsForDpi(SM_CXSMICON, uTrayIconDPI);
+		hTrayIcon = (HICON)LoadImage(g_exeInstance, MAKEINTRESOURCE(IDR_MAINWND), IMAGE_ICON, size, size, LR_DEFAULTCOLOR);
+#endif
 	}
 
 	NOTIFYICONDATA nid;
@@ -8520,7 +8544,7 @@ void ShowNotifyIcon(HWND hwnd, bool bAdd) {
 	nid.uID = 0;
 	nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
 	nid.uCallbackMessage = APPM_TRAYMESSAGE;
-	nid.hIcon = hIcon;
+	nid.hIcon = hTrayIcon;
 	lstrcpy(nid.szTip, WC_NOTEPAD2);
 	Shell_NotifyIcon(bAdd ? NIM_ADD : NIM_DELETE, &nid);
 }
