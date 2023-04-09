@@ -78,7 +78,7 @@ Latest development builds (artifacts in Release configuration for each compiler 
 	* INI Configuration File
 	* [Inno Setup](tools/lang/InnoSetup.iss), up to Inno Setup 6.2.
 	* [Boost Jam](tools/lang/Jamfile.jam), up to Jam 4.4.
-	* [Java](tools/lang/Java.java), up to Java 18. [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#java)
+	* [Java](tools/lang/Java.java), up to Java 20. [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#java)
 		* [BeanShell](https://github.com/beanshell/beanshell)
 	* [JavaScript](tools/lang/JavaScript.js), up to ECMAScript 2022 with [JSX](https://facebook.github.io/jsx/) and [Web APIs](https://developer.mozilla.org/en-US/docs/Web/API).
 	* [JSON](https://www.json.org) and [JSON5](https://json5.org/) Document
@@ -86,7 +86,7 @@ Latest development builds (artifacts in Release configuration for each compiler 
 	* [Kotlin](tools/lang/Kotlin.kt), up to Kotlin 1.7.
 	* LaTeX
 	* Lisp Script (Common Lisp, Clojure, Scheme, etc.)
-	* [LLVM IR](tools/lang/LLVM.ll), up to LLVM 15.
+	* [LLVM IR](tools/lang/LLVM.ll), up to LLVM 16.
 	* [Lua Script](tools/lang/Lua.lua), up to Lua 5.4.
 	* Makefile, [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#makefile)
 		* nmake
@@ -125,9 +125,9 @@ Latest development builds (artifacts in Release configuration for each compiler 
 		* [PostgreSQL](tools/lang/PostgreSQL.sql), PostgreSQL 14.
 		* [Transact-SQL](tools/lang/Transact-SQL.sql), SQL Server 2019.
 		* [Oracle](tools/lang/Oracle.sql), Oracle 20, incomplete.
-	* [Swift](tools/lang/Swift.swift), up to Swift 5.7.
+	* [Swift](tools/lang/Swift.swift), up to Swift 5.8.
 	* TCL, [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#tcl)
-	* Texinfo
+	* [Texinfo](tools/lang/Texinfo.texi), up to Texinfo 7.0.
 	* [TOML File](https://toml.io/)
 	* [TypeScript](tools/lang/TypeScript.ts), TypeScript 5.0.
 	* Visual Basic, VB6, VB.NET

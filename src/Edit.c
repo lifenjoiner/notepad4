@@ -1645,12 +1645,12 @@ void EditMapTextCase(int menu) {
 			charsConverted = LCMapString(LOCALE_USER_DEFAULT, flags, pszTextW, cchTextW, NULL, 0);
 #endif
 			if (charsConverted) {
+				pszMappedW = (LPWSTR)NP2HeapAlloc((charsConverted + 1)*sizeof(WCHAR));
 #if _WIN32_WINNT >= _WIN32_WINNT_VISTA
 				charsConverted = LCMapStringEx(LOCALE_NAME_USER_DEFAULT, flags, pszTextW, cchTextW, pszMappedW, charsConverted, NULL, NULL, 0);
 #else
-				pszMappedW = (LPWSTR)NP2HeapAlloc((charsConverted + 1)*sizeof(WCHAR));
-#endif
 				charsConverted = LCMapString(LOCALE_USER_DEFAULT, flags, pszTextW, cchTextW, pszMappedW, charsConverted);
+#endif
 			}
 		}
 
@@ -8081,7 +8081,7 @@ void FoldToggleDefault(FOLD_ACTION action) {
 				level &= SC_FOLDLEVELNUMBERMASK;
 				FoldLevelStack_Push(&levelStack, level);
 				const int lev = levelStack.levelCount;
-				if ((levelMask >> lev) & 1) {
+				if (levelMask & (1U << lev)) {
 					action = FoldToggleNode(line, action);
 					if (lev == maxLevel || (ignoreInner && EditIsLineContainsStyle(line, ignoreInner))) {
 						line = SciCall_GetLastChildEx(line, level);
@@ -8096,7 +8096,7 @@ void FoldToggleDefault(FOLD_ACTION action) {
 			if (level & SC_FOLDLEVELHEADERFLAG) {
 				level &= SC_FOLDLEVELNUMBERMASK;
 				const int lev = level - SC_FOLDLEVELBASE;
-				if ((levelMask >> lev) & 1) {
+				if (levelMask & (1U << lev)) {
 					action = FoldToggleNode(line, action);
 					if (lev == maxLevel || (ignoreInner && EditIsLineContainsStyle(line, ignoreInner))) {
 						line = SciCall_GetLastChildEx(line, level);
