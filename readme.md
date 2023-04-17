@@ -48,7 +48,7 @@ Latest development builds (artifacts in Release configuration for each compiler 
 		* Objective-C/C++, [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#objective-cc)
 		* [C Standard Library](tools/lang/C.c), up to C2x.
 		* [C++ STL](tools/lang/CPP.cpp), up to C++20.
-	* [CSS Style Sheet](tools/lang/CSS.css), up to March 2023 snapshot.
+	* [CSS Style Sheet](tools/lang/CSS.css), up to April 2023 snapshot.
 		* [SCSS Style Sheet](tools/lang/SCSS.scss), up to Dart Sass 1.50.
 		* [Less Style Sheet](tools/lang/Less.less), up to Less 4.1.
 		* [HSS Style Sheet](tools/lang/HSS.hss)
@@ -70,7 +70,7 @@ Latest development builds (artifacts in Release configuration for each compiler 
 	* [GraphViz Dot](tools/lang/GraphViz.dot), up to GraphViz 2.49, [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#graphviz)
 	* [Groovy](tools/lang/Groovy.groovy), up to Groovy 4.0.
 	* [Haxe](tools/lang/Haxe.hx), up to Haxe 4.2
-	* [HTML](tools/lang/html.html), up to [WHATWG](https://html.spec.whatwg.org/multipage/) March 2023. [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#html)
+	* [HTML](tools/lang/html.html), up to [WHATWG](https://html.spec.whatwg.org/multipage/) April 2023. [Screenshots](https://github.com/zufuliu/notepad2/wiki/Screenshots#html)
 		* ASP
 		* ASP.NET
 		* JSP
@@ -196,7 +196,7 @@ Latest development builds (artifacts in Release configuration for each compiler 
 * [Scintilla's website](https://www.scintilla.org/)
 * [Build Notepad2 and metapath](https://github.com/zufuliu/notepad2/wiki/Build-Notepad2)
 * [Localization](https://github.com/zufuliu/notepad2/wiki/Localization)
-	* [French (France)](https://github.com/VoilierBleu/notepad2) by [@Matteo-Nigro](https://github.com/VoilierBleu)
+	* [French (France)](https://github.com/VoilierBleu/notepad2) by [@VoilierBleu](https://github.com/VoilierBleu)
 	* [Italiano](https://github.com/Matteo-Nigro/notepad2) by [@Matteo-Nigro](https://github.com/Matteo-Nigro)
 	* [日本語](https://github.com/maboroshin/notepad2) by [@maboroshin](https://github.com/maboroshin)
 	* [中文 (繁體)](https://github.com/zufuliu/notepad2/tree/main/locale/zh-Hant)
