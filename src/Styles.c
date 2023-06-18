@@ -312,8 +312,8 @@ static const COLORREF defaultCustomColor[MAX_CUSTOM_COLOR_COUNT] = {
 	//RGB(0x00, 0x7F, 0x7F),	// Class, Trait
 };
 static COLORREF customColor[MAX_CUSTOM_COLOR_COUNT];
-
-static BOOL iCustomColorLoaded = FALSE;
+struct CallTipInfo callTipInfo;
+static bool bCustomColorLoaded = false;
 
 bool	bUse2ndGlobalStyle;
 int		np2StyleTheme;
@@ -803,7 +803,7 @@ static void Style_LoadOne(PEDITLEXER pLex) {
 	NP2HeapFree(pIniSectionBuf);
 }
 
-static void Style_LoadAll(bool bReload) {
+static void Style_LoadAll(bool bReload, bool onlyCustom) {
 	IniSection section;
 	WCHAR *pIniSectionBuf = (WCHAR *)NP2HeapAlloc(sizeof(WCHAR) * MAX_INI_SECTION_SIZE_STYLES);
 	const int cchIniSection = (int)(NP2HeapSize(pIniSectionBuf) / sizeof(WCHAR));
@@ -811,10 +811,9 @@ static void Style_LoadAll(bool bReload) {
 	IniSectionInit(pIniSection, 128);
 
 	// Custom colors
-	const int value = (np2StyleTheme << 1) | 1;
-	if (bReload || iCustomColorLoaded != value) {
+	if (bReload || !bCustomColorLoaded) {
+		bCustomColorLoaded = true;
 		LPCWSTR themePath = GetStyleThemeFilePath();
-		iCustomColorLoaded = value;
 		memcpy(customColor, defaultCustomColor, MAX_CUSTOM_COLOR_COUNT * sizeof(COLORREF));
 
 		GetPrivateProfileSection(INI_SECTION_NAME_CUSTOM_COLORS, pIniSectionBuf, cchIniSection, themePath);
@@ -834,10 +833,12 @@ static void Style_LoadAll(bool bReload) {
 		}
 	}
 
-	for (UINT iLexer = 0; iLexer < ALL_LEXER_COUNT; iLexer++) {
-		PEDITLEXER pLex = pLexArray[iLexer];
-		if (bReload || !IsStyleLoaded(pLex)) {
-			Style_LoadOneEx(pLex, pIniSection, pIniSectionBuf, cchIniSection);
+	if (!onlyCustom) {
+		for (UINT iLexer = 0; iLexer < ALL_LEXER_COUNT; iLexer++) {
+			PEDITLEXER pLex = pLexArray[iLexer];
+			if (bReload || !IsStyleLoaded(pLex)) {
+				Style_LoadOneEx(pLex, pIniSection, pIniSectionBuf, cchIniSection);
+			}
 		}
 	}
 
@@ -1166,6 +1167,9 @@ void Style_OnDPIChanged(PEDITLEXER pLex) {
 }
 
 void Style_OnStyleThemeChanged(int theme) {
+	if (theme == np2StyleTheme) {
+		return;
+	}
 	if (theme != StyleTheme_Default) {
 		if (!PathIsFile(darkStyleThemeFilePath)) {
 			FindDarkThemeFile();
@@ -1176,6 +1180,7 @@ void Style_OnStyleThemeChanged(int theme) {
 		SaveSettingsNow(true, true);
 	}
 	np2StyleTheme = theme;
+	bCustomColorLoaded = false;
 	Style_SetLexer(pLexCurrent, false);
 }
 
@@ -1668,6 +1673,8 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) {
 
 	// CallTip
 	Style_SetDefaultStyle(GlobalStyleIndex_CallTip);
+	//callTipInfo.backColor = SciCall_StyleGetBack(STYLE_CALLTIP);
+	//callTipInfo.foreColor = SciCall_StyleGetFore(STYLE_CALLTIP);
 	// HotSpot
 	Style_SetDefaultStyle(GlobalStyleIndex_Link);
 	SciCall_StyleSetHotSpot(STYLE_LINK, true);
@@ -1705,16 +1712,6 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) {
 		Style_SetAllStyle(pLexNew, 0);
 
 		switch (rid) {
-		case NP2LEX_PERL:
-#if defined(_WIN64)
-			SciCall_CopyStyles(SCE_PL_SCALAR, MULTI_STYLE8(SCE_PL_REGEX_VAR, SCE_PL_REGSUBST_VAR, SCE_PL_BACKTICKS_VAR, SCE_PL_HERE_QQ_VAR,
-				SCE_PL_HERE_QX_VAR, SCE_PL_STRING_QQ_VAR, SCE_PL_STRING_QX_VAR, SCE_PL_STRING_QR_VAR));
-#else
-			SciCall_CopyStyles(SCE_PL_SCALAR, MULTI_STYLE(SCE_PL_REGEX_VAR, SCE_PL_REGSUBST_VAR, SCE_PL_BACKTICKS_VAR, SCE_PL_HERE_QQ_VAR));
-			SciCall_CopyStyles(SCE_PL_SCALAR, MULTI_STYLE(SCE_PL_HERE_QX_VAR, SCE_PL_STRING_QQ_VAR, SCE_PL_STRING_QX_VAR, SCE_PL_STRING_QR_VAR));
-#endif
-			break;
-
 		case NP2LEX_REBOL:
 			SciCall_CopyStyles(STYLE_LINK, MULTI_STYLE(SCE_REBOL_URL, SCE_REBOL_EMAIL, 0, 0));
 			break;
@@ -2491,24 +2488,22 @@ static PEDITLEXER Style_GetLexerFromFile(LPCWSTR lpszFile, bool bCGIGuess, LPCWS
 		if (StrCaseEqual(lpszExt, L"txt")) {
 			if (StrCaseEqual(lpszName, L"CMakeLists.txt") || StrCaseEqual(lpszName, L"CMakeCache.txt")) {
 				pLexNew = &lexCMake;
-#if 0 // LLVMBuild.txt were removed from LLVM project
-			} else if (StrCaseEqual(lpszName, L"LLVMBuild.txt")) {
-				pLexNew = &lexINI;
-#endif
-			} else {
-				pLexNew = &lexTextFile;
 			}
-			return pLexNew;
+#if 0 // LLVMBuild.txt were removed from LLVM project
+			else if (StrCaseEqual(lpszName, L"LLVMBuild.txt")) {
+				pLexNew = &lexINI;
+			}
+#endif
 		}
 
-		if (bCGIGuess && (StrCaseEqual(lpszExt, L"cgi") || StrCaseEqual(lpszExt, L"fcgi"))) {
+		else if (bCGIGuess && (StrCaseEqual(lpszExt, L"cgi") || StrCaseEqual(lpszExt, L"fcgi"))) {
 			char tchText[256] = "";
 			SciCall_GetText(COUNTOF(tchText) - 1, tchText);
 			pLexNew = Style_SniffShebang(tchText);
 		}
 
 		// autoconf / automake
-		if (!pLexNew && pDotFile != NULL && StrCaseEqual(lpszExt, L"in")) {
+		else if (pDotFile != NULL && StrCaseEqual(lpszExt, L"in")) {
 			WCHAR tchCopy[MAX_PATH];
 			lstrcpyn(tchCopy, lpszFile, COUNTOF(tchCopy));
 			PathRemoveExtension(tchCopy);
@@ -2516,7 +2511,7 @@ static PEDITLEXER Style_GetLexerFromFile(LPCWSTR lpszFile, bool bCGIGuess, LPCWS
 		}
 
 		// MySQL ini/cnf
-		if (!pLexNew && StrHasPrefixCase(lpszName, L"my") && (StrCaseEqual(lpszExt, L"ini") || StrCaseEqual(lpszExt, L"cnf"))) {
+		else if (StrHasPrefixCase(lpszName, L"my") && (StrCaseEqual(lpszExt, L"ini") || StrCaseEqual(lpszExt, L"cnf"))) {
 			pLexNew = &lexConfig;
 		}
 		else if (StrCaseEqual(lpszName, L"web.config")) {
@@ -2532,7 +2527,7 @@ static PEDITLEXER Style_GetLexerFromFile(LPCWSTR lpszFile, bool bCGIGuess, LPCWS
 			Style_UpdateLexerLang(pLexNew, lpszExt, lpszName);
 		}
 		// dot file
-		if (StrCaseEqual(lpszExt - 1, lpszName)) {
+		if (lpszName[0] == L'.') {
 			if (pDotFile) {
 				*pDotFile = TRUE;
 			}
@@ -2914,6 +2909,7 @@ void Style_UpdateSchemeMenu(HMENU hmenu) {
 			break;
 		// Markdown
 		case NP2LEX_MARKDOWN:
+			update = false;
 			lang = IDM_LEXER_MARKDOWN_GITHUB;
 			break;
 		// Math
@@ -3569,11 +3565,12 @@ bool Style_SelectColor(HWND hwnd, LPWSTR lpszStyle, int cchStyle, bool bFore) {
 	cc.lpCustColors = customColor;
 	cc.Flags = CC_FULLOPEN | CC_RGBINIT | CC_SOLIDCOLOR;
 
-	if (!ChooseColor(&cc)) {
+	if (!ChooseColor(&cc) || cc.rgbResult == iRGBResult) {
 		return false;
 	}
 
 	iRGBResult = cc.rgbResult;
+	iRGBResult = ColorToRGBHex(iRGBResult);
 
 	// Rebuild style string
 	WCHAR szNewStyle[MAX_LEXER_STYLE_EDIT_SIZE];
@@ -3597,7 +3594,7 @@ bool Style_SelectColor(HWND hwnd, LPWSTR lpszStyle, int cchStyle, bool bFore) {
 		if (StrNotEmpty(szNewStyle)) {
 			lstrcat(szNewStyle, L"; ");
 		}
-		wsprintf(tch, L"fore:#%06X", ColorToRGBHex(iRGBResult));
+		wsprintf(tch, L"fore:#%06X", iRGBResult);
 		lstrcat(szNewStyle, tch);
 		Style_StrCopyBack(szNewStyle, lpszStyle, tch);
 	} else {
@@ -3605,7 +3602,7 @@ bool Style_SelectColor(HWND hwnd, LPWSTR lpszStyle, int cchStyle, bool bFore) {
 		if (StrNotEmpty(szNewStyle)) {
 			lstrcat(szNewStyle, L"; ");
 		}
-		wsprintf(tch, L"back:#%06X", ColorToRGBHex(iRGBResult));
+		wsprintf(tch, L"back:#%06X", iRGBResult);
 		lstrcat(szNewStyle, tch);
 	}
 
@@ -4510,7 +4507,7 @@ static INT_PTR CALLBACK Style_ConfigDlgProc(HWND hwnd, UINT umsg, WPARAM wParam,
 					Style_ResetAll(true);
 				} else {
 					// reload styles from external file
-					Style_LoadAll(true);
+					Style_LoadAll(true, false);
 					// reset file extensions to built-in default
 					Style_ResetAll(false);
 				}
@@ -4647,7 +4644,7 @@ static INT_PTR CALLBACK Style_ConfigDlgProc(HWND hwnd, UINT umsg, WPARAM wParam,
 void Style_ConfigDlg(HWND hwnd) {
 	struct StyleConfigDlgParam param;
 
-	Style_LoadAll(false);
+	Style_LoadAll(false, false);
 	// Backup Styles
 	param.hFontTitle = NULL;
 	param.bApply = false;
@@ -5280,4 +5277,134 @@ static INT_PTR CALLBACK SelectCSVOptionsDlgProc(HWND hwnd, UINT umsg, WPARAM wPa
 bool SelectCSVOptionsDlg(void) {
 	const INT_PTR iResult = ThemedDialogBoxParam(g_hInstance, MAKEINTRESOURCE(IDD_CSV_OPTIONS), hwndMain, SelectCSVOptionsDlgProc, 0);
 	return iResult == IDOK;
+}
+
+void EditShowCallTip(Sci_Position position) {
+	if (callTipInfo.type > CallTipType_Notification) {
+		if (SciCall_CallTipActive() && position >= callTipInfo.startPos && position < callTipInfo.endPos) {
+			return;
+		}
+		callTipInfo.type = CallTipType_None;
+		SciCall_CallTipCancel();
+	}
+	if (position < 0) {
+		return;
+	}
+
+	const ShowCallTip colorFormat = callTipInfo.showCallTip;
+	if (colorFormat != ShowCallTip_None) {
+		char text[32] = {0};
+		const Sci_Position startPos = max_pos(0, position - 10);
+		const Sci_Position endPos = min_pos(position + 10, SciCall_GetLength());
+		const struct Sci_TextRangeFull tr = { { startPos, endPos }, text + 8};
+		SciCall_GetTextRangeFull(&tr);
+		char * const p = text + 8 + position - startPos;
+		char *s = p;
+		while (IsHexDigit(*s)) {
+			--s;
+		}
+		if (*s == '#' || ((*s == 'x' || *s == 'X') && s[-1] == '0')) {
+			char *t = p + 1;
+			while (IsHexDigit(*t)) {
+				++t;
+			}
+			Sci_Position len = t - s - 1;
+			if ((*s == '#' && (len == 3 || len == 4)) || len == 6 || len == 8) {
+				*t++ = '\n';
+				*t = '\0';
+				position -= p - s;
+				uint32_t color = strtoul(s + 1, NULL, 16);
+				if (len == 6) {
+					if (colorFormat == ShowCallTip_ColorRGBA || colorFormat == ShowCallTip_ColorARGB) {
+						color = ColorFromRGBHex(color);
+					}
+				} else if (len > 6) {
+					if (colorFormat == ShowCallTip_ColorRGBA) {
+						color = ColorFromRGBAHex(color);
+					} else if (colorFormat == ShowCallTip_ColorARGB) {
+						color = ColorFromARGBHex(color);
+					} else if (colorFormat == ShowCallTip_ColorBGRA) {
+						color = ColorFromBGRAHex(color);
+					}
+				} else {
+					// always treated as #RGBA or #ARGB
+					uint32_t alpha = 0;
+					if (len == 4) {
+						if (colorFormat == ShowCallTip_ColorARGB) {
+							alpha = color >> 12;
+						} else {
+							alpha = color & 15;
+							color >>= 4;
+						}
+					}
+					const uint32_t red = (color >> 8) & 15;
+					const uint32_t green = (color >> 4) & 15;
+					const uint32_t blue = color & 15;
+					color = red | (green << 8) | (blue << 16) | (alpha << 24);
+					color *= 0x11;
+				}
+				if (*s != '#') {
+					--s;
+					++len;
+				}
+				--s;
+				*s = '\n';
+				callTipInfo.type = CallTipType_ColorHex;
+				callTipInfo.startPos = position;
+				callTipInfo.endPos = position + len + 1;
+				callTipInfo.hexStart = position + 1;
+				callTipInfo.currentColor = color;
+				SciCall_CallTipSetBack(color);
+				SciCall_CallTipSetFore(~color);
+				SciCall_CallTipShow(position, s);
+			}
+		}
+	}
+
+	// show "Ctrl + click to follow link"?
+}
+
+void EditClickCallTip(HWND hwnd) {
+	SciCall_CallTipCancel();
+	const CallTipType type = callTipInfo.type;
+	callTipInfo.type = CallTipType_None;
+	if (type == CallTipType_ColorHex) {
+		if (!bCustomColorLoaded) {
+			Style_LoadAll(false, true);
+		}
+
+		const unsigned back = callTipInfo.currentColor;
+		unsigned color = back & 0xffffffU;
+		CHOOSECOLOR cc;
+		memset(&cc, 0, sizeof(CHOOSECOLOR));
+		cc.lStructSize = sizeof(CHOOSECOLOR);
+		cc.hwndOwner = hwnd;
+		cc.rgbResult = color;
+		cc.lpCustColors = customColor;
+		cc.Flags = CC_FULLOPEN | CC_RGBINIT | CC_SOLIDCOLOR;
+
+		if (ChooseColor(&cc) && cc.rgbResult != color) {
+			const ShowCallTip colorFormat = callTipInfo.showCallTip;
+			color = cc.rgbResult | (back & 0xff000000U);
+			const int width = (color > 0xffffffU) ? 8 : 6;
+			if (width == 6) {
+				if (colorFormat == ShowCallTip_ColorRGBA || colorFormat == ShowCallTip_ColorARGB) {
+					color = ColorToRGBHex(color);
+				}
+			} else {
+				if (colorFormat == ShowCallTip_ColorRGBA) {
+					color = ColorToRGBAHex(color);
+				} else if (colorFormat == ShowCallTip_ColorARGB) {
+					color = ColorToARGBHex(color);
+				} else if (colorFormat == ShowCallTip_ColorBGRA) {
+					color = ColorToBGRAHex(color);
+				}
+			}
+
+			char text[16];
+			sprintf(text, "%0*X", width, color);
+			SciCall_SetSel(callTipInfo.hexStart, callTipInfo.endPos);
+			SciCall_ReplaceSel(text);
+		}
+	}
 }

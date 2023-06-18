@@ -59,7 +59,8 @@ def build_enum_name(comment):
 			singly = item[:-1]
 			SinglyWordMap[item] = singly
 		items[-1] = singly
-	return ''.join(item.title() for item in items)
+	items = [item if item[0].isupper() else item.title() for item in items]
+	return ''.join(items)
 
 def BuildKeywordContent(rid, lexer, keywordList, keywordCount=16):
 	output = []
@@ -487,11 +488,26 @@ def parse_awk_api_file(path):
 		('misc', keywordMap['misc'], KeywordAttr.NoLexer),
 	]
 
-def parse_bash_api_file(path):
+def parse_bash_api_file(pathList):
+	keywordMap = {
+		'keywords': [],
+		'variables': [],
+		'commands': ['m4', 'dnl'], # M4
+	}
+	for path in pathList:
+		sections = read_api_file(path, '#')
+		for key, doc in sections:
+			if key not in keywordMap:
+				continue
+			items = doc.split()
+			if key == 'variables':
+				items = [item[1:] for item in items]
+			keywordMap[key].extend(items)
+	keywordMap['keywords'].extend(keywordMap['commands'])
 	return [
-		('keywords', [], KeywordAttr.Default),
-		('bash struct', [], KeywordAttr.Default),
-		('variables', [], KeywordAttr.NoLexer | KeywordAttr.NoAutoComp | KeywordAttr.Special),
+		('keywords', keywordMap['keywords'], KeywordAttr.Default),
+		('bash struct', "if elif fi while until else then do done esac eval".split(), KeywordAttr.NoAutoComp),
+		('variables', keywordMap['variables'], KeywordAttr.NoLexer | KeywordAttr.Special),
 	]
 
 def parse_batch_api_file(path):
@@ -1772,6 +1788,22 @@ def parse_powershell_api_file(path):
 		#('parameters', keywordMap['parameters'], KeywordAttr.NoLexer),
 		('parameters', [], KeywordAttr.NoLexer),
 		('misc', keywordMap['misc'], KeywordAttr.NoLexer),
+	]
+
+def parse_perl_api_file(path):
+	keywordMap = {}
+	sections = read_api_file(path, '#')
+	for key, doc in sections:
+		if key == 'variables':
+			items = re.findall(r'\w+', doc)
+		else:
+			items = doc.split()
+		keywordMap[key] = items
+	keywordMap['keywords'].extend('__DATA__ __END__ package'.split())
+	return [
+		('keywords', keywordMap['keywords'], KeywordAttr.Default),
+		('regex', keywordMap['regex'], KeywordAttr.NoAutoComp),
+		('variables', keywordMap['variables'], KeywordAttr.NoLexer | KeywordAttr.Special),
 	]
 
 def parse_python_api_file(path):
