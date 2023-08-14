@@ -514,6 +514,13 @@ BEGIN
 			MENUITEM "Less スタイルシート(&L)",			IDM_LEXER_LESS
 			MENUITEM "HSS スタイルシート(&H)",			IDM_LEXER_HSS
 		END
+		POPUP "&JavaScript"
+		BEGIN
+			MENUITEM "&JavaScript",				IDM_LEXER_JAVASCRIPT
+			MENUITEM "Java&Script JSX",			IDM_LEXER_JAVASCRIPT_JSX
+			MENUITEM "&TypeScript",				IDM_LEXER_TYPESCRIPT
+			MENUITEM "TypeScript TS&X",			IDM_LEXER_TYPESCRIPT_TSX
+		END
 		POPUP "Webソースコード(&W)"
 		BEGIN
 			MENUITEM "&Web ソースコード",			IDM_LEXER_WEB
@@ -523,6 +530,7 @@ BEGIN
 			MENUITEM "ASP.NET (&VB.NET)",			IDM_LEXER_ASPX_VB
 			MENUITEM "ASP (V&BScript)",				IDM_LEXER_ASP_VBS
 			MENUITEM "ASP (J&Script)",				IDM_LEXER_ASP_JS
+			MENUITEM "&Apache Config",				IDM_LEXER_APACHE
 		END
 		POPUP "Mark&down"
 		BEGIN
@@ -532,6 +540,7 @@ BEGIN
 		END
 		POPUP "計算(&M)"
 		BEGIN
+			MENUITEM "Mathematica",					IDM_LEXER_MATHEMATICA
 			MENUITEM "&MATLAB",						IDM_LEXER_MATLAB
 			MENUITEM "&Octave",						IDM_LEXER_OCTAVE
 			MENUITEM "&Scilab",						IDM_LEXER_SCILAB
@@ -549,39 +558,7 @@ BEGIN
 			MENUITEM "XML スキーマ(&S)",					IDM_LEXER_XSD
 			MENUITEM "XSLT スタイルシート(&T)",			IDM_LEXER_XSLT
 			MENUITEM "XML DTD(&D)",					IDM_LEXER_DTD
-		END
-		POPUP "XML (&Java)"
-		BEGIN
-			MENUITEM "Ant &Build",					IDM_LEXER_ANT_BUILD
-			MENUITEM "Maven &POM",					IDM_LEXER_MAVEN_POM
-			MENUITEM "&Maven 設定",				IDM_LEXER_MAVEN_SETTINGS
-			MENUITEM "I&vy モジュール",					IDM_LEXER_IVY_MODULE
-			MENUITEM "&Ivy 設定",				IDM_LEXER_IVY_SETTINGS
-			MENUITEM "PMD ルールセット(&R)",				IDM_LEXER_PMD_RULESET
-			MENUITEM "&Checkstyle",					IDM_LEXER_CHECKSTYLE
-		END
-		POPUP "Webサーバ設定(&G)"
-		BEGIN
-			MENUITEM "&Apache Config",				IDM_LEXER_APACHE
-			MENUITEM "&Tomcat Config",				IDM_LEXER_TOMCAT
-			MENUITEM "&Web Config",					IDM_LEXER_WEB_JAVA
-			MENUITEM "Str&uts Config",				IDM_LEXER_STRUTS
-			MENUITEM "&Hibernate Config",			IDM_LEXER_HIB_CFG
-			MENUITEM "Hibernate &Mapping",			IDM_LEXER_HIB_MAP
-			MENUITEM "Spring &Beans",				IDM_LEXER_SPRING_BEANS
-			MENUITEM "&JBoss Config",				IDM_LEXER_JBOSS
-		END
-		//POPUP "XML (.&NET)"
-		//BEGIN
-		//	MENUITEM "&Web 設定",					IDM_LEXER_WEB_NET
-		//	MENUITEM "&ResX リソース",				IDM_LEXER_RESX
-		//	MENUITEM "WPF &XAML",					IDM_LEXER_XAML
-		//END
-		POPUP "XML 他(&O)"
-		BEGIN
 			MENUITEM "プロパティリスト(&P)",				IDM_LEXER_PROPERTY_LIST
-			MENUITEM "Android マニフェスト(&M)",			IDM_LEXER_ANDROID_MANIFEST
-			MENUITEM "Android レイアウト(&L)",				IDM_LEXER_ANDROID_LAYOUT
 			//MENUITEM "SVG 文書(&G)",				IDM_LEXER_SVG
 		END
 	END
@@ -1282,7 +1259,7 @@ BEGIN
     AUTORADIOBUTTON "なし(&N)",IDC_CHANGENOTIFY_NONE,7,7,35,10,WS_GROUP | WS_TABSTOP
     AUTORADIOBUTTON "メッセージを表示(&S)",IDC_CHANGENOTIFY_SHOW_MSG,7,19,71,10,WS_TABSTOP
     AUTORADIOBUTTON "自動的に再読み込み(修正不可)(&A)",IDC_CHANGENOTIFY_AUTO_RELOAD,7,31,114,10,WS_TABSTOP
-    AUTOCHECKBOX    "通知の代わりにポーリングで変更を検出(&P)",IDC_CHANGENOTIFY_USE_POLLING,7,48,184,10,WS_TABSTOP
+    AUTOCHECKBOX    "定期更新のファイルを監視(例:ログ)(&M)",IDC_CHANGENOTIFY_LOG_FILE,7,48,184,10,WS_TABSTOP
     AUTOCHECKBOX    "再読み込み後に終端へフォーカス(&K)",IDC_CHANGENOTIFY_KEEP_AT_END,7,60,184,10,WS_TABSTOP
     AUTOCHECKBOX    "新たにファイルを開いたらリセット(&R)",IDC_CHANGENOTIFY_RESET_WATCH,7,72,184,10,WS_TABSTOP
     DEFPUSHBUTTON   "OK",IDOK,139,7,50,14
@@ -1481,6 +1458,7 @@ BEGIN
     EDITTEXT        IDC_MODIFY_LINE_PREFIX,7,18,246,18,ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL | ES_WANTRETURN
     LTEXT           "行の後ろの文字列(&A):",IDC_MODIFY_LINE_TIP2,7,41,97,8
     EDITTEXT        IDC_MODIFY_LINE_APPEND,7,52,246,18,ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL | ES_WANTRETURN
+    AUTOCHECKBOX    "空の行を飛ばす(&S)",IDC_MODIFY_LINE_SKIP_EMPTY,7,108,96,14,WS_TABSTOP
     DEFPUSHBUTTON   "OK",IDOK,147,108,50,14
     PUSHBUTTON     "キャンセル",IDCANCEL,203,108,50,14
     LTEXT           "$(L)",IDC_MODIFY_LINE_DLN_NP,7,76,21,8
@@ -1899,7 +1877,7 @@ BEGIN
     IDS_ASK_SAVE            "「%s」\nの編集を保存しますか？"
     IDS_ASK_REVERT          "最後に保存された内容で再読み込みします。それ以降の変更内容は失われますがよろしいですか？"
     IDS_ASK_RECODE          "読み直しはファイルを再読み込みするため、変更内容は失われます。続行しますか？"
-    IDS_ASK_CREATE          "「%s」は存在しません。\nこのファイルを作成しますか？"
+    IDS_ASK_CREATE          "次のファイルは存在しません。作成しますか？\n%s "
     IDS_PRINT_HEADER        "ファイル名, 現在の日付と時刻|ファイル名, 現在の日付|ファイル名|空欄とする"
     IDS_PRINT_FOOTER        "ページ番号|空欄とする"
     IDS_PRINT_COLOR         "通常|明るさの反転 (暗い背景)|白背景に黒|白背景にカラー|白背景にカラー (行番号以外)|モニタ通りの見ている色 (WYSIWYG)"

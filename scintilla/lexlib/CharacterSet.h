@@ -104,7 +104,7 @@ public:
 template <typename T, typename... Args>
 constexpr bool AnyOf(T t, Args... args) noexcept {
 #if defined(__clang__)
-	static_assert(__is_integral(T));
+	static_assert(__is_integral(T) || __is_enum(T));
 #endif
 	return ((t == args) || ...);
 }
@@ -236,6 +236,10 @@ constexpr bool IsOctalDigit(int ch) noexcept {
 constexpr bool IsOctalOrHex(int ch, bool hex) noexcept {
 	const unsigned diff = ch - '0';
 	return diff < 8 || (hex && (diff < 10 || Between(UnsafeLower(ch), 'a', 'f')));
+}
+
+constexpr bool IsDecimalOrHex(int ch, bool hex) noexcept {
+	return IsADigit(ch) || (hex && Between(UnsafeLower(ch), 'a', 'f'));
 }
 
 constexpr bool IsADigitEx(int ch, int base) noexcept {

@@ -1033,21 +1033,51 @@ static inline void ExitApplication(HWND hwnd) {
 	}
 }
 
-void OnDropOneFile(HWND hwnd, LPCWSTR szBuf) {
-	// Reset Change Notify
-	//bPendingChangeNotify = false;
-	if (IsIconic(hwnd)) {
-		ShowWindow(hwnd, SW_RESTORE);
-	}
-	//SetForegroundWindow(hwnd);
-	if (PathIsDirectory(szBuf)) {
-		WCHAR tchFile[MAX_PATH];
-		if (OpenFileDlg(tchFile, COUNTOF(tchFile), szBuf)) {
-			FileLoad(FileLoadFlag_Default, tchFile);
+void MsgDropFiles(HWND hwnd, UINT umsg, WPARAM wParam) {
+	UNREFERENCED_PARAMETER(umsg);
+	HDROP hDrop = (HDROP)wParam;
+	// fix drag & drop file from 32-bit app to 64-bit Notepad2 before Win 10
+#if defined(_WIN64) && (_WIN32_WINNT < _WIN32_WINNT_WIN10)
+	if (umsg == WM_DROPFILES) {
+		POINT pt;
+		if (DragQueryPoint(hDrop, &pt)) { // client area
+			RECT rc;
+			ClientToScreen(hwnd, &pt);
+			GetWindowRect(hwndEdit, &rc);
+			if (PtInRect(&rc, pt)) { // already processed APPM_DROPFILES
+				DragFinish(hDrop);
+				return;
+			}
 		}
-	} else {
-		FileLoad(FileLoadFlag_Default, szBuf);
 	}
+#endif
+	//if (DragQueryFile(hDrop, (UINT)(-1), NULL, 0) > 1) {
+	//	MsgBoxWarn(MB_OK, IDS_ERR_DROP);
+	//}
+	WCHAR szBuf[MAX_PATH + 40];
+	if (DragQueryFile(hDrop, 0, szBuf, COUNTOF(szBuf))) {
+		LPCWSTR path = szBuf;
+		// Visual Studio: {UUID}|Solution\Project.[xx]proj|path
+		LPCWSTR t = StrRChrW(path, NULL, L'|');
+		if (t) {
+			path = t + 1;
+		}
+		// Reset Change Notify
+		//bPendingChangeNotify = false;
+		if (IsIconic(hwnd)) {
+			ShowWindow(hwnd, SW_RESTORE);
+		}
+		//SetForegroundWindow(hwnd);
+		if (PathIsDirectory(path)) {
+			WCHAR tchFile[MAX_PATH];
+			if (OpenFileDlg(tchFile, COUNTOF(tchFile), path)) {
+				FileLoad(FileLoadFlag_Default, tchFile);
+			}
+		} else {
+			FileLoad(FileLoadFlag_Default, path);
+		}
+	}
+	DragFinish(hDrop);
 }
 
 #if NP2_ENABLE_DOT_LOG_FEATURE
@@ -1238,24 +1268,10 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 		//	PostMessage(hwnd, APPM_CHANGENOTIFY, 0, 0);
 		break;
 
-	case WM_DROPFILES: {
-		WCHAR szBuf[MAX_PATH + 40];
-		HDROP hDrop = (HDROP)wParam;
-		if (DragQueryFile(hDrop, 0, szBuf, COUNTOF(szBuf))) {
-			LPCWSTR p = szBuf;
-			// Visual Studio: {UUID}|Solution\Project.[xx]proj|path
-			LPCWSTR t = StrRChrW(p, NULL, L'|');
-			if (t) {
-				p = t + 1;
-			}
-			OnDropOneFile(hwnd, p);
-		}
-		//if (DragQueryFile(hDrop, (UINT)(-1), NULL, 0) > 1) {
-		//	MsgBoxWarn(MB_OK, IDS_ERR_DROP);
-		//}
-		DragFinish(hDrop);
-	}
-	break;
+	case WM_DROPFILES:
+	case APPM_DROPFILES:
+		MsgDropFiles(hwnd, umsg, wParam);
+		break;
 
 	case WM_COPYDATA: {
 		PCOPYDATASTRUCT pcds = (PCOPYDATASTRUCT)lParam;
@@ -1940,6 +1956,12 @@ LRESULT MsgCreate(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	SetDlgItemInt(hwnd, IDC_REUSELOCK, GetTickCount(), FALSE);
 
 	// Drag & Drop
+#if 0//_WIN32_WINNT >= _WIN32_WINNT_WIN7
+	// enable drop file onto non-client area for elevated Notepad2
+	ChangeWindowMessageFilterEx(hwnd, WM_DROPFILES, MSGFLT_ADD, NULL);
+	ChangeWindowMessageFilterEx(hwnd, WM_COPYDATA, MSGFLT_ADD, NULL);
+	ChangeWindowMessageFilterEx(hwnd, 0x0049 /*WM_COPYGLOBALDATA*/, MSGFLT_ADD, NULL);
+#endif
 	DragAcceptFiles(hwnd, TRUE);
 
 	// File MRU
@@ -4014,24 +4036,16 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
 	case IDM_VIEW_WORDWRAP: {
 		fWordWrapG = fvCurFile.fWordWrap = !fvCurFile.fWordWrap;
-		const Sci_Line iVisTopLine = SciCall_GetFirstVisibleLine();
-		const Sci_Line iDocTopLine = SciCall_DocLineFromVisible(iVisTopLine);
 		SciCall_SetWrapMode(fvCurFile.fWordWrap ? iWordWrapMode : SC_WRAP_NONE);
-		SciCall_SetFirstVisibleLine(iVisTopLine);
-		SciCall_EnsureVisible(iDocTopLine);
 		UpdateToolbar();
 	} break;
 
 	case IDM_VIEW_WORDWRAPSETTINGS:
 		if (WordWrapSettingsDlg(hwnd)) {
-			const Sci_Line iVisTopLine = SciCall_GetFirstVisibleLine();
-			const Sci_Line iDocTopLine = SciCall_DocLineFromVisible(iVisTopLine);
 			SciCall_SetWrapMode(fvCurFile.fWordWrap ? iWordWrapMode : SC_WRAP_NONE);
 			SciCall_SetMarginOptions(bWordWrapSelectSubLine ? SC_MARGINOPTION_SUBLINESELECT : SC_MARGINOPTION_NONE);
 			EditSetWrapIndentMode(fvCurFile.iTabWidth, fvCurFile.iIndentWidth);
 			SetWrapVisualFlags();
-			SciCall_SetFirstVisibleLine(iVisTopLine);
-			SciCall_EnsureVisible(iDocTopLine);
 			UpdateToolbar();
 		}
 		break;
@@ -4703,6 +4717,11 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	case IDM_LEXER_SCSS:
 	case IDM_LEXER_LESS:
 	case IDM_LEXER_HSS:
+	// JavaScript
+	case IDM_LEXER_JAVASCRIPT:
+	case IDM_LEXER_JAVASCRIPT_JSX:
+	case IDM_LEXER_TYPESCRIPT:
+	case IDM_LEXER_TYPESCRIPT_TSX:
 	// Web Source Code
 	case IDM_LEXER_WEB:
 	case IDM_LEXER_PHP:
@@ -4711,11 +4730,13 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	case IDM_LEXER_ASPX_VB:
 	case IDM_LEXER_ASP_VBS:
 	case IDM_LEXER_ASP_JS:
+	case IDM_LEXER_APACHE:
 	// Markdown
 	case IDM_LEXER_MARKDOWN_GITHUB:
 	case IDM_LEXER_MARKDOWN_GITLAB:
 	case IDM_LEXER_MARKDOWN_PANDOC:
 	// Math
+	case IDM_LEXER_MATHEMATICA:
 	case IDM_LEXER_MATLAB:
 	case IDM_LEXER_OCTAVE:
 	case IDM_LEXER_SCILAB:
@@ -4728,28 +4749,8 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	case IDM_LEXER_XSD:
 	case IDM_LEXER_XSLT:
 	case IDM_LEXER_DTD:
-	case IDM_LEXER_ANT_BUILD:
-	case IDM_LEXER_MAVEN_POM:
-	case IDM_LEXER_MAVEN_SETTINGS:
-	case IDM_LEXER_IVY_MODULE:
-	case IDM_LEXER_IVY_SETTINGS:
-	case IDM_LEXER_PMD_RULESET:
-	case IDM_LEXER_CHECKSTYLE:
-	case IDM_LEXER_TOMCAT:
-	case IDM_LEXER_WEB_JAVA:
-	case IDM_LEXER_STRUTS:
-	case IDM_LEXER_HIB_CFG:
-	case IDM_LEXER_HIB_MAP:
-	case IDM_LEXER_SPRING_BEANS:
-	case IDM_LEXER_JBOSS:
-	case IDM_LEXER_WEB_NET:
-	case IDM_LEXER_RESX:
-	case IDM_LEXER_XAML:
 	case IDM_LEXER_PROPERTY_LIST:
-	case IDM_LEXER_ANDROID_MANIFEST:
-	case IDM_LEXER_ANDROID_LAYOUT:
-	case IDM_LEXER_SVG:
-	case IDM_LEXER_APACHE:
+	//case IDM_LEXER_SVG:
 		Style_SetLexerByLangIndex(LOWORD(wParam));
 		break;
 
@@ -4849,11 +4850,8 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		break;
 
 	case CMD_INCREASENUM:
-		EditModifyNumber(true);
-		break;
-
 	case CMD_DECREASENUM:
-		EditModifyNumber(false);
+		EditModifyNumber(LOWORD(wParam) == CMD_INCREASENUM);
 		break;
 
 	case CMD_JUMP2SELSTART:
@@ -7862,28 +7860,35 @@ void EditApplyDefaultEncoding(PEDITLEXER pLex, BOOL bLexerChanged) {
 // OpenFileDlg()
 //
 //
-BOOL OpenFileDlg(LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir) {
-	WCHAR tchInitialDir[MAX_PATH] = L"";
-	if (!lpstrInitialDir) {
-		if (StrNotEmpty(szCurFile)) {
-			lstrcpy(tchInitialDir, szCurFile);
-			PathRemoveFileSpec(tchInitialDir);
-		} else if (StrNotEmpty(tchDefaultDir)) {
-			ExpandEnvironmentStrings(tchDefaultDir, tchInitialDir, COUNTOF(tchInitialDir));
-			if (PathIsRelative(tchInitialDir)) {
-				WCHAR tchModule[MAX_PATH];
-				GetModuleFileName(NULL, tchModule, COUNTOF(tchModule));
-				PathRemoveFileSpec(tchModule);
-				PathAppend(tchModule, tchInitialDir);
-				PathCanonicalize(tchInitialDir, tchModule);
-			}
-		} else {
-			lstrcpy(tchInitialDir, g_wchWorkingDirectory);
+void SetupInitialOpenSaveDir(LPWSTR tchInitialDir, DWORD cchInitialDir, LPCWSTR lpstrInitialDir) {
+	tchInitialDir[0] = L'\0';
+	if (StrNotEmpty(lpstrInitialDir)) {
+		lstrcpy(tchInitialDir, lpstrInitialDir);
+	} else if (StrNotEmpty(szCurFile)) {
+		lstrcpy(tchInitialDir, szCurFile);
+		PathRemoveFileSpec(tchInitialDir);
+	} else if (StrNotEmpty(tchDefaultDir)) {
+		ExpandEnvironmentStrings(tchDefaultDir, tchInitialDir, cchInitialDir);
+		if (PathIsRelative(tchInitialDir)) {
+			WCHAR tchModule[MAX_PATH];
+			GetModuleFileName(NULL, tchModule, COUNTOF(tchModule));
+			PathRemoveFileSpec(tchModule);
+			PathAppend(tchModule, tchInitialDir);
+			PathCanonicalize(tchInitialDir, tchModule);
 		}
+	} else if (StrNotEmpty(pFileMRU->pszItems[0])) {
+		lstrcpy(tchInitialDir, pFileMRU->pszItems[0]);
+		PathRemoveFileSpec(tchInitialDir);
+	} else {
+		lstrcpy(tchInitialDir, g_wchWorkingDirectory);
 	}
+}
 
+BOOL OpenFileDlg(LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir) {
+	WCHAR tchInitialDir[MAX_PATH];
+	SetupInitialOpenSaveDir(tchInitialDir, COUNTOF(tchInitialDir), lpstrInitialDir);
 	WCHAR szFile[MAX_PATH];
-	StrCpyExW(szFile, L"");
+	szFile[0] = L'\0';
 	int lexers[1 + OPENDLG_MAX_LEXER_COUNT] = {0}; // 1-based filter index
 	LPWSTR szFilter = Style_GetOpenDlgFilterStr(true, szCurFile, lexers);
 
@@ -7893,7 +7898,7 @@ BOOL OpenFileDlg(LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir) {
 	ofn.hwndOwner = hwndMain;
 	ofn.lpstrFilter = szFilter;
 	ofn.lpstrFile = szFile;
-	ofn.lpstrInitialDir = (lpstrInitialDir) ? lpstrInitialDir : tchInitialDir;
+	ofn.lpstrInitialDir = tchInitialDir;
 	ofn.lpstrDefExt = L""; // auto add first extension from current filter
 	ofn.nMaxFile = COUNTOF(szFile);
 	ofn.Flags = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | /* OFN_NOCHANGEDIR |*/
@@ -7921,25 +7926,8 @@ BOOL OpenFileDlg(LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir) {
 //
 //
 BOOL SaveFileDlg(bool Untitled, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir) {
-	WCHAR tchInitialDir[MAX_PATH] = L"";
-	if (StrNotEmpty(lpstrInitialDir)) {
-		lstrcpy(tchInitialDir, lpstrInitialDir);
-	} else if (StrNotEmpty(szCurFile)) {
-		lstrcpy(tchInitialDir, szCurFile);
-		PathRemoveFileSpec(tchInitialDir);
-	} else if (StrNotEmpty(tchDefaultDir)) {
-		ExpandEnvironmentStrings(tchDefaultDir, tchInitialDir, COUNTOF(tchInitialDir));
-		if (PathIsRelative(tchInitialDir)) {
-			WCHAR tchModule[MAX_PATH];
-			GetModuleFileName(NULL, tchModule, COUNTOF(tchModule));
-			PathRemoveFileSpec(tchModule);
-			PathAppend(tchModule, tchInitialDir);
-			PathCanonicalize(tchInitialDir, tchModule);
-		}
-	} else {
-		lstrcpy(tchInitialDir, g_wchWorkingDirectory);
-	}
-
+	WCHAR tchInitialDir[MAX_PATH];
+	SetupInitialOpenSaveDir(tchInitialDir, COUNTOF(tchInitialDir), lpstrInitialDir);
 	WCHAR szNewFile[MAX_PATH];
 	lstrcpy(szNewFile, lpstrFile);
 	int lexers[1 + OPENDLG_MAX_LEXER_COUNT] = {0}; // 1-based filter index
