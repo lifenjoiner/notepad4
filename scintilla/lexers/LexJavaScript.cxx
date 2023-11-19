@@ -109,7 +109,7 @@ constexpr int GetStringQuote(int state) noexcept {
 
 constexpr bool FollowExpression(int chPrevNonWhite, int stylePrevNonWhite) noexcept {
 	return chPrevNonWhite == ')' || chPrevNonWhite == ']'
-		|| stylePrevNonWhite == SCE_JS_OPERATOR_PF
+		|| (stylePrevNonWhite >= SCE_JS_NUMBER && stylePrevNonWhite <= SCE_JS_OPERATOR_PF)
 		|| IsJsIdentifierChar(chPrevNonWhite);
 }
 
@@ -263,6 +263,8 @@ void ColouriseJsDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initStyl
 								// type<type>
 								// type<type?>
 								// type<type<type>>
+								// type<type, type>
+								// class type implements interface, interface {}
 								sc.ChangeState(SCE_JS_CLASS);
 							}
 						}
@@ -494,8 +496,8 @@ void ColouriseJsDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initStyl
 				sc.SetState((sc.chPrev == '.') ? SCE_JSX_ATTRIBUTE_AT : SCE_JS_DECORATOR);
 			} else if (IsJsIdentifierStart(sc.ch) || sc.Match('\\', 'u')) {
 				chBefore = chPrevNonWhite;
-				if (sc.chPrev != '.') {
-					chBeforeIdentifier = sc.chPrev;
+				if (chPrevNonWhite != '.') {
+					chBeforeIdentifier = chPrevNonWhite;
 				}
 				sc.SetState(SCE_JS_IDENTIFIER);
 			}

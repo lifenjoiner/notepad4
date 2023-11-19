@@ -417,6 +417,7 @@ Markdown
 	mkd
 
 	litcoffee		Literate CoffeeScript
+	Rmd				R Markdown, https://rmarkdown.rstudio.com/
 
 Mathematica
 	m				Module
@@ -583,6 +584,10 @@ Visual Basic
 WebAssembly
 	wat
 	wast
+
+WinHex Script
+	whs
+	tpl				Template Definition
 
 YAML Document
 	yml

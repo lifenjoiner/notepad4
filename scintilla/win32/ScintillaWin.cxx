@@ -713,10 +713,10 @@ ScintillaWin::ScintillaWin(HWND hwnd) noexcept {
 	SetCoalescableTimerFn = DLLFunctionEx<SetCoalescableTimerSig>(L"user32.dll", "SetCoalescableTimer");
 #endif
 
-	vs.indicators[IndicatorUnknown] = Indicator(IndicatorStyle::Hidden, ColourRGBA(0, 0, 0xff));
-	vs.indicators[IndicatorInput] = Indicator(IndicatorStyle::Dots, ColourRGBA(0, 0, 0xff));
-	vs.indicators[IndicatorConverted] = Indicator(IndicatorStyle::CompositionThick, ColourRGBA(0, 0, 0xff));
-	vs.indicators[IndicatorTarget] = Indicator(IndicatorStyle::StraightBox, ColourRGBA(0, 0, 0xff));
+	vs.indicators[IndicatorUnknown] = Indicator(IndicatorStyle::Hidden, colourIME);
+	vs.indicators[IndicatorInput] = Indicator(IndicatorStyle::Dots, colourIME);
+	vs.indicators[IndicatorConverted] = Indicator(IndicatorStyle::CompositionThick, colourIME);
+	vs.indicators[IndicatorTarget] = Indicator(IndicatorStyle::StraightBox, colourIME);
 }
 
 ScintillaWin::~ScintillaWin() {
@@ -963,7 +963,7 @@ inline int WideCharLenFromMultiByte(UINT codePage, std::string_view sv) noexcept
 }
 
 std::string StringEncode(const std::wstring_view wsv, int codePage) {
-	const int cchMulti = wsv.length() ? MultiByteLenFromWideChar(codePage, wsv) : 0;
+	const int cchMulti = wsv.empty() ? 0: MultiByteLenFromWideChar(codePage, wsv);
 	std::string sMulti(cchMulti, '\0');
 	if (cchMulti) {
 		MultiByteFromWideChar(codePage, wsv, sMulti.data(), cchMulti);
@@ -972,7 +972,7 @@ std::string StringEncode(const std::wstring_view wsv, int codePage) {
 }
 
 std::wstring StringDecode(const std::string_view sv, int codePage) {
-	const int cchWide = sv.length() ? WideCharLenFromMultiByte(codePage, sv) : 0;
+	const int cchWide = sv.empty() ? 0: WideCharLenFromMultiByte(codePage, sv);
 	std::wstring sWide(cchWide, 0);
 	if (cchWide) {
 		WideCharFromMultiByte(codePage, sv, sWide.data(), cchWide);
@@ -1433,7 +1433,7 @@ bool ScintillaWin::HandleLaTeXTabCompletion() {
 
 	targetRange.start.SetPosition(pos);
 	targetRange.end.SetPosition(main);
-	ReplaceTarget(ReplaceType::basic, std::string_view(buffer, len));
+	ReplaceTarget(Message::ReplaceTarget, len, reinterpret_cast<sptr_t>(buffer));
 	// move caret after character
 	SetEmptySelection(pos + len);
 	return true;
@@ -2351,6 +2351,7 @@ sptr_t ScintillaWin::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		case WM_SETREDRAW:
 			::DefWindowProc(MainHWND(), msg, wParam, lParam);
 			if (wParam) {
+				SetIdleTaskTime(IdleLineWrapTime);
 				SetScrollBars();
 				SetVerticalScrollPos();
 				SetHorizontalScrollPos();
@@ -3389,7 +3390,7 @@ LRESULT ScintillaWin::ImeOnReconvert(LPARAM lParam) {
 		} else {
 			// Ensure docCompStart+docCompLen be not beyond lineEnd.
 			// since docCompLen by byte might break eol.
-			const Sci::Position lineEnd = pdoc->LineEnd(pdoc->SciLineFromPosition(rBase));
+			const Sci::Position lineEnd = pdoc->LineEndPosition(rBase);
 			const Sci::Position overflow = (docCompStart + docCompLen) - lineEnd;
 			if (overflow > 0) {
 				pdoc->DeleteChars(docCompStart, docCompLen - overflow);
