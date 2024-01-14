@@ -180,17 +180,12 @@ constexpr bool KeyboardIsNumericKeypadFunction(Scintilla::uptr_t wParam, Scintil
 	}
 }
 
-inline CLIPFORMAT GetClipboardFormat(LPCWSTR name) noexcept {
-	return static_cast<CLIPFORMAT>(::RegisterClipboardFormat(name));
+inline CLIPFORMAT RegisterClipboardType(LPCWSTR lpszFormat) noexcept {
+	// Registered clipboard format values are 0xC000 through 0xFFFF.
+	// RegisterClipboardFormat() returns 32-bit unsigned and CLIPFORMAT is 16-bit
+	// unsigned so choose the low 16-bits with &.
+	return static_cast<CLIPFORMAT>(::RegisterClipboardFormat(lpszFormat));
 }
-
-#if 0
-inline void LazyGetClipboardFormat(UINT &fmt, LPCWSTR name) noexcept {
-	if (fmt == 0) {
-		fmt = ::RegisterClipboardFormat(name);
-	}
-}
-#endif
 
 }
 
@@ -420,9 +415,9 @@ class ScintillaWin final :
 	HRGN hRgnUpdate {};
 
 	CLIPFORMAT cfColumnSelect;
-	UINT cfBorlandIDEBlockType;
-	UINT cfLineSelect;
-	UINT cfVSLineTag;
+	CLIPFORMAT cfBorlandIDEBlockType;
+	CLIPFORMAT cfLineSelect;
+	CLIPFORMAT cfVSLineTag;
 
 #if EnableDrop_VisualStudioProjectItem
 	CLIPFORMAT cfVSStgProjectItem;
@@ -665,22 +660,22 @@ ScintillaWin::ScintillaWin(HWND hwnd) noexcept {
 
 	// There does not seem to be a real standard for indicating that the clipboard
 	// contains a rectangular selection, so copy Developer Studio and Borland Delphi.
-	cfColumnSelect = GetClipboardFormat(L"MSDEVColumnSelect");
-	cfBorlandIDEBlockType = ::RegisterClipboardFormat(L"Borland IDE Block Type");
+	cfColumnSelect = RegisterClipboardType(L"MSDEVColumnSelect");
+	cfBorlandIDEBlockType = RegisterClipboardType(L"Borland IDE Block Type");
 
 	// Likewise for line-copy (copies a full line when no text is selected)
-	cfLineSelect = ::RegisterClipboardFormat(L"MSDEVLineSelect");
-	cfVSLineTag = ::RegisterClipboardFormat(L"VisualStudioEditorOperationsLineCutCopyClipboardTag");
+	cfLineSelect = RegisterClipboardType(L"MSDEVLineSelect");
+	cfVSLineTag = RegisterClipboardType(L"VisualStudioEditorOperationsLineCutCopyClipboardTag");
 
 #if EnableDrop_VisualStudioProjectItem
-	cfVSStgProjectItem = GetClipboardFormat(L"CF_VSSTGPROJECTITEMS");
-	cfVSRefProjectItem = GetClipboardFormat(L"CF_VSREFPROJECTITEMS");
+	cfVSStgProjectItem = RegisterClipboardType(L"CF_VSSTGPROJECTITEMS");
+	cfVSRefProjectItem = RegisterClipboardType(L"CF_VSREFPROJECTITEMS");
 #endif
 #if Enable_ChromiumWebCustomMIMEDataFormat
-	cfChromiumCustomMIME = GetClipboardFormat(L"Chromium Web Custom MIME Data Format");
+	cfChromiumCustomMIME = RegisterClipboardType(L"Chromium Web Custom MIME Data Format");
 #endif
 #if DebugCopyAsRichTextFormat
-	cfRTF = GetClipboardFormat(L"Rich Text Format");
+	cfRTF = RegisterClipboardType(L"Rich Text Format");
 #endif
 
 	UINT index = 0;
@@ -1238,7 +1233,7 @@ void ScintillaWin::SetCandidateWindowPos() {
 }
 
 void ScintillaWin::SelectionToHangul() {
-	// Convert every hanja to hangul within the main range.
+	// Convert every Hanja to Hangul within the main range.
 	const Sci::Position selStart = sel.RangeMain().Start().Position();
 	const Sci::Position documentStrLen = sel.RangeMain().Length();
 	const Sci::Position selEnd = selStart + documentStrLen;
@@ -1263,9 +1258,9 @@ void ScintillaWin::SelectionToHangul() {
 }
 
 void ScintillaWin::EscapeHanja() {
-	// The candidate box pops up to user to select a hanja.
+	// The candidate box pops up to user to select a Hanja.
 	// It comes into WM_IME_COMPOSITION with GCS_RESULTSTR.
-	// The existing hangul or hanja is replaced with it.
+	// The existing Hangul or Hanja is replaced with it.
 	if (sel.Count() > 1) {
 		return; // Do not allow multi carets.
 	}
@@ -1296,7 +1291,7 @@ void ScintillaWin::EscapeHanja() {
 }
 
 void ScintillaWin::ToggleHanja() {
-	// If selection, convert every hanja to hangul within the main range.
+	// If selection, convert every Hanja to Hangul within the main range.
 	// If no selection, commit to IME.
 	if (sel.Count() > 1) {
 		return; // Do not allow multi carets.
@@ -2362,7 +2357,7 @@ sptr_t ScintillaWin::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 			capturedMouse = false;
 			return 0;
 
-			// These are not handled in Scintilla and its faster to dispatch them here.
+			// These are not handled in Scintilla and it's faster to dispatch them here.
 			// Also moves time out to here so profile doesn't count lots of empty message calls.
 
 		case WM_MOVE:
@@ -3607,7 +3602,7 @@ void ScintillaWin::HorizontalScrollMessage(WPARAM wParam) {
 		break;
 	case SB_THUMBPOSITION:
 	case SB_THUMBTRACK: {
-		// Do NOT use wParam, its 16 bit and not enough for very long lines. Its still possible to overflow the 32 bit but you have to try harder =]
+		// Do NOT use wParam, its 16 bit and not enough for very long lines. It's still possible to overflow the 32 bit but you have to try harder =]
 		SCROLLINFO si {};
 		si.cbSize = sizeof(si);
 		si.fMask = SIF_TRACKPOS;
@@ -3637,7 +3632,7 @@ void ScintillaWin::FullPaint() {
 }
 
 /**
- * Redraw all of text area on the specified DC.
+ * Redraw all text area on the specified DC.
  * This paint will not be abandoned.
  */
 void ScintillaWin::FullPaintDC(HDC hdc) {
@@ -3671,7 +3666,7 @@ bool ScintillaWin::IsCompatibleDC(HDC hOtherDC) const noexcept {
 // https://docs.microsoft.com/en-us/windows/desktop/api/oleidl/nf-oleidl-idroptarget-dragenter
 DWORD ScintillaWin::EffectFromState(DWORD grfKeyState) const noexcept {
 	// These are the Wordpad semantics.
-	// DROPEFFECT_COPY not works for some applications like Github Atom.
+	// DROPEFFECT_COPY not works for some applications like GitHub Atom.
 	DWORD dwEffect = DROPEFFECT_MOVE;
 #if 0
 	if (inDragDrop == DragDrop::dragging)	// Internal defaults to move
@@ -3736,7 +3731,7 @@ const char* GetStorageMediumType(DWORD tymed) noexcept {
 }
 
 const char* GetSourceFormatName(UINT fmt, char name[], int cchName) noexcept {
-	const int len = GetClipboardFormatNameA(fmt, name, cchName);
+	const int len = RegisterClipboardTypeNameA(fmt, name, cchName);
 	if (len <= 0) {
 		switch (fmt) {
 		case CF_TEXT:

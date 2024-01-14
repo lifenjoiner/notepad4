@@ -110,6 +110,10 @@ NP2_inline bool IsASpaceOrTab(int ch) {
 	return ch == ' ' || ch == '\t';
 }
 
+NP2_inline bool IsADigit(int ch) {
+	return ch >= '0' && ch <= '9';
+}
+
 NP2_inline bool IsOctalDigit(int ch) {
 	return ch >= '0' && ch <= '7';
 }
@@ -317,7 +321,7 @@ extern WCHAR szIniFile[MAX_PATH];
 #define LOAD_LIBRARY_AS_IMAGE_RESOURCE	0x00000020
 #endif
 
-#if defined(__GNUC__) && __GNUC__ >= 8
+#if (defined(__GNUC__) && __GNUC__ >= 8) || (defined(__clang__) && __clang_major__ >= 18)
 // GCC statement expression
 #define DLLFunction(funcSig, hModule, funcName) __extension__({			\
 	_Pragma("GCC diagnostic push")										\
@@ -890,17 +894,33 @@ typedef struct MRULIST {
 
 typedef const MRULIST * LPCMRULIST;
 
-LPMRULIST MRU_Create(LPCWSTR pszRegKey, int iFlags);
-void	MRU_Destroy(LPMRULIST pmru);
-void	MRU_Add(LPMRULIST pmru, LPCWSTR pszNew);
-void	MRU_AddMultiline(LPMRULIST pmru, LPCWSTR pszNew);
-void	MRU_Delete(LPMRULIST pmru, int iIndex);
-void	MRU_DeleteFileFromStore(LPCMRULIST pmru, LPCWSTR pszFile);
-void	MRU_Empty(LPMRULIST pmru, bool save);
-void	MRU_Load(LPMRULIST pmru);
-void	MRU_Save(LPCMRULIST pmru);
-void	MRU_MergeSave(LPMRULIST pmru, bool keep);
+void MRU_Init(LPMRULIST pmru, LPCWSTR pszRegKey, int iFlags);
+void MRU_Add(LPMRULIST pmru, LPCWSTR pszNew);
+void MRU_AddMultiline(LPMRULIST pmru, LPCWSTR pszNew);
+void MRU_Delete(LPMRULIST pmru, int iIndex);
+void MRU_DeleteFileFromStore(LPCMRULIST pmru, LPCWSTR pszFile);
+void MRU_Empty(LPMRULIST pmru, bool save);
+void MRU_Load(LPMRULIST pmru);
+void MRU_Save(LPCMRULIST pmru);
+void MRU_MergeSave(LPMRULIST pmru, bool keep);
 void MRU_AddToCombobox(LPCMRULIST pmru, HWND hwnd);
+
+typedef struct BitmapCache {
+	UINT count;
+	UINT used;
+	bool invalid;
+	int iconIndex[MRU_MAXITEMS];
+	HBITMAP items[MRU_MAXITEMS];
+} BitmapCache;
+
+static inline void BitmapCache_Invalidate(BitmapCache *cache) {
+	cache->invalid = true; // mark all cache as invalid
+}
+static inline void BitmapCache_StartUse(BitmapCache *cache) {
+	cache->used = 0; // mark all cache as unused
+}
+void BitmapCache_Empty(BitmapCache *cache);
+HBITMAP BitmapCache_Get(BitmapCache *cache, LPCWSTR path);
 
 //==== Themed Dialogs =========================================================
 #ifndef DLGTEMPLATEEX

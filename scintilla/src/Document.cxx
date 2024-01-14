@@ -156,15 +156,16 @@ Document::Document(DocumentOption options) :
 	enteredModification = 0;
 	enteredStyling = 0;
 	enteredReadOnlyCount = 0;
+	matchesValid = false;
 	insertionSet = false;
 	tabInChars = 8;
 	indentInChars = 0;
 	actualIndentInChars = 8;
 	useTabs = true;
 	tabIndents = true;
+	forwardSafeChar = 0x80;
+	backwardSafeChar = 0x80;
 	backspaceUnindents = false;
-
-	matchesValid = false;
 
 	perLineData[ldMarkers] = std::make_unique<LineMarkers>();
 	perLineData[ldLevels] = std::make_unique<LineLevels>();
@@ -186,7 +187,7 @@ Document::~Document() {
 }
 
 // Increase reference count and return its previous value.
-int Document::AddRef() noexcept {
+int SCI_METHOD Document::AddRef() noexcept {
 	return refCount++;
 }
 
@@ -265,20 +266,35 @@ LineEndType Document::LineEndTypesSupported() const noexcept {
 		return LineEndType::Default;
 }
 
-static inline std::unique_ptr<DBCSCharClassify> GetDBCSCharClassify(int codePage) {
-	if (codePage != 0 && codePage != CpUtf8) {
-		return std::make_unique<DBCSCharClassify>(codePage);
-	}
-	return {};
-}
-
 bool Document::SetDBCSCodePage(int dbcsCodePage_) {
 	if (dbcsCodePage != dbcsCodePage_) {
 		dbcsCodePage = dbcsCodePage_;
 		pcf.reset();
 		cb.SetLineEndTypes(lineEndBitSet & LineEndTypesSupported());
 		cb.SetUTF8Substance(CpUtf8 == dbcsCodePage);
-		dbcsCharClass = GetDBCSCharClassify(dbcsCodePage);
+		DBCSCharClassify *classify = nullptr;
+		forwardSafeChar = 0xff;
+		backwardSafeChar = 0xff;
+		if (dbcsCodePage) {
+			forwardSafeChar = 0x80;
+			backwardSafeChar = 0x80;
+			if (CpUtf8 != dbcsCodePage) {
+				// minimum trail byte
+				switch (dbcsCodePage) {
+				default:
+					backwardSafeChar = 0x40 - 1;
+					break;
+				case 949:
+					backwardSafeChar = 0x41 - 1;
+					break;
+				case 1361:
+					backwardSafeChar = 0x31 - 1;
+					break;
+				}
+				classify = new DBCSCharClassify(dbcsCodePage);
+			}
+		}
+		dbcsCharClass.reset(classify);
 		regex.reset();
 		ModifiedAt(0);	// Need to restyle whole document
 		return true;
@@ -1171,8 +1187,8 @@ size_t Document::SafeSegment(const char *text, size_t lengthSegment, EncodingFam
 					prev = current;
 					it += UTF8BytesOfLead(static_cast<unsigned char>(*it));
 				} while (it < end);
-				// no boundary between last two code points, assume text ends with a longest sequence.
-				it -= longestUnicodeCharacterSquenceBytes + UTF8MaxBytes;
+				// no boundary between last two code points, assume text ends with the longest sequence.
+				it -= longestUnicodeCharacterSequenceBytes + UTF8MaxBytes;
 			}
 #endif
 		}
@@ -1381,7 +1397,7 @@ int SCI_METHOD Document::AddData(const char *data, Sci_Position length) {
 }
 
 void * SCI_METHOD Document::ConvertToDocument() noexcept {
-	return this;
+	return AsDocumentEditable();
 }
 
 Sci::Position Document::Undo() {
@@ -1394,10 +1410,7 @@ Sci::Position Document::Undo() {
 			bool multiLine = false;
 			const int steps = cb.StartUndo();
 			//Platform::DebugPrintf("Steps=%d\n", steps);
-			Sci::Position coalescedRemovePos = -1;
-			Sci::Position coalescedRemoveLen = 0;
-			Sci::Position prevRemoveActionPos = -1;
-			Sci::Position prevRemoveActionLen = 0;
+			Range coalescedRemove;	// Default is empty at 0
 			for (int step = 0; step < steps; step++) {
 				const Sci::Line prevLinesTotal = LinesTotal();
 				const Action &action = cb.GetUndoStep();
@@ -1408,12 +1421,6 @@ Sci::Position Document::Undo() {
 					DocModification dm(ModificationFlags::Container | ModificationFlags::Undo);
 					dm.token = action.position;
 					NotifyModified(dm);
-					if (!action.mayCoalesce) {
-						coalescedRemovePos = -1;
-						coalescedRemoveLen = 0;
-						prevRemoveActionPos = -1;
-						prevRemoveActionLen = 0;
-					}
 				} else {
 					NotifyModified(DocModification(
 						ModificationFlags::BeforeDelete | ModificationFlags::Undo, action));
@@ -1429,22 +1436,15 @@ Sci::Position Document::Undo() {
 				if (action.at == ActionType::remove) {
 					newPos += action.lenData;
 					modFlags |= ModificationFlags::InsertText;
-					if ((coalescedRemoveLen > 0) &&
-						(action.position == prevRemoveActionPos || action.position == (prevRemoveActionPos + prevRemoveActionLen))) {
-						coalescedRemoveLen += action.lenData;
-						newPos = coalescedRemovePos + coalescedRemoveLen;
+					if (coalescedRemove.Contains(action.position)) {
+						coalescedRemove.end += action.lenData;
+						newPos = coalescedRemove.end;
 					} else {
-						coalescedRemovePos = action.position;
-						coalescedRemoveLen = action.lenData;
+						coalescedRemove = Range(action.position, action.position + action.lenData);
 					}
-					prevRemoveActionPos = action.position;
-					prevRemoveActionLen = action.lenData;
 				} else if (action.at == ActionType::insert) {
 					modFlags |= ModificationFlags::DeleteText;
-					coalescedRemovePos = -1;
-					coalescedRemoveLen = 0;
-					prevRemoveActionPos = -1;
-					prevRemoveActionLen = 0;
+					coalescedRemove = Range();
 				}
 				if (steps > 1)
 					modFlags |= ModificationFlags::MultiStepUndoRedo;
@@ -2078,7 +2078,7 @@ bool Document::IsWordEndAt(Sci::Position pos) const noexcept {
 }
 
 /**
- * Check that the given range is has transitions between character classes at both
+ * Check that the given range has transitions between character classes at both
  * ends and where the characters on the inside are word or punctuation characters.
  */
 bool Document::IsWordAt(Sci::Position start, Sci::Position end) const noexcept {
@@ -2140,7 +2140,7 @@ Sci::Position Document::FindText(Sci::Position minPos, Sci::Position maxPos, con
 		// pos >= endSearch: break           continue
 		// pos < endSearch:  continue        break
 		// i.e. continue search when direction and (pos - endSearch) have opposite signs,
-		// which can be wrote as: (direction ^ (pos - endSearch)) < 0
+		// which can be written as: (direction ^ (pos - endSearch)) < 0
 
 		// Range endpoints should not be inside DBCS characters, but just in case, move them.
 		const Sci::Position startPos = MovePositionOutsideChar(minPos, increment, false);
@@ -2148,10 +2148,6 @@ Sci::Position Document::FindText(Sci::Position minPos, Sci::Position maxPos, con
 
 		// Compute actual search ranges needed
 		const Sci::Position lengthFind = *length;
-
-		// character less than safeChar is encoded in single byte in the encoding.
-		constexpr int safeCharASCII = 0x80;		// UTF-8 forward & backward search, DBCS forward search
-		constexpr int safeCharSBCS = 256;		// all
 
 		//Platform::DebugPrintf("Find %d %d %s %d\n", startPos, endPos, search, lengthFind);
 		const Sci::Position limitPos = std::max(startPos, endPos);
@@ -2163,10 +2159,7 @@ Sci::Position Document::FindText(Sci::Position minPos, Sci::Position maxPos, con
 		const SplitView cbView = cb.AllView();
 		SearchThing searchThing;
 		if (caseSensitive) {
-			const Sci::Position endSearch = (startPos <= endPos) ? endPos - lengthFind + 1 : endPos;
 			const unsigned char * const searchData = reinterpret_cast<const unsigned char *>(search);
-			const unsigned char charStartSearch = searchData[0];
-			const int safeChar = (0 == dbcsCodePage) ? safeCharSBCS : ((direction >= 0 || CpUtf8 == dbcsCodePage) ? safeCharASCII : dbcsCharClass->MinTrailByte());
 			// Boyer-Moore-Horspool-Sunday Algorithm / Quick Search Algorithm
 			// https://www-igm.univ-mlv.fr/~lecroq/string/index.html
 			// https://www-igm.univ-mlv.fr/~lecroq/string/node19.html
@@ -2195,6 +2188,9 @@ Sci::Position Document::FindText(Sci::Position minPos, Sci::Position maxPos, con
 				}
 			}
 
+			const Sci::Position endSearch = (startPos <= endPos) ? endPos - lengthFind + 1 : endPos;
+			const unsigned char charStartSearch = searchData[0];
+			const unsigned char safeChar = (direction >= 0) ? forwardSafeChar : backwardSafeChar;
 			const Sci::Position skip = (direction >= 0) ? lengthFind : -1;
 			if (direction < 0) {
 				pos = MovePositionOutsideChar(pos - lengthFind, -1, false);
@@ -2214,7 +2210,7 @@ Sci::Position Document::FindText(Sci::Position minPos, Sci::Position maxPos, con
 				}
 
 				if (lengthFind == 1) {
-					if (leadByte < safeChar) {
+					if (leadByte <= safeChar) {
 						pos += increment;
 					} else {
 						if (!NextCharacter(pos, increment)) {
@@ -2224,7 +2220,7 @@ Sci::Position Document::FindText(Sci::Position minPos, Sci::Position maxPos, con
 				} else {
 					const unsigned char nextByte = cbView.CharAt(pos + skip);
 					pos += shiftTable[nextByte];
-					if (nextByte >= safeChar) {
+					if (nextByte > safeChar) {
 						pos = MovePositionOutsideChar(pos, increment, false);
 					}
 				}
@@ -2393,11 +2389,11 @@ LineCharacterIndexType Document::LineCharacterIndex() const noexcept {
 }
 
 void Document::AllocateLineCharacterIndex(LineCharacterIndexType lineCharacterIndex) {
-	return cb.AllocateLineCharacterIndex(lineCharacterIndex);
+	cb.AllocateLineCharacterIndex(lineCharacterIndex);
 }
 
 void Document::ReleaseLineCharacterIndex(LineCharacterIndexType lineCharacterIndex) {
-	return cb.ReleaseLineCharacterIndex(lineCharacterIndex);
+	cb.ReleaseLineCharacterIndex(lineCharacterIndex);
 }
 
 void Document::AllocateLines(Sci::Line lines) {
@@ -2942,14 +2938,12 @@ class BuiltinRegex final : public RegexSearchBase {
 public:
 	explicit BuiltinRegex(const CharClassify *charClassTable) : search(charClassTable) {}
 
-	Sci::Position FindText(const Document *doc, Sci::Position minPos, Sci::Position maxPos, const char *pattern,
-		FindOption flags, Sci::Position *length) override;
+	Sci::Position FindText(const Document *doc, Sci::Position minPos, Sci::Position maxPos, const char *pattern, FindOption flags, Sci::Position *length) override;
 
-	const char *SubstituteByPosition(Document *doc, const char *text, Sci::Position *length) override;
+	const char *SubstituteByPosition(const Document *doc, const char *text, Sci::Position *length) override;
 
 #if defined(BOOST_REGEX_STANDALONE) || !defined(NO_CXX11_REGEX)
-	Sci::Position CxxRegexFindText(const Document *doc, Sci::Position minPos, Sci::Position maxPos, const char *pattern,
-		FindOption flags, Sci::Position *length);
+	Sci::Position CxxRegexFindText(const Document *doc, Sci::Position minPos, Sci::Position maxPos, const char *pattern, FindOption flags, Sci::Position *length);
 #endif
 
 private:
@@ -2991,8 +2985,8 @@ public:
 		lineRangeEnd = doc->SciLineFromPosition(endPos);
 		lineRangeBreak = lineRangeEnd + increment;
 	}
-	Range LineRange(Sci::Line line) const noexcept {
-		Range range(doc->LineStart(line), doc->LineEnd(line));
+	Range LineRange(Sci::Line line, Sci::Position lineStartPos, Sci::Position lineEndPos) const noexcept {
+		Range range(lineStartPos, lineEndPos);
 		if (increment > 0) {
 			if (line == lineRangeStart)
 				range.start = startPos;
@@ -3203,13 +3197,23 @@ public:
 #define REGEX_MULTILINE
 #endif
 
-std::regex_constants::match_flag_type MatchFlags(const Document *doc, Sci::Position startPos, Sci::Position endPos) noexcept {
+std::regex_constants::match_flag_type MatchFlags(const Document *doc, Sci::Position startPos, Sci::Position endPos, Sci::Position lineStartPos, Sci::Position lineEndPos) noexcept {
 	std::regex_constants::match_flag_type flagsMatch = std::regex_constants::match_default;
-	if (!doc->IsLineStartPosition(startPos)) {
+	if (startPos != lineStartPos) {
+#if defined(_LIBCPP_VERSION)
 		flagsMatch |= std::regex_constants::match_not_bol;
+		if (!doc->IsWordStartAt(startPos)) {
+			flagsMatch |= std::regex_constants::match_not_bow;
+		}
+#else
+		flagsMatch |= std::regex_constants::match_prev_avail;
+#endif
 	}
-	if (!doc->IsLineEndPosition(endPos)) {
+	if (endPos != lineEndPos) {
 		flagsMatch |= std::regex_constants::match_not_eol;
+		if (!doc->IsWordEndAt(endPos)) {
+			flagsMatch |= std::regex_constants::match_not_eow;
+		}
 	}
 	return flagsMatch;
 }
@@ -3224,13 +3228,15 @@ bool MatchOnLines(const Document *doc, const Regex &regexp, const RESearchRange 
 	// has not been implemented by compiler runtimes with MSVC always in multiline
 	// mode and libc++ and libstdc++ always in single-line mode.
 	// If multiline regex worked well then the line by line iteration could be removed
-	// for the forwards case and replaced with the following 4 lines:
+	// for the forwards case and replaced with the following:
 	bool matched = false;
 #ifdef REGEX_MULTILINE
 	if (resr.increment > 0) {
+		const Sci::Position lineStartPos = doc->LineStart(resr.lineRangeStart);
+		const Sci::Position lineEndPos = doc->LineEnd(resr.lineRangeEnd);
 		Iterator itStart(doc, resr.startPos);
 		Iterator itEnd(doc, resr.endPos);
-		const std::regex_constants::match_flag_type flagsMatch = MatchFlags(doc, resr.startPos, resr.endPos);
+		const std::regex_constants::match_flag_type flagsMatch = MatchFlags(doc, resr.startPos, resr.endPos, lineStartPos, lineEndPos);
 		matched = std::regex_search(itStart, itEnd, match, regexp, flagsMatch);
 		goto labelMatched;
 	}
@@ -3238,36 +3244,24 @@ bool MatchOnLines(const Document *doc, const Regex &regexp, const RESearchRange 
 	{
 		// Line by line.
 		for (Sci::Line line = resr.lineRangeStart; line != resr.lineRangeBreak; line += resr.increment) {
-			const Range lineRange = resr.LineRange(line);
+			const Sci::Position lineStartPos = doc->LineStart(line);
+			const Sci::Position lineEndPos = doc->LineEnd(line);
+			const Range lineRange = resr.LineRange(line, lineStartPos, lineEndPos);
 			Iterator itStart(doc, lineRange.start);
 			Iterator itEnd(doc, lineRange.end);
-			std::regex_constants::match_flag_type flagsMatch = MatchFlags(doc, lineRange.start, lineRange.end);
-			matched = std::regex_search(itStart, itEnd, match, regexp, flagsMatch);
-			// Check for the last match on this line.
-			if (matched) {
+			const std::regex_constants::match_flag_type flagsMatch = MatchFlags(doc, lineRange.start, lineRange.end, lineStartPos, lineEndPos);
+			std::regex_iterator<Iterator> it(itStart, itEnd, regexp, flagsMatch);
+			for (const std::regex_iterator<Iterator> last; it != last; ++it) {
+				match = *it;
+				matched = true;
 #ifndef REGEX_MULTILINE
-			if (resr.increment < 0) {
-#endif
-				flagsMatch |= std::regex_constants::match_not_bol;
-				Sci::Position endPos = match[0].second.PosRoundUp();
-				while (endPos < lineRange.end) {
-					if (match[0].first == match[0].second) {
-						// empty match
-						endPos = doc->NextPosition(endPos, 1);
-					}
-					Iterator itNext(doc, endPos);
-					std::match_results<Iterator> matchNext;
-					if (std::regex_search(itNext, itEnd, matchNext, regexp, flagsMatch)) {
-						match = matchNext;
-						endPos = match[0].second.PosRoundUp();
-					} else {
-						break;
-					}
+				if (resr.increment > 0) {
+					break;
 				}
-#ifndef REGEX_MULTILINE
-			}
 #endif
-			break;
+			}
+			if (matched) {
+				break;
 			}
 		}
 	}
@@ -3284,8 +3278,7 @@ labelMatched:
 	return matched;
 }
 
-Sci::Position BuiltinRegex::CxxRegexFindText(const Document *doc, Sci::Position minPos, Sci::Position maxPos, const char *pattern,
-	FindOption flags, Sci::Position *length) {
+Sci::Position BuiltinRegex::CxxRegexFindText(const Document *doc, Sci::Position minPos, Sci::Position maxPos, const char *pattern, FindOption flags, Sci::Position *length) {
 	const RESearchRange resr(doc, minPos, maxPos);
 	try {
 		//const ElapsedPeriod ep;
@@ -3347,9 +3340,7 @@ Sci::Position BuiltinRegex::CxxRegexFindText(const Document *doc, Sci::Position 
 
 #endif // BOOST_REGEX_STANDALONE || !NO_CXX11_REGEX
 
-Sci::Position BuiltinRegex::FindText(const Document *doc, Sci::Position minPos, Sci::Position maxPos, const char *pattern,
-	FindOption flags, Sci::Position *length) {
-
+Sci::Position BuiltinRegex::FindText(const Document *doc, Sci::Position minPos, Sci::Position maxPos, const char *pattern, FindOption flags, Sci::Position *length) {
 #if defined(BOOST_REGEX_STANDALONE) || !defined(NO_CXX11_REGEX)
 	if (FlagSet(flags, FindOption::Cxx11RegEx)) {
 		return CxxRegexFindText(doc, minPos, maxPos, pattern, flags, length);
@@ -3406,37 +3397,29 @@ Sci::Position BuiltinRegex::FindText(const Document *doc, Sci::Position minPos, 
 		search.SetLineRange(lineStartPos, lineEndPos);
 		int success = search.Execute(di, startOfLine, endOfLine);
 		if (success) {
-			pos = search.bopat[0];
-			lenRet = search.eopat[0] - pos;
+			Sci::Position endPos = search.eopat[0];
 			// There can be only one start of a line, so no need to look for last match in line
 			if ((resr.increment < 0) && !searchforLineStart) {
 				// Check for the last match on this line.
-				Sci::Position endPos = search.eopat[0];
-				RESearch::MatchPositions bopat{};
-				RESearch::MatchPositions eopat{};
 				while (success && (endPos < endOfLine)) {
-					bopat = search.bopat;
-					eopat = search.eopat;
-					if (lenRet == 0) {
+					const RESearch::MatchPositions bopat = search.bopat;
+					const RESearch::MatchPositions eopat = search.eopat;
+					pos = endPos;
+					if (pos == bopat[0]) {
 						// empty match
-						endPos = doc->NextPosition(endPos, 1);
+						pos = doc->NextPosition(pos, 1);
 					}
-					success = search.Execute(di, endPos, endOfLine);
+					success = search.Execute(di, pos, endOfLine);
 					if (success) {
 						endPos = search.eopat[0];
-						if (endPos <= minPos) {
-							pos = search.bopat[0];
-							lenRet = endPos - pos;
-						} else {
-							success = 0;
-						}
+					} else {
+						search.bopat = bopat;
+						search.eopat = eopat;
 					}
 				}
-				if (!success) {
-					search.bopat = bopat;
-					search.eopat = eopat;
-				}
 			}
+			pos = search.bopat[0];
+			lenRet = endPos - pos;
 			break;
 		}
 	}
@@ -3444,7 +3427,7 @@ Sci::Position BuiltinRegex::FindText(const Document *doc, Sci::Position minPos, 
 	return pos;
 }
 
-const char *BuiltinRegex::SubstituteByPosition(Document *doc, const char *text, Sci::Position *length) {
+const char *BuiltinRegex::SubstituteByPosition(const Document *doc, const char *text, Sci::Position *length) {
 	substituted.clear();
 	for (Sci::Position j = 0; j < *length; j++) {
 		if (text[j] == '\\') {

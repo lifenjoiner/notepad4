@@ -1288,10 +1288,10 @@ bool PathGetLnkPath(LPCWSTR pszLnkFile, LPWSTR pszResPath) {
 	tchPath[0] = L'\0';
 
 #if defined(__cplusplus)
-	if (SUCCEEDED(CoCreateInstance(IID_IShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_IShellLink, (LPVOID *)(&psl)))) {
+	if (SUCCEEDED(CoCreateInstance(IID_IShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_IShellLink, reinterpret_cast<LPVOID *>(&psl)))) {
 		IPersistFile *ppf;
 
-		if (SUCCEEDED(psl->QueryInterface(IID_IPersistFile, (void **)(&ppf)))) {
+		if (SUCCEEDED(psl->QueryInterface(IID_IPersistFile, reinterpret_cast<void **>(&ppf)))) {
 			if (SUCCEEDED(ppf->Load(pszLnkFile, STGM_READ))) {
 				hr = psl->GetPath(tchPath, COUNTOF(tchPath), nullptr, 0);
 			}
@@ -1347,10 +1347,10 @@ bool PathCreateLnk(LPCWSTR pszLnkDir, LPCWSTR pszPath) {
 	bool bSucceeded = false;
 
 #if defined(__cplusplus)
-	if (SUCCEEDED(CoCreateInstance(IID_IShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_IShellLink, (LPVOID *)(&psl)))) {
+	if (SUCCEEDED(CoCreateInstance(IID_IShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_IShellLink, reinterpret_cast<LPVOID *>(&psl)))) {
 		IPersistFile *ppf;
 
-		if (SUCCEEDED(psl->QueryInterface(IID_IPersistFile, (void **)(&ppf)))) {
+		if (SUCCEEDED(psl->QueryInterface(IID_IPersistFile, reinterpret_cast<void **>(&ppf)))) {
 			psl->SetPath(pszPath);
 
 			if (SUCCEEDED(ppf->Save(tchLnkFileName, TRUE))) {
@@ -1757,7 +1757,7 @@ void History_Init(PHISTORY ph) {
 	ph->iCurItem = -1;
 }
 
-void History_Uninit(PHISTORY ph) {
+void History_Empty(PHISTORY ph) {
 	for (int i = 0; i < HISTORY_ITEMS; i++) {
 		if (ph->psz[i]) {
 			LocalFree(ph->psz[i]);
@@ -1788,7 +1788,7 @@ bool History_Add(PHISTORY ph, LPCWSTR pszNew) {
 			LocalFree(ph->psz[0]);
 		}
 
-		memmove(ph->psz, ph->psz + 1, (HISTORY_ITEMS - 1) * sizeof(WCHAR *));
+		memmove(NP2_void_pointer(ph->psz), NP2_void_pointer(ph->psz + 1), (HISTORY_ITEMS - 1) * sizeof(WCHAR *));
 	}
 
 	ph->psz[ph->iCurItem] = StrDup(pszNew);
@@ -1858,21 +1858,12 @@ void History_UpdateToolbar(LCPHISTORY ph, HWND hwnd, int cmdBack, int cmdForward
 //
 //  MRU functions
 //
-LPMRULIST MRU_Create(LPCWSTR pszRegKey, int iFlags) {
-	LPMRULIST pmru = (LPMRULIST)NP2HeapAlloc(sizeof(MRULIST));
+void MRU_Init(LPMRULIST pmru, LPCWSTR pszRegKey, int iFlags) {
+	pmru->iSize = 0;
 	pmru->iFlags = iFlags;
 	pmru->szRegKey = pszRegKey;
+	memset(NP2_void_pointer(pmru->pszItems), 0, sizeof(pmru->pszItems));
 	MRU_Load(pmru);
-	return pmru;
-}
-
-void MRU_Destroy(LPMRULIST pmru) {
-	for (int i = 0; i < pmru->iSize; i++) {
-		LocalFree(pmru->pszItems[i]);
-	}
-
-	memset(pmru, 0, sizeof(MRULIST));
-	NP2HeapFree(pmru);
 }
 
 static inline bool MRU_Equal(int flags, LPCWSTR psz1, LPCWSTR psz2) {
@@ -1931,8 +1922,8 @@ void MRU_Empty(LPMRULIST pmru, bool save) {
 		pmru->pszItems[i] = NULL;
 	}
 	pmru->iSize = 0;
-	if (save) {
-		MRU_Save(pmru);
+	if (save && StrNotEmpty(szIniFile)) {
+		IniClearSection(pmru->szRegKey);
 	}
 }
 
@@ -1946,9 +1937,7 @@ void MRU_Load(LPMRULIST pmru) {
 	const int cchIniSection = (int)(NP2HeapSize(pIniSectionBuf) / sizeof(WCHAR));
 	IniSection * const pIniSection = &section;
 
-	//MRU_Empty(pmru, false);
 	IniSectionInit(pIniSection, MRU_MAXITEMS);
-
 	LoadIniSection(pmru->szRegKey, pIniSectionBuf, cchIniSection);
 	IniSectionParseArray(pIniSection, pIniSectionBuf);
 	const UINT count = pIniSection->count;
@@ -2235,8 +2224,8 @@ UINT_PTR CALLBACK OpenSaveFileDlgHookProc(HWND hwnd, UINT umsg, WPARAM wParam, L
 // me a line if you use them!
 //
 // 1.0 29.06.2000 Initial version
-// 1.1 01.07.2000 The window retains it's place in the Z-order of windows
-//     when minimized/hidden. This means that when restored/shown, it doen't
+// 1.1 01.07.2000 The window retains its place in the Z-order of windows
+//     when minimized/hidden. This means that when restored/shown, it doesn't
 //     always appear as the foreground window unless we call SetForegroundWindow
 //
 // Copyright 2000 Matthew Ellis <m.t.ellis@bigfoot.com>
@@ -2290,7 +2279,7 @@ static void GetTrayWndRect(LPRECT lpTrayRect) {
 	appBarData.cbSize = sizeof(appBarData);
 	if (SHAppBarMessage(ABM_GETTASKBARPOS, &appBarData)) {
 		// We know the edge the taskbar is connected to, so guess the rect of the
-		// system tray. Use various fudge factor to make it look good
+		// system tray. Use various fudge factors to make it look good
 		switch (appBarData.uEdge) {
 		case ABE_LEFT:
 		case ABE_RIGHT:
@@ -2322,7 +2311,7 @@ static void GetTrayWndRect(LPRECT lpTrayRect) {
 	// on the 3rd party shell's Shell_TrayWnd doing the same, in fact, we can't
 	// rely on it being any size. The best we can do is just blindly use the
 	// window rect, perhaps limiting the width and height to, say 150 square.
-	// Note that if the 3rd party shell supports the same configuraion as
+	// Note that if the 3rd party shell supports the same configuration as
 	// explorer (the icons hosted in NotifyTrayWnd, which is a child window of
 	// Shell_TrayWnd), we would already have caught it above
 	hShellTrayWnd = FindWindowEx(NULL, NULL, L"Shell_TrayWnd", NULL);

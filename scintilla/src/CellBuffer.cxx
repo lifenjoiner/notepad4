@@ -11,6 +11,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdarg>
+#include <climits>
 
 #include <stdexcept>
 #include <string>
@@ -758,6 +759,9 @@ const char *CellBuffer::DeleteChars(Sci::Position position, Sci::Position delete
 }
 
 void CellBuffer::Allocate(Sci::Position newSize) {
+	//if (!largeDocument && (newSize > INT32_MAX)) {
+	//	throw std::runtime_error("CellBuffer::Allocate: size of standard document limited to 2G.");
+	//}
 	substance.ReAllocate(newSize);
 	if (hasStyles) {
 		style.ReAllocate(newSize);
@@ -1114,7 +1118,7 @@ void CellBuffer::BasicInsertString(const Sci::Position position, const char * co
 
 			if (maskCR) {
 				lastCR = _addcarry_u64(0, maskCR, maskCR, &maskCR);
-				// maskCR and maskLF never have some bit set. after shifting maskCR by 1 bit,
+				// maskCR and maskLF never have some bit set, after shifting maskCR by 1 bit,
 				// the bits both set in maskCR and maskLF represents CR+LF;
 				// the bits only set in maskCR or maskLF represents individual CR or LF.
 				const uint64_t maskCRLF = maskCR & maskLF; // CR+LF
@@ -1181,7 +1185,7 @@ void CellBuffer::BasicInsertString(const Sci::Position position, const char * co
 
 			if (maskCR) {
 				lastCR = _addcarry_u64(0, maskCR, maskCR, &maskCR);
-				// maskCR and maskLF never have some bit set. after shifting maskCR by 1 bit,
+				// maskCR and maskLF never have some bit set, after shifting maskCR by 1 bit,
 				// the bits both set in maskCR and maskLF represents CR+LF;
 				// the bits only set in maskCR or maskLF represents individual CR or LF.
 				const uint64_t maskCRLF = maskCR & maskLF; // CR+LF
@@ -1241,7 +1245,7 @@ void CellBuffer::BasicInsertString(const Sci::Position position, const char * co
 
 			if (maskCR) {
 				lastCR = _addcarry_u32(0, maskCR, maskCR, &maskCR);
-				// maskCR and maskLF never have some bit set. after shifting maskCR by 1 bit,
+				// maskCR and maskLF never have some bit set, after shifting maskCR by 1 bit,
 				// the bits both set in maskCR and maskLF represents CR+LF;
 				// the bits only set in maskCR or maskLF represents individual CR or LF.
 				const uint32_t maskCRLF = maskCR & maskLF; // CR+LF
@@ -1537,11 +1541,11 @@ void CellBuffer::BasicDeleteChars(const Sci::Position position, const Sci::Posit
 
 			ch = chNext;
 		}
-		// May have to fix up end if last deletion causes cr to be next to lf
-		// or removes one of a crlf pair
+		// May have to fix up end if last deletion causes CR to be next to LF
+		// or removes one of a CR LF pair
 		const char chAfter = substance.ValueAt(position + deleteLength);
 		if (chBefore == '\r' && chAfter == '\n') {
-			// Using lineRemove-1 as cr ended line before start of deletion
+			// Using lineRemove-1 as CR ended line before start of deletion
 			RemoveLine(lineRemove - 1);
 			plv->SetLineStart(lineRemove - 1, position + 1);
 		}

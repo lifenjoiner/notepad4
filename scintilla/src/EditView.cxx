@@ -320,11 +320,11 @@ void EditView::RefreshPixMaps(Surface *surfaceWindow, const ViewStyle &vsDraw) {
 		pixmapIndentGuideHighlight = surfaceWindow->AllocatePixMap(1, vsDraw.lineHeight + 1);
 		const PRectangle rcIG = PRectangle::FromInts(0, 0, 1, vsDraw.lineHeight);
 		pixmapIndentGuide->FillRectangle(rcIG, vsDraw.styles[StyleIndentGuide].back);
-		pixmapIndentGuideHighlight->FillRectangle(rcIG, vsDraw.styles[StyleBraceLight].back);
+		pixmapIndentGuideHighlight->FillRectangle(rcIG, vsDraw.styles[/*StyleBraceLight*/StyleDefault].back);
 		for (int stripe = 1; stripe < vsDraw.lineHeight + 1; stripe += 2) {
 			const PRectangle rcPixel = PRectangle::FromInts(0, stripe, 1, stripe + 1);
 			pixmapIndentGuide->FillRectangle(rcPixel, vsDraw.styles[StyleIndentGuide].fore);
-			pixmapIndentGuideHighlight->FillRectangle(rcPixel, vsDraw.styles[StyleBraceLight].fore);
+			pixmapIndentGuideHighlight->FillRectangle(rcPixel, vsDraw.styles[/*StyleBraceLight*/StyleDefault].fore);
 		}
 		pixmapIndentGuide->FlushDrawing();
 		pixmapIndentGuideHighlight->FlushDrawing();
@@ -1058,7 +1058,7 @@ ColourRGBA TextBackground(const EditModel &model, const ViewStyle &vsDraw, const
 			return colourHotSpotBack->Opaque();
 		}
 	}
-	if (background && (styleMain != StyleBraceLight) && (styleMain != StyleBraceBad)) {
+	if (background /*&& (styleMain != StyleBraceLight) && (styleMain != StyleBraceBad)*/) {
 		return *background;
 	} else {
 		return vsDraw.styles[styleMain].back;
@@ -2268,8 +2268,7 @@ void DrawFoldLines(Surface *surface, const EditModel &model, const ViewStyle &vs
 		const ColourRGBA foldLineColour = vsDraw.ElementColour(Element::FoldLine).value_or(
 			vsDraw.markers[static_cast<int>(MarkerOutline::Folder)].fore);
 		// Paint the line above the fold
-		// Paint the line above the fold
-		if ((subLine == 0) && FlagSet(model.foldFlags, (expanded ? FoldFlag::LineBeforeContracted : FoldFlag::LineBeforeExpanded))) {
+		if ((subLine == 0) && FlagSet(model.foldFlags, (expanded ? FoldFlag::LineBeforeExpanded : FoldFlag::LineBeforeContracted))) {
 			surface->FillRectangleAligned(Side(rcLine, Edge::top, 1.0), foldLineColour);
 		}
 		// Paint the line below the fold
