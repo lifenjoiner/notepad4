@@ -503,6 +503,7 @@ static INT_PTR CALLBACK RunDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM l
 				WCHAR arg2[MAX_PATH];
 
 				ExtractFirstArgument(arg1, arg1, arg2);
+				ExpandEnvironmentStringsEx(arg2, COUNTOF(arg2));
 
 				if (StrCaseEqual(arg1, L"notepad2") || StrCaseEqual(arg1, L"notepad2.exe")) {
 					GetModuleFileName(NULL, arg1, COUNTOF(arg1));

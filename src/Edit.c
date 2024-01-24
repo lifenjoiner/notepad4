@@ -6933,6 +6933,7 @@ void EditSelectionAction(int action) {
 
 	LPWSTR lpszArgs = (LPWSTR)NP2HeapAlloc(cbCommand);
 	ExtractFirstArgument(lpszCommand, lpszCommand, lpszArgs);
+	ExpandEnvironmentStringsEx(lpszArgs, (DWORD)(cbCommand / sizeof(WCHAR)));
 
 	WCHAR wchDirectory[MAX_PATH] = L"";
 	if (StrNotEmpty(szCurFile)) {
