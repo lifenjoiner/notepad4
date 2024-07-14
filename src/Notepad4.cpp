@@ -523,7 +523,7 @@ static void SetShortcutEnvironments(WCHAR *wCD) {
 
 	p = wchPath + len + 1;
 	GetEnvironmentVariable(L"Path", p, 32767 - 1 - len);
-	if (!StrHasPrefixCaseEx(p, wCD, len) && p[len] != L';') {
+	if (_wcsnicmp(p, wCD, len) && p[len] != L';') {
 		lstrcpy(wchPath, wCD);
 		wchPath[len] = L';';
 		SetEnvironmentVariable(L"Path", wchPath);
