@@ -159,6 +159,7 @@ Latest development builds (artifacts in Release configuration for each compiler 
 * Insert new GUID and current timestamps
 * Number conversion between decimal, hexadecimal, octal and binary
 * Display caret location and length of selected text in count of characters
+* Improved regex support with Boost regex library
 * Improved support for NFO ANSI art
 * Support various [Windows system integration](https://github.com/zufuliu/notepad4/wiki/System-Integration)
 * Support high DPI display with HD version

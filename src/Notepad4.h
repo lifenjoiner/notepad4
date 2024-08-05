@@ -123,18 +123,6 @@ enum {
 
 #define REUSEWINDOWLOCKTIMEOUT		1000	// Reuse Window Lock Timeout
 
-// Settings Version
-enum {
-// No version
-NP2SettingsVersion_None = 0,
-/*
-1. `ZoomLevel` and `PrintZoom` changed from relative font size in point to absolute percentage.
-2. `HighlightCurrentLine` changed to outline frame of subline, regardless of any previous settings.
-*/
-NP2SettingsVersion_V1 = 1,
-NP2SettingsVersion_Current = NP2SettingsVersion_V1,
-};
-
 enum EscFunction {
 	EscFunction_None = 0,
 	EscFunction_Minimize,
@@ -191,9 +179,9 @@ void SnapToDefaultPos(HWND hwnd) noexcept;
 void ShowNotifyIcon(HWND hwnd, bool bAdd) noexcept;
 void SetNotifyIconTitle(HWND hwnd) noexcept;
 
-void ShowNotificationA(int notifyPos, LPCSTR lpszText) noexcept;
-void ShowNotificationW(int notifyPos, LPCWSTR lpszText) noexcept;
-void ShowNotificationMessage(int notifyPos, UINT uidMessage, ...) noexcept;
+void ShowNotificationA(WPARAM notifyPos, LPCSTR lpszText) noexcept;
+void ShowNotificationW(WPARAM notifyPos, LPCWSTR lpszText) noexcept;
+void ShowNotificationMessage(WPARAM notifyPos, UINT uidMessage, ...) noexcept;
 
 void InstallFileWatching(bool terminate) noexcept;
 void CALLBACK WatchTimerProc(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime) noexcept;
@@ -263,7 +251,7 @@ enum FileSaveFlag {
 	FileSaveFlag_EndSession = 16,
 };
 
-bool FileIO(bool fLoad, LPWSTR pszFile, int flag, EditFileIOStatus &status) noexcept;
+bool FileIO(bool fLoad, LPWSTR pszFile, FileSaveFlag flag, EditFileIOStatus &status) noexcept;
 bool FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile);
 bool FileSave(FileSaveFlag saveFlag) noexcept;
 BOOL OpenFileDlg(LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir) noexcept;
@@ -275,6 +263,7 @@ enum {
 	AutoSaveOption_Suspend = 2,
 	AutoSaveOption_Shutdown = 4,
 	AutoSaveOption_ManuallyDelete = 8,
+	AutoSaveOption_OverwriteCurrent = 16,
 	AutoSaveOption_Default = AutoSaveOption_Suspend | AutoSaveOption_Shutdown,
 	AutoSaveDefaultPeriod = 5000,
 };

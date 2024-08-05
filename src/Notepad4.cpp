@@ -137,10 +137,7 @@ int		iWrapColumn = 0;
 int		iZoomLevel = 100;
 bool	bShowBookmarkMargin;
 static bool bShowLineNumbers;
-static bool bMarkOccurrences;
-static bool bMarkOccurrencesMatchCase;
-static bool bMarkOccurrencesMatchWords;
-static bool bMarkOccurrencesBookmark;
+static int bMarkOccurrences;
 EditAutoCompletionConfig autoCompletionConfig;
 int iSelectOption;
 static int iLineSelectionMode;
@@ -191,9 +188,7 @@ static bool bAlwaysOnTop;
 static bool bMinimizeToTray;
 static bool bTransparentMode;
 static int	iEndAtLastLine;
-bool	bFindReplaceTransparentMode;
-bool	bFindReplaceUseMonospacedFont;
-bool	bFindReplaceFindAllBookmark;
+int iFindReplaceOption;
 static bool bEditLayoutRTL;
 bool	bWindowLayoutRTL;
 static int iRenderingTechnology;
@@ -968,9 +963,9 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 			WideCharToMultiByte(CP_UTF8, 0, lpMatchArg, -1, efrData.szFindUTF8, COUNTOF(efrData.szFindUTF8), nullptr, nullptr);
 
 			if (flagMatchText & MatchTextFlag_Regex) {
-				efrData.fuFlags |= NP2_RegexDefaultFlags;
+				efrData.fuFlags |= (iFindReplaceOption & FindReplaceOption_UseCxxRegex) ? (SCFIND_REGEXP | SCFIND_CXX11REGEX) : (SCFIND_REGEXP | SCFIND_POSIX);
 			} else if (flagMatchText & MatchTextFlag_TransformBS) {
-				efrData.bTransformBS = true;
+				efrData.option |= FindReplaceOption_TransformBackslash;
 			}
 
 			if (flagMatchText & MatchTextFlag_FindUp) {
@@ -2492,6 +2487,8 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 		CMD_OPEN_PATH_OR_LINK,
 		CMD_TIMESTAMPS,
 		IDM_EDIT_CLEARDOCUMENT,
+		IDM_EDIT_CODE_COMPRESS,
+		IDM_EDIT_CODE_PRETTY,
 		IDM_EDIT_COMPLETEWORD,
 		IDM_EDIT_COPY,
 		IDM_EDIT_COPYALL,
@@ -2546,8 +2543,6 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 		IDM_EDIT_BASE64_HTML_EMBEDDED_IMAGE,
 		IDM_EDIT_BASE64_SAFE_ENCODE,
 		IDM_EDIT_CHAR2HEX,
-		IDM_EDIT_CODE_COMPRESS,
-		IDM_EDIT_CODE_PRETTY,
 		IDM_EDIT_COLUMNWRAP,
 		IDM_EDIT_CONVERTLOWERCASE,
 		IDM_EDIT_CONVERTSPACES,
@@ -2633,13 +2628,13 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 	i = IDM_LINE_SELECTION_MODE_NONE + iLineSelectionMode;
 	CheckMenuRadioItem(hmenu, IDM_LINE_SELECTION_MODE_NONE, IDM_LINE_SELECTION_MODE_OLDVS, i, MF_BYCOMMAND);
 
-	UncheckCmd(hmenu, IDM_VIEW_MARKOCCURRENCES_OFF, bMarkOccurrences);
-	CheckCmd(hmenu, IDM_VIEW_MARKOCCURRENCES_CASE, bMarkOccurrencesMatchCase);
-	CheckCmd(hmenu, IDM_VIEW_MARKOCCURRENCES_WORD, bMarkOccurrencesMatchWords);
-	CheckCmd(hmenu, IDM_VIEW_MARKOCCURRENCES_BOOKMARK, bMarkOccurrencesBookmark);
-	EnableCmd(hmenu, IDM_VIEW_MARKOCCURRENCES_CASE, bMarkOccurrences);
-	EnableCmd(hmenu, IDM_VIEW_MARKOCCURRENCES_WORD, bMarkOccurrences);
-	EnableCmd(hmenu, IDM_VIEW_MARKOCCURRENCES_BOOKMARK, bMarkOccurrences);
+	UncheckCmd(hmenu, IDM_VIEW_MARKOCCURRENCES_OFF, bMarkOccurrences & MarkOccurrences_Enable);
+	CheckCmd(hmenu, IDM_VIEW_MARKOCCURRENCES_CASE, bMarkOccurrences & MarkOccurrences_MatchCase);
+	CheckCmd(hmenu, IDM_VIEW_MARKOCCURRENCES_WORD, bMarkOccurrences & MarkOccurrences_WholeWord);
+	CheckCmd(hmenu, IDM_VIEW_MARKOCCURRENCES_BOOKMARK, bMarkOccurrences & MarkOccurrences_Bookmark);
+	EnableCmd(hmenu, IDM_VIEW_MARKOCCURRENCES_CASE, bMarkOccurrences & MarkOccurrences_Enable);
+	EnableCmd(hmenu, IDM_VIEW_MARKOCCURRENCES_WORD, bMarkOccurrences & MarkOccurrences_Enable);
+	EnableCmd(hmenu, IDM_VIEW_MARKOCCURRENCES_BOOKMARK, bMarkOccurrences & MarkOccurrences_Enable);
 	i = IDM_VIEW_SHOWCALLTIP_OFF + static_cast<int>(callTipInfo.showCallTip);
 	CheckMenuRadioItem(hmenu, IDM_VIEW_SHOWCALLTIP_OFF, IDM_VIEW_SHOWCALLTIP_ABGR, i, MF_BYCOMMAND);
 
@@ -3471,12 +3466,8 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		break;
 
 	case IDM_EDIT_INVERTCASE:
-		BeginWaitCursor();
-		EditInvertCase();
-		EndWaitCursor();
-		break;
-
 	case IDM_EDIT_TITLECASE:
+	case IDM_EDIT_SENTENCECASE:
 	case IDM_EDIT_MAP_FULLWIDTH:
 	case IDM_EDIT_MAP_HALFWIDTH:
 	case IDM_EDIT_MAP_SIMPLIFIED_CHINESE:
@@ -3491,12 +3482,6 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	case IDM_EDIT_MAP_HANJA_HANGUL:
 		BeginWaitCursor();
 		EditMapTextCase(LOWORD(wParam));
-		EndWaitCursor();
-		break;
-
-	case IDM_EDIT_SENTENCECASE:
-		BeginWaitCursor();
-		EditSentenceCase();
 		EndWaitCursor();
 		break;
 
@@ -4077,7 +4062,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
 	case IDM_VIEW_AUTOCOMPLETION_SETTINGS:
 		if (AutoCompletionSettingsDlg(hwnd)) {
-			if (!autoCompletionConfig.bCompleteWord) {
+			if ((autoCompletionConfig.iCompleteOption & AutoCompletionOption_CompleteWord) == 0) {
 				SciCall_AutoCCancel();
 			}
 		}
@@ -4119,28 +4104,20 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	case IDM_VIEW_MARKOCCURRENCES_OFF:
 	case IDM_VIEW_MARKOCCURRENCES_CASE:
 	case IDM_VIEW_MARKOCCURRENCES_WORD:
-	case IDM_VIEW_MARKOCCURRENCES_BOOKMARK:
-		switch (LOWORD(wParam)) {
-		case IDM_VIEW_MARKOCCURRENCES_OFF:
-			bMarkOccurrences = !bMarkOccurrences;
-			break;
-		case IDM_VIEW_MARKOCCURRENCES_CASE:
-			bMarkOccurrencesMatchCase = !bMarkOccurrencesMatchCase;
-			break;
-		case IDM_VIEW_MARKOCCURRENCES_WORD:
-			bMarkOccurrencesMatchWords = !bMarkOccurrencesMatchWords;
-			break;
-		case IDM_VIEW_MARKOCCURRENCES_BOOKMARK:
-			bMarkOccurrencesBookmark = !bMarkOccurrencesBookmark;
-			break;
+	case IDM_VIEW_MARKOCCURRENCES_BOOKMARK: {
+		const int mask = 1 << (LOWORD(wParam) - IDM_VIEW_MARKOCCURRENCES_OFF);
+		if (bMarkOccurrences & mask) {
+			bMarkOccurrences &= ~mask;
+		} else {
+			bMarkOccurrences |= mask;
 		}
-		if (bMarkOccurrences) {
-			editMarkAll.MarkAll(FALSE, bMarkOccurrencesMatchCase, bMarkOccurrencesMatchWords, bMarkOccurrencesBookmark);
+		if (bMarkOccurrences & MarkOccurrences_Enable) {
+			editMarkAll.MarkAll(FALSE, bMarkOccurrences);
 		} else {
 			editMarkAll.Clear();
 		}
 		UpdateStatusbar();
-		break;
+	} break;
 
 	case IDM_VIEW_SHOW_FOLDING:
 		bShowCodeFolding = !bShowCodeFolding;
@@ -4772,8 +4749,8 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 				strcpy(efrData.szFindUTF8, mszSelection);
 			}
 
-			efrData.fuFlags &= ~NP2_RegexDefaultFlags;
-			efrData.bTransformBS = false;
+			efrData.fuFlags &= SCFIND_REGEXP - 1; // clear all regex flags
+			efrData.option &= ~FindReplaceOption_TransformBackslash;
 
 			switch (LOWORD(wParam)) {
 			case IDM_EDIT_SAVEFIND:
@@ -4921,19 +4898,19 @@ LRESULT MsgNotify(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 					// mark occurrences of text currently selected
 					if (editMarkAll.ignoreSelectionUpdate) {
 						editMarkAll.ignoreSelectionUpdate = false;
-					} else if (bMarkOccurrences) {
+					} else if (bMarkOccurrences & MarkOccurrences_Enable) {
 						if (SciCall_IsSelectionEmpty()) {
 							if (editMarkAll.matchCount) {
 								editMarkAll.Clear();
 							}
 						} else {
-							editMarkAll.MarkAll((scn->updated & SC_UPDATE_CONTENT), bMarkOccurrencesMatchCase, bMarkOccurrencesMatchWords, bMarkOccurrencesBookmark);
+							editMarkAll.MarkAll((scn->updated & SC_UPDATE_CONTENT), bMarkOccurrences);
 						}
 					}
 				} else if (scn->updated & SC_UPDATE_CONTENT) {
 					// cachedStatusItem.updateMask is already set in SCN_MODIFIED.
 					if (editMarkAll.matchCount) {
-						editMarkAll.MarkAll(TRUE, bMarkOccurrencesMatchCase, bMarkOccurrencesMatchWords, bMarkOccurrencesBookmark);
+						editMarkAll.MarkAll(TRUE, bMarkOccurrences);
 					}
 				}
 				if (cachedStatusItem.updateMask) {
@@ -4998,7 +4975,7 @@ LRESULT MsgNotify(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 				}
 				// Auto close tags
 				if (ch == '>') {
-					if (autoCompletionConfig.bCloseTags || autoCompletionConfig.bCompleteWord) {
+					if (autoCompletionConfig.iCompleteOption & (AutoCompletionOption_CloseTags | AutoCompletionOption_CompleteWord)) {
 						EditAutoCloseXMLTag();
 					}
 					return 0;
@@ -5016,9 +4993,9 @@ LRESULT MsgNotify(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 			}
 
 			// auto complete word
-			if (!autoCompletionConfig.bCompleteWord
+			if ((autoCompletionConfig.iCompleteOption & AutoCompletionOption_CompleteWord) == 0
 				// ignore IME input
-				|| (scn->characterSource != SC_CHARACTERSOURCE_DIRECT_INPUT && (ch >= 0x80 || autoCompletionConfig.bEnglistIMEModeOnly))
+				|| (scn->characterSource != SC_CHARACTERSOURCE_DIRECT_INPUT && (ch >= 0x80 || (autoCompletionConfig.iCompleteOption & AutoCompletionOption_EnglishIMEModeOnly) != 0))
 				|| !IsAutoCompletionWordCharacter(ch)
 			) {
 				return 0;
@@ -5349,9 +5326,8 @@ void LoadSettings() noexcept {
 
 	LoadIniSection(INI_SECTION_NAME_SETTINGS, pIniSectionBuf, cchIniSection);
 	section.Parse(pIniSectionBuf);
-
-	//const int iSettingsVersion = section.GetInt(L"SettingsVersion", NP2SettingsVersion_Current);
 	bSaveSettings = section.GetBool(L"SaveSettings", true);
+
 	// TODO: sort loading order by item frequency to reduce UnsafeGetValue() calls
 	LPCWSTR strValue = section.GetValue(L"OpenWithDir");
 	if (StrIsEmpty(strValue)) {
@@ -5392,30 +5368,13 @@ void LoadSettings() noexcept {
 
 	bSaveRecentFiles = section.GetBool(L"SaveRecentFiles", false);
 	bSaveFindReplace = section.GetBool(L"SaveFindReplace", false);
-	bFindReplaceTransparentMode = section.GetBool(L"FindReplaceTransparentMode", true);
-	bFindReplaceUseMonospacedFont = section.GetBool(L"FindReplaceUseMonospacedFont", false);
-	bFindReplaceFindAllBookmark = section.GetBool(L"FindReplaceFindAllBookmark", false);
-
-	efrData.bFindClose = section.GetBool(L"CloseFind", false);
-	efrData.bReplaceClose = section.GetBool(L"CloseReplace", false);
-	efrData.bNoFindWrap = section.GetBool(L"NoFindWrap", false);
-
+	iValue = section.GetInt(L"FindReplaceOption", FindReplaceOption_None);
+	iFindReplaceOption = iValue & 15;
+	efrData.option = iValue >> 4;
 	if (bSaveFindReplace) {
-		efrData.fuFlags = 0;
-		if (section.GetBool(L"FindReplaceMatchCase", false)) {
-			efrData.fuFlags |= SCFIND_MATCHCASE;
-		}
-		if (section.GetBool(L"FindReplaceMatchWholeWorldOnly", false)) {
-			efrData.fuFlags |= SCFIND_WHOLEWORD;
-		}
-		if (section.GetBool(L"FindReplaceMatchBeginingWordOnly", false)) {
-			efrData.fuFlags |= SCFIND_WORDSTART;
-		}
-		if (section.GetBool(L"FindReplaceRegExpSearch", false)) {
-			efrData.fuFlags |= NP2_RegexDefaultFlags;
-		}
-		efrData.bTransformBS = section.GetBool(L"FindReplaceTransformBackslash", false);
-		efrData.bWildcardSearch = section.GetBool(L"FindReplaceWildcardSearch", false);
+		iValue = section.GetInt(L"FindReplaceFlag", SCFIND_NONE);
+		efrData.fuFlags = iValue & 1023;
+		efrData.option |= iValue >> 10;
 	}
 
 	fWordWrapG = section.GetBool(L"WordWrap", true);
@@ -5441,15 +5400,12 @@ void LoadSettings() noexcept {
 	bShowIndentGuides = section.GetBool(L"ShowIndentGuides", false);
 
 	autoCompletionConfig.bIndentText = section.GetBool(L"AutoIndent", true);
-	autoCompletionConfig.bCloseTags = section.GetBool(L"AutoCloseTags", true);
-	autoCompletionConfig.bCompleteWord = section.GetBool(L"AutoCompleteWords", true);
-	autoCompletionConfig.bScanWordsInDocument = section.GetBool(L"AutoCScanWordsInDocument", true);
+	autoCompletionConfig.iCompleteOption = section.GetInt(L"AutoCompleteOption", AutoCompletionOption_Default);
 	iValue = section.GetInt(L"AutoCompleteScope", AutoCompleteScope_Default);
 	autoCompletionConfig.fCompleteScope = iValue & 15;
 	autoCompletionConfig.fScanWordScope = iValue >> 4;
 	iValue = section.GetInt(L"AutoCScanWordsTimeout", AUTOC_SCAN_WORDS_DEFAULT_TIMEOUT);
 	autoCompletionConfig.dwScanWordsTimeout = max(iValue, AUTOC_SCAN_WORDS_MIN_TIMEOUT);
-	autoCompletionConfig.bEnglistIMEModeOnly = section.GetBool(L"AutoCEnglishIMEModeOnly", false);
 	autoCompletionConfig.bIgnoreCase = section.GetBool(L"AutoCIgnoreCase", false);
 	autoCompletionConfig.bLaTeXInputMethod = section.GetBool(L"LaTeXInputMethod", false);
 	iValue = section.GetInt(L"AutoCVisibleItemCount", 16);
@@ -5497,11 +5453,7 @@ void LoadSettings() noexcept {
 	bShowBookmarkMargin = section.GetBool(L"ShowBookmarkMargin", false);
 	bShowLineNumbers = section.GetBool(L"ShowLineNumbers", true);
 	bShowCodeFolding = section.GetBool(L"ShowCodeFolding", true);
-
-	bMarkOccurrences = section.GetBool(L"MarkOccurrences", true);
-	bMarkOccurrencesMatchCase = section.GetBool(L"MarkOccurrencesMatchCase", false);
-	bMarkOccurrencesMatchWords = section.GetBool(L"MarkOccurrencesMatchWholeWords", false);
-	bMarkOccurrencesBookmark = section.GetBool(L"MarkOccurrencesBookmark", false);
+	bMarkOccurrences = section.GetInt(L"MarkOccurrences", MarkOccurrences_Enable);
 
 	bViewWhiteSpace = section.GetBool(L"ViewWhiteSpace", false);
 	bViewEOLs = section.GetBool(L"ViewEOLs", false);
@@ -5746,8 +5698,6 @@ void SaveSettings(bool bSaveSettingsNow) noexcept {
 	}
 
 	IniSectionBuilder section = { pIniSectionBuf };
-
-	//section.SetInt(L"SettingsVersion", NP2SettingsVersion_Current);
 	section.SetBoolEx(L"SaveSettings", bSaveSettings, true);
 
 	PathRelativeToApp(tchOpenWithDir, wchTmp, FILE_ATTRIBUTE_DIRECTORY, true, flagPortableMyDocs);
@@ -5762,19 +5712,11 @@ void SaveSettings(bool bSaveSettingsNow) noexcept {
 
 	section.SetBoolEx(L"SaveRecentFiles", bSaveRecentFiles, false);
 	section.SetBoolEx(L"SaveFindReplace", bSaveFindReplace, false);
-	section.SetBoolEx(L"CloseFind", efrData.bFindClose, false);
-	section.SetBoolEx(L"CloseReplace", efrData.bReplaceClose, false);
-	section.SetBoolEx(L"NoFindWrap", efrData.bNoFindWrap, false);
-	section.SetBoolEx(L"FindReplaceTransparentMode", bFindReplaceTransparentMode, true);
-	section.SetBoolEx(L"FindReplaceUseMonospacedFont", bFindReplaceUseMonospacedFont, false);
-	section.SetBoolEx(L"FindReplaceFindAllBookmark", bFindReplaceFindAllBookmark, false);
+	int iValue = iFindReplaceOption | ((efrData.option & FindReplaceOption_BehaviorMask) << 4);
+	section.SetIntEx(L"FindReplaceOption", iValue, FindReplaceOption_None);
 	if (bSaveFindReplace) {
-		section.SetBoolEx(L"FindReplaceMatchCase", (efrData.fuFlags & SCFIND_MATCHCASE), false);
-		section.SetBoolEx(L"FindReplaceMatchWholeWorldOnly", (efrData.fuFlags & SCFIND_WHOLEWORD), false);
-		section.SetBoolEx(L"FindReplaceMatchBeginingWordOnly", (efrData.fuFlags & SCFIND_WORDSTART), false);
-		section.SetBoolEx(L"FindReplaceRegExpSearch", (efrData.fuFlags & SCFIND_REGEXP), false);
-		section.SetBoolEx(L"FindReplaceTransformBackslash", efrData.bTransformBS, false);
-		section.SetBoolEx(L"FindReplaceWildcardSearch", efrData.bWildcardSearch, false);
+		iValue = efrData.fuFlags | ((efrData.option & FindReplaceOption_SearchMask) << 10);
+		section.SetIntEx(L"FindReplaceFlag", iValue, SCFIND_NONE);
 	}
 
 	section.SetBoolEx(L"WordWrap", fWordWrapG, true);
@@ -5786,18 +5728,15 @@ void SaveSettings(bool bSaveSettingsNow) noexcept {
 	section.SetBoolEx(L"ShowUnicodeControlCharacter", bShowUnicodeControlCharacter, false);
 	section.SetBoolEx(L"MatchBraces", bMatchBraces, true);
 	section.SetBoolEx(L"HighlightCurrentBlock", bHighlightCurrentBlock, true);
-	int iValue = static_cast<int>(iHighlightCurrentLine) + (static_cast<int>(bHighlightCurrentSubLine)*10);
+	iValue = static_cast<int>(iHighlightCurrentLine) + (static_cast<int>(bHighlightCurrentSubLine)*10);
 	section.SetIntEx(L"HighlightCurrentLine", iValue, 10 + LineHighlightMode_OutlineFrame);
 	section.SetBoolEx(L"ShowIndentGuides", bShowIndentGuides, false);
 
 	section.SetBoolEx(L"AutoIndent", autoCompletionConfig.bIndentText, true);
-	section.SetBoolEx(L"AutoCloseTags", autoCompletionConfig.bCloseTags, true);
-	section.SetBoolEx(L"AutoCompleteWords", autoCompletionConfig.bCompleteWord, true);
-	section.SetBoolEx(L"AutoCScanWordsInDocument", autoCompletionConfig.bScanWordsInDocument, true);
+	section.SetIntEx(L"AutoCompleteOption", autoCompletionConfig.iCompleteOption, AutoCompletionOption_Default);
 	iValue = autoCompletionConfig.fCompleteScope | (autoCompletionConfig.fScanWordScope << 4);
 	section.SetIntEx(L"AutoCompleteScope", iValue, AutoCompleteScope_Default);
 	section.SetIntEx(L"AutoCScanWordsTimeout", autoCompletionConfig.dwScanWordsTimeout, AUTOC_SCAN_WORDS_DEFAULT_TIMEOUT);
-	section.SetBoolEx(L"AutoCEnglishIMEModeOnly", autoCompletionConfig.bEnglistIMEModeOnly, false);
 	section.SetBoolEx(L"AutoCIgnoreCase", autoCompletionConfig.bIgnoreCase, false);
 	section.SetBoolEx(L"LaTeXInputMethod", autoCompletionConfig.bLaTeXInputMethod, false);
 	section.SetIntEx(L"AutoCVisibleItemCount", autoCompletionConfig.iVisibleItemCount, 16);
@@ -5822,10 +5761,7 @@ void SaveSettings(bool bSaveSettingsNow) noexcept {
 	section.SetBoolEx(L"ShowBookmarkMargin", bShowBookmarkMargin, false);
 	section.SetBoolEx(L"ShowLineNumbers", bShowLineNumbers, true);
 	section.SetBoolEx(L"ShowCodeFolding", bShowCodeFolding, true);
-	section.SetBoolEx(L"MarkOccurrences", bMarkOccurrences, true);
-	section.SetBoolEx(L"MarkOccurrencesMatchCase", bMarkOccurrencesMatchCase, false);
-	section.SetBoolEx(L"MarkOccurrencesMatchWholeWords", bMarkOccurrencesMatchWords, false);
-	section.SetBoolEx(L"MarkOccurrencesBookmark", bMarkOccurrencesBookmark, false);
+	section.SetIntEx(L"MarkOccurrences", bMarkOccurrences, MarkOccurrences_Enable);
 	section.SetBoolEx(L"ViewWhiteSpace", bViewWhiteSpace, false);
 	section.SetBoolEx(L"ViewEOLs", bViewEOLs, false);
 	section.SetIntEx(L"ShowCallTip", static_cast<int>(callTipInfo.showCallTip), ShowCallTip_None);
@@ -7236,18 +7172,20 @@ void ToggleFullScreenMode() noexcept {
 //	FileIO()
 //
 //
-bool FileIO(bool fLoad, LPWSTR pszFile, int flag, EditFileIOStatus &status) noexcept {
-	BeginWaitCursor();
+bool FileIO(bool fLoad, LPWSTR pszFile, FileSaveFlag flag, EditFileIOStatus &status) noexcept {
+	if (!(flag & FileSaveFlag_EndSession)) {
+		BeginWaitCursor();
 
-	WCHAR tch[MAX_PATH + 128];
-	WCHAR fmt[128];
-	FormatString(tch, fmt, (fLoad ? IDS_LOADFILE : IDS_SAVEFILE), pszFile);
+		WCHAR tch[MAX_PATH + 128];
+		WCHAR fmt[128];
+		FormatString(tch, fmt, (fLoad ? IDS_LOADFILE : IDS_SAVEFILE), pszFile);
 
-	StatusSetText(hwndStatus, STATUS_HELP, tch);
-	StatusSetSimple(hwndStatus, TRUE);
+		StatusSetText(hwndStatus, STATUS_HELP, tch);
+		StatusSetSimple(hwndStatus, TRUE);
 
-	InvalidateRect(hwndStatus, nullptr, TRUE);
-	UpdateWindow(hwndStatus);
+		InvalidateRect(hwndStatus, nullptr, TRUE);
+		UpdateWindow(hwndStatus);
+	}
 
 	if (fLoad) {
 		fLoad = EditLoadFile(pszFile, status);
@@ -7260,8 +7198,10 @@ bool FileIO(bool fLoad, LPWSTR pszFile, int flag, EditFileIOStatus &status) noex
 	const DWORD dwFileAttributes = GetFileAttributes(pszFile);
 	bReadOnlyFile = (dwFileAttributes != INVALID_FILE_ATTRIBUTES) && (dwFileAttributes & FILE_ATTRIBUTE_READONLY);
 
-	StatusSetSimple(hwndStatus, FALSE);
-	EndWaitCursor();
+	if (!(flag & FileSaveFlag_EndSession)) {
+		StatusSetSimple(hwndStatus, FALSE);
+		EndWaitCursor();
+	}
 
 	return fLoad;
 }
@@ -7398,7 +7338,7 @@ bool FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile) {
 			return false;
 		}
 	} else {
-		fSuccess = FileIO(true, szFileName, 0, status);
+		fSuccess = FileIO(true, szFileName, FileSaveFlag_Default, status);
 		if (fSuccess) {
 			iCurrentEncoding = status.iEncoding;
 			iCurrentEOLMode = status.iEOLMode;
@@ -7592,7 +7532,7 @@ bool FileSave(FileSaveFlag saveFlag) noexcept {
 			}
 		}
 		if (!(saveFlag & FileSaveFlag_SaveAs)) {
-			fSuccess = FileIO(false, szCurFile, saveFlag & FileSaveFlag_EndSession, status);
+			fSuccess = FileIO(false, szCurFile, saveFlag, status);
 			if (!fSuccess) {
 				saveFlag = static_cast<FileSaveFlag>(saveFlag | FileSaveFlag_SaveAs);
 			}
@@ -7610,7 +7550,7 @@ bool FileSave(FileSaveFlag saveFlag) noexcept {
 		}
 
 		if (SaveFileDlg(Untitled, tchFile, COUNTOF(tchFile), tchInitialDir)) {
-			fSuccess = FileIO(false, tchFile, saveFlag & (FileSaveFlag_SaveCopy | FileSaveFlag_EndSession), status);
+			fSuccess = FileIO(false, tchFile, saveFlag, status);
 			if (fSuccess) {
 				if (!(saveFlag & FileSaveFlag_SaveCopy)) {
 					lstrcpy(szCurFile, tchFile);
@@ -7642,7 +7582,7 @@ bool FileSave(FileSaveFlag saveFlag) noexcept {
 			return false;
 		}
 	} else if (!fSuccess) {
-		fSuccess = FileIO(false, szCurFile, saveFlag & FileSaveFlag_EndSession, status);
+		fSuccess = FileIO(false, szCurFile, saveFlag, status);
 	}
 
 	if (fSuccess) {
@@ -8428,15 +8368,15 @@ void SetNotifyIconTitle(HWND hwnd) noexcept {
 	Shell_NotifyIcon(NIM_MODIFY, &nid);
 }
 
-void ShowNotificationA(int notifyPos, LPCSTR lpszText) noexcept {
+void ShowNotificationA(WPARAM notifyPos, LPCSTR lpszText) noexcept {
 	callTipInfo.type = CallTipType_Notification;
-	//SciCall_CallTipSetBack(callTipInfo.backColor);
-	//SciCall_CallTipSetFore(callTipInfo.foreColor);
+	SciCall_CallTipSetBack(callTipInfo.backColor);
+	SciCall_CallTipSetFore(callTipInfo.foreColor);
 	SciCall_CallTipUseStyle(CallTipTabWidthNotification);
 	SciCall_ShowNotification(notifyPos, lpszText);
 }
 
-void ShowNotificationW(int notifyPos, LPCWSTR lpszText) noexcept {
+void ShowNotificationW(WPARAM notifyPos, LPCWSTR lpszText) noexcept {
 	const int cpEdit = SciCall_GetCodePage();
 	const int wchLen = lstrlen(lpszText);
 	const int cchLen = wchLen*kMaxMultiByteCount + 1;
@@ -8446,7 +8386,7 @@ void ShowNotificationW(int notifyPos, LPCWSTR lpszText) noexcept {
 	NP2HeapFree(cchText);
 }
 
-void ShowNotificationMessage(int notifyPos, UINT uidMessage, ...) noexcept {
+void ShowNotificationMessage(WPARAM notifyPos, UINT uidMessage, ...) noexcept {
 	WCHAR wchFormat[1024] = L"";
 	WCHAR wchMessage[2048] = L"";
 	GetString(uidMessage, wchFormat, COUNTOF(wchFormat));
@@ -8690,8 +8630,19 @@ void AutoSave_DoWork(FileSaveFlag saveFlag) noexcept {
 		return;
 	}
 
-	WCHAR tchPath[MAX_PATH + 40];
 	const bool Untitled = StrIsEmpty(szCurFile);
+	if (!Untitled && saveFlag == FileSaveFlag_Default && (iAutoSaveOption & AutoSaveOption_OverwriteCurrent)) {
+		// overwrite current file
+		EditFileIOStatus status{};
+		status.iEncoding = iCurrentEncoding;
+		status.iEOLMode = iCurrentEOLMode;
+		if (EditSaveFile(hwndEdit, szCurFile, FileSaveFlag_EndSession, status)) {
+			dwLastSavedDocReversion = dwCurrentDocReversion;
+			return;
+		}
+	}
+
+	WCHAR tchPath[MAX_PATH + 40];
 	LPCWSTR extension = L"bak";
 	if (Untitled) {
 		lstrcpy(tchPath, L"Untitled");
