@@ -3098,23 +3098,17 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
 	case IDM_RECODE_SELECT:
 		if (StrNotEmpty(szCurFile)) {
-			int iNewEncoding;
-			switch (iCurrentEncoding) {
-			case CPI_DEFAULT:
-				iNewEncoding = CPI_NONE; // unknown encoding
-				break;
-			case CPI_UTF8SIGN:
-				iNewEncoding = CPI_UTF8;
-				break;
-			case CPI_UNICODEBOM:
-				iNewEncoding = CPI_UNICODE;
-				break;
-			case CPI_UNICODEBEBOM:
-				iNewEncoding = CPI_UNICODEBE;
-				break;
-			default:
-				iNewEncoding = iCurrentEncoding;
-				break;
+			int iNewEncoding = iCurrentEncoding;
+			if (iNewEncoding < CPI_UTF7) {
+				constexpr UINT mask = ((CPI_NONE + 1) << 4*CPI_DEFAULT) // unknown encoding
+					| ((CPI_OEM + 1) << 4*CPI_OEM)
+					| ((CPI_UNICODE + 1) << 4*CPI_UNICODEBOM)
+					| ((CPI_UNICODEBE + 1) << 4*CPI_UNICODEBEBOM)
+					| ((CPI_UNICODE + 1) << 4*CPI_UNICODE)
+					| ((CPI_UNICODEBE + 1) << 4*CPI_UNICODEBE)
+					| ((CPI_UTF8 + 1) << 4*CPI_UTF8)
+					| ((CPI_UTF8 + 1) << 4*CPI_UTF8SIGN);
+				iNewEncoding = ((mask >> (4*iNewEncoding)) & 15) - 1;
 			}
 
 			if (IsDocumentModified() && MsgBoxWarn(MB_OKCANCEL, IDS_ASK_RECODE) != IDOK) {
@@ -4589,14 +4583,17 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
 	case CMD_RECODEDEFAULT:
 		if (StrNotEmpty(szCurFile)) {
-			if (iDefaultEncoding == CPI_UNICODEBOM) {
-				iSrcEncoding = CPI_UNICODE;
-			} else if (iDefaultEncoding == CPI_UNICODEBEBOM) {
-				iSrcEncoding = CPI_UNICODEBE;
-			} else if (iDefaultEncoding == CPI_UTF8SIGN) {
-				iSrcEncoding = CPI_UTF8;
-			} else {
-				iSrcEncoding = iDefaultEncoding;
+			iSrcEncoding = iDefaultEncoding;
+			if (iSrcEncoding < CPI_UTF7) {
+				constexpr UINT mask = (CPI_DEFAULT << 4*CPI_DEFAULT)
+					| (CPI_OEM << 4*CPI_OEM)
+					| (CPI_UNICODE << 4*CPI_UNICODEBOM)
+					| (CPI_UNICODEBE << 4*CPI_UNICODEBEBOM)
+					| (CPI_UNICODE << 4*CPI_UNICODE)
+					| (CPI_UNICODEBE << 4*CPI_UNICODEBE)
+					| (CPI_UTF8 << 4*CPI_UTF8)
+					| (CPI_UTF8 << 4*CPI_UTF8SIGN);
+				iSrcEncoding = (mask >> (4*iSrcEncoding)) & 15;
 			}
 			FileLoad(FileLoadFlag_Reload, szCurFile);
 		}
@@ -5368,7 +5365,7 @@ void LoadSettings() noexcept {
 
 	bSaveRecentFiles = section.GetBool(L"SaveRecentFiles", false);
 	bSaveFindReplace = section.GetBool(L"SaveFindReplace", false);
-	iValue = section.GetInt(L"FindReplaceOption", FindReplaceOption_None);
+	iValue = section.GetInt(L"FindReplaceOption", FindReplaceOption_Default);
 	iFindReplaceOption = iValue & 15;
 	efrData.option = iValue >> 4;
 	if (bSaveFindReplace) {
@@ -5713,7 +5710,7 @@ void SaveSettings(bool bSaveSettingsNow) noexcept {
 	section.SetBoolEx(L"SaveRecentFiles", bSaveRecentFiles, false);
 	section.SetBoolEx(L"SaveFindReplace", bSaveFindReplace, false);
 	int iValue = iFindReplaceOption | ((efrData.option & FindReplaceOption_BehaviorMask) << 4);
-	section.SetIntEx(L"FindReplaceOption", iValue, FindReplaceOption_None);
+	section.SetIntEx(L"FindReplaceOption", iValue, FindReplaceOption_Default);
 	if (bSaveFindReplace) {
 		iValue = efrData.fuFlags | ((efrData.option & FindReplaceOption_SearchMask) << 10);
 		section.SetIntEx(L"FindReplaceFlag", iValue, SCFIND_NONE);

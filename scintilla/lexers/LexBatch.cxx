@@ -941,4 +941,4 @@ void ColouriseBatchDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initS
 
 }
 
-LexerModule lmBatch(SCLEX_BATCH, ColouriseBatchDoc, "batch");
+extern const LexerModule lmBatch(SCLEX_BATCH, ColouriseBatchDoc, "batch");
