@@ -68,7 +68,7 @@ constexpr bool IsScalaIdentifierStart(int ch) noexcept {
 }
 
 constexpr bool IsScalaIdentifierChar(int ch) noexcept {
-	return IsIdentifierCharEx(ch) || ch == '$';
+	return IsIdentifierCharEx(ch);
 }
 
 constexpr bool IsSingleLineString(int state) noexcept {
@@ -167,56 +167,57 @@ void ColouriseScalaDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initS
 			}
 			if (!IsScalaIdentifierChar(sc.ch) && !(sc.ch == '-' && (sc.state == SCE_SCALA_XML_TAG || sc.state == SCE_SCALA_XML_ATTRIBUTE))) {
 				if (sc.state == SCE_SCALA_IDENTIFIER) {
-					if (escSeq.outerState == SCE_SCALA_DEFAULT) {
-						char s[128];
-						sc.GetCurrent(s, sizeof(s));
-						if (keywordLists[KeywordIndex_Keyword].InList(s)) {
-							sc.ChangeState(SCE_SCALA_WORD);
-							kwType = KeywordType::None;
-							if (StrEqualsAny(s, "class", "new", "extends", "throws", "object")) {
-								kwType = KeywordType::Class;
-							} else if (StrEqualsAny(s, "trait", "with")) {
-								kwType = KeywordType::Trait;
-							} else if (StrEqual(s, "def")) {
-								kwType = KeywordType::Function;
-							} else if (StrEqual(s, "enum")) {
-								kwType = KeywordType::Enum;
-							} else if (StrEqualsAny(s, "return", "yield")) {
-								kwType = KeywordType::Return;
-							} else if (visibleChars == 3 && StrEqual(s, "end")) {
-								lineState |= PyLineStateMaskCloseBrace;
+					char s[128];
+					sc.GetCurrent(s, sizeof(s));
+					if (keywordLists[KeywordIndex_Keyword].InList(s)) {
+						sc.ChangeState(SCE_SCALA_WORD);
+						kwType = KeywordType::None;
+						if (escSeq.outerState != SCE_SCALA_DEFAULT) {
+							// nop
+						} else if (StrEqualsAny(s, "class", "new", "extends", "throws", "object")) {
+							kwType = KeywordType::Class;
+						} else if (StrEqualsAny(s, "trait", "with")) {
+							kwType = KeywordType::Trait;
+						} else if (StrEqual(s, "def")) {
+							kwType = KeywordType::Function;
+						} else if (StrEqual(s, "enum")) {
+							kwType = KeywordType::Enum;
+						} else if (StrEqualsAny(s, "return", "yield")) {
+							kwType = KeywordType::Return;
+						} else if (visibleChars == 3 && StrEqual(s, "end")) {
+							lineState |= PyLineStateMaskCloseBrace;
+						}
+						if (kwType > KeywordType::None && kwType < KeywordType::Return) {
+							const int chNext = sc.GetLineNextChar();
+							if (!IsScalaIdentifierStart(chNext)) {
+								kwType = KeywordType::None;
 							}
-							if (kwType > KeywordType::None && kwType < KeywordType::Return) {
-								const int chNext = sc.GetLineNextChar();
-								if (!IsIdentifierStartEx(chNext)) {
-									kwType = KeywordType::None;
-								}
-							}
-						} else if (keywordLists[KeywordIndex_Class].InList(s)) {
-							sc.ChangeState(SCE_SCALA_CLASS);
-						} else if (keywordLists[KeywordIndex_Trait].InList(s)) {
-							sc.ChangeState(SCE_SCALA_TRAIT);
-						} else if (sc.ch != '.') {
-							if (kwType > KeywordType::None && kwType < KeywordType::Return) {
-								sc.ChangeState(static_cast<int>(kwType));
-							} else {
-								const int chNext = sc.GetLineNextChar();
-								if (chNext == '(') {
-									// type method()
-									// type[] method()
-									if (kwType != KeywordType::Return && (IsIdentifierCharEx(chBefore) || chBefore == ']')) {
-										sc.ChangeState(SCE_SCALA_FUNCTION_DEFINITION);
-									} else {
-										sc.ChangeState(SCE_SCALA_FUNCTION);
-									}
+						}
+					} else if (keywordLists[KeywordIndex_Class].InList(s)) {
+						sc.ChangeState(SCE_SCALA_CLASS);
+					} else if (keywordLists[KeywordIndex_Trait].InList(s)) {
+						sc.ChangeState(SCE_SCALA_TRAIT);
+					} else if (escSeq.outerState == SCE_SCALA_DEFAULT && sc.ch != '.') {
+						if (kwType > KeywordType::None && kwType < KeywordType::Return) {
+							sc.ChangeState(static_cast<int>(kwType));
+						} else {
+							const int chNext = sc.GetLineNextChar();
+							if (chNext == '(') {
+								// type method()
+								// type[] method()
+								if (kwType != KeywordType::Return && (IsScalaIdentifierChar(chBefore) || chBefore == ']')) {
+									sc.ChangeState(SCE_SCALA_FUNCTION_DEFINITION);
+								} else {
+									sc.ChangeState(SCE_SCALA_FUNCTION);
 								}
 							}
 						}
-						stylePrevNonWhite = sc.state;
-						if (sc.state != SCE_SCALA_WORD && sc.ch != '.') {
-							kwType = KeywordType::None;
-						}
-					} else {
+					}
+					stylePrevNonWhite = sc.state;
+					if (sc.state != SCE_SCALA_WORD && sc.ch != '.') {
+						kwType = KeywordType::None;
+					}
+					if (escSeq.outerState != SCE_SCALA_DEFAULT) {
 						sc.SetState(escSeq.outerState);
 						continue;
 					}
@@ -284,18 +285,19 @@ void ColouriseScalaDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initS
 					}
 				}
 			} else if (sc.ch == '$' && IsInterpolatedString(sc.state)) {
-				if (sc.chNext == '$') {
-					escSeq.outerState = sc.state;
+				escSeq.outerState = sc.state;
+				sc.SetState(SCE_SCALA_OPERATOR2);
+				sc.Forward();
+				if (sc.ch == '$' || sc.ch == '\"') {
 					escSeq.digitsLeft = 1;
-					sc.SetState(SCE_SCALA_ESCAPECHAR);
-					sc.Forward();
-				} else if (sc.chNext == '{') {
-					nestedState.push_back(sc.state);
-					sc.SetState(SCE_SCALA_OPERATOR2);
-					sc.Forward();
+					sc.ChangeState(SCE_SCALA_ESCAPECHAR);
+				} else if (sc.ch == '{') {
+					nestedState.push_back(escSeq.outerState);
 				} else if (IsScalaIdentifierStart(sc.chNext)) {
-					escSeq.outerState = sc.state;
 					sc.SetState(SCE_SCALA_IDENTIFIER);
+				} else { // error
+					sc.SetState(escSeq.outerState);
+					continue;
 				}
 			} else if (sc.ch == GetStringQuote(sc.state) && (IsSingleLineString(sc.state) || sc.MatchNext('"', '"'))) {
 				if (!IsSingleLineString(sc.state)) {
