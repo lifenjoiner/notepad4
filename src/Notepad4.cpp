@@ -56,7 +56,6 @@ static HWND hwndToolbar;
 static HWND hwndReBar;
 static HMONITOR hCurrentMonitor = nullptr;
 HWND	hwndEdit;
-static HWND hwndEditFrame;
 HWND	hwndMain;
 static HMENU hmenuMain;
 static HWND hwndNextCBChain = nullptr;
@@ -213,8 +212,6 @@ static WININFO wi;
 
 static int cyReBar;
 static int cyReBarFrame;
-static int cxEditFrame;
-static int cyEditFrame;
 
 int		cxRunDlg;
 int		cxEncodingDlg;
@@ -1053,7 +1050,7 @@ static inline void ExitApplication(HWND hwnd) noexcept {
 void MsgDropFiles(HWND hwnd, UINT umsg, WPARAM wParam) {
 	UNREFERENCED_PARAMETER(umsg);
 	HDROP hDrop = AsPointer<HDROP>(wParam);
-	// fix drag & drop file from 32-bit app to 64-bit Notepad4 before Win 10
+	// fix drag & drop file from 32-bit app to 64-bit Notepad4 prior Win 10
 #if defined(_WIN64) && (_WIN32_WINNT < _WIN32_WINNT_WIN10)
 	if (umsg == WM_DROPFILES && !bReadOnlyMode) {
 		POINT pt;
@@ -1278,8 +1275,6 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 
 		// Reset Change Notify
 		//bPendingChangeNotify = false;
-
-		SetDlgItemInt(hwnd, IDC_REUSELOCK, GetTickCount(), FALSE);
 
 		if (pcds->dwData == DATA_NOTEPAD4_PARAMS) {
 			NP2PARAMS *params = static_cast<NP2PARAMS *>(NP2HeapAlloc(pcds->cbData));
@@ -1730,39 +1725,13 @@ void SetWrapVisualFlags() noexcept {
 	}
 }
 
-static void EditFrameOnThemeChanged() noexcept {
-	if (IsAppThemed()) {
-		SetWindowExStyle(hwndEdit, GetWindowExStyle(hwndEdit) & ~WS_EX_CLIENTEDGE);
-		SetWindowPos(hwndEdit, nullptr, 0, 0, 0, 0, SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE);
-
-		if (IsVistaAndAbove()) {
-			cxEditFrame = 0;
-			cyEditFrame = 0;
-		} else {
-			RECT rc;
-			RECT rc2;
-			SetWindowPos(hwndEditFrame, nullptr, 0, 0, 0, 0, SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED);
-			GetClientRect(hwndEditFrame, &rc);
-			GetWindowRect(hwndEditFrame, &rc2);
-
-			cxEditFrame = ((rc2.right - rc2.left) - (rc.right - rc.left)) / 2;
-			cyEditFrame = ((rc2.bottom - rc2.top) - (rc.bottom - rc.top)) / 2;
-		}
-	} else {
-		SetWindowExStyle(hwndEdit, GetWindowExStyle(hwndEdit) | WS_EX_CLIENTEDGE);
-		SetWindowPos(hwndEdit, nullptr, 0, 0, 0, 0, SWP_NOZORDER | SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED);
-
-		cxEditFrame = 0;
-		cyEditFrame = 0;
-	}
-}
-
 //=============================================================================
 //
 // EditCreate()
 //
 void EditCreate(HWND hwndParent) noexcept {
-	HWND hwnd = CreateWindowEx(WS_EX_CLIENTEDGE,
+	const DWORD dwExStyle = IsAppThemed() ? 0 : WS_EX_CLIENTEDGE;
+	HWND hwnd = CreateWindowEx(dwExStyle,
 						  L"Scintilla",
 						  nullptr,
 						  WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
@@ -1908,23 +1877,11 @@ LRESULT MsgCreate(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 	Style_DetectBaseFontSize(hCurrentMonitor);
 
 	// Setup edit control
-	// create edit control and frame with zero size to avoid
+	// create edit control with zero size to avoid
 	// a white/black window fades out on startup when using Direct2D.
 	EditCreate(hwnd);
 
 	HINSTANCE hInstance = (AsPointer<LPCREATESTRUCT>(lParam))->hInstance;
-	hwndEditFrame = CreateWindowEx(
-						WS_EX_CLIENTEDGE,
-						WC_LISTVIEW,
-						nullptr,
-						WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-						0, 0, 0, 0,
-						hwnd,
-						AsPointer<HMENU, ULONG_PTR>(IDC_EDITFRAME),
-						hInstance,
-						nullptr);
-
-	EditFrameOnThemeChanged();
 
 	// Create Toolbar and Statusbar
 	CreateBars(hwnd, hInstance);
@@ -1933,27 +1890,13 @@ LRESULT MsgCreate(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 
 	(void)CreateWindowEx(0,
 		WC_STATIC,
-		nullptr,
+		szCurFile,
 		WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-		0, 0, 10, 10,
+		0, 0, 0, 0,
 		hwnd,
 		AsPointer<HMENU, ULONG_PTR>(IDC_FILENAME),
 		hInstance,
 		nullptr);
-
-	SetDlgItemText(hwnd, IDC_FILENAME, szCurFile);
-
-	(void)CreateWindowEx(0,
-		WC_STATIC,
-		nullptr,
-		WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-		10, 10, 10, 10,
-		hwnd,
-		AsPointer<HMENU, ULONG_PTR>(IDC_REUSELOCK),
-		hInstance,
-		nullptr);
-
-	SetDlgItemInt(hwnd, IDC_REUSELOCK, GetTickCount(), FALSE);
 
 	// Drag & Drop
 #if 0//_WIN32_WINNT >= _WIN32_WINNT_WIN7
@@ -1978,8 +1921,6 @@ LRESULT MsgCreate(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 //
 //
 void CreateBars(HWND hwnd, HINSTANCE hInstance) noexcept {
-	const BOOL bIsAppThemed = IsAppThemed();
-
 	constexpr DWORD dwToolbarStyle = WS_TOOLBAR;
 	hwndToolbar = CreateWindowEx(0, TOOLBARCLASSNAME, nullptr, dwToolbarStyle,
 								 0, 0, 0, 0, hwnd, AsPointer<HMENU, ULONG_PTR>(IDC_TOOLBAR), hInstance, nullptr);
@@ -2113,6 +2054,7 @@ void CreateBars(HWND hwnd, HINSTANCE hInstance) noexcept {
 	rbi.himl = nullptr;
 	SendMessage(hwndReBar, RB_SETBARINFO, 0, AsInteger<LPARAM>(&rbi));
 
+	const BOOL bIsAppThemed = IsAppThemed();
 	REBARBANDINFO rbBand;
 	rbBand.cbSize = sizeof(REBARBANDINFO);
 	rbBand.fMask = /*RBBIM_COLORS | RBBIM_TEXT | RBBIM_BACKGROUND | */
@@ -2189,7 +2131,14 @@ void MsgThemeChanged(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 	UNREFERENCED_PARAMETER(lParam);
 
 	// reinitialize edit frame
-	EditFrameOnThemeChanged();
+	DWORD dwExStyle = GetWindowExStyle(hwndEdit);
+	if (IsAppThemed()) {
+		dwExStyle &= ~WS_EX_CLIENTEDGE;
+	} else {
+		dwExStyle |= WS_EX_CLIENTEDGE;
+	}
+	SetWindowExStyle(hwndEdit, dwExStyle);
+	SetWindowPos(hwndEdit, nullptr, 0, 0, 0, 0, SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE);
 
 	// recreate toolbar and statusbar
 	HINSTANCE hInstance = GetWindowInstance(hwnd);
@@ -2247,11 +2196,7 @@ void MsgSize(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 		cy -= (rc.bottom - rc.top);
 	}
 
-	HDWP hdwp = BeginDeferWindowPos(2);
-	DeferWindowPos(hdwp, hwndEditFrame, nullptr, x, y, cx, cy, SWP_NOZORDER | SWP_NOACTIVATE);
-	DeferWindowPos(hdwp, hwndEdit, nullptr, x + cxEditFrame, y + cyEditFrame,
-				   cx - 2 * cxEditFrame, cy - 2 * cyEditFrame, SWP_NOZORDER | SWP_NOACTIVATE);
-	EndDeferWindowPos(hdwp);
+	SetWindowPos(hwndEdit, nullptr, x, y, cx, cy, SWP_NOZORDER | SWP_NOACTIVATE);
 
 	// resize Statusbar items
 	UpdateStatusbar();
@@ -7248,7 +7193,6 @@ bool FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile) {
 	if (loadFlag & FileLoadFlag_New) {
 		StrCpyEx(szCurFile, L"");
 		SetDlgItemText(hwndMain, IDC_FILENAME, szCurFile);
-		SetDlgItemInt(hwndMain, IDC_REUSELOCK, GetTickCount(), FALSE);
 		if (!keepTitleExcerpt) {
 			StrCpyEx(szTitleExcerpt, L"");
 		}
@@ -7345,7 +7289,6 @@ bool FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile) {
 	if (fSuccess) {
 		lstrcpy(szCurFile, szFileName);
 		SetDlgItemText(hwndMain, IDC_FILENAME, szCurFile);
-		SetDlgItemInt(hwndMain, IDC_REUSELOCK, GetTickCount(), FALSE);
 		if (!keepTitleExcerpt) {
 			StrCpyEx(szTitleExcerpt, L"");
 		}
@@ -7552,7 +7495,6 @@ bool FileSave(FileSaveFlag saveFlag) noexcept {
 				if (!(saveFlag & FileSaveFlag_SaveCopy)) {
 					lstrcpy(szCurFile, tchFile);
 					SetDlgItemText(hwndMain, IDC_FILENAME, szCurFile);
-					SetDlgItemInt(hwndMain, IDC_REUSELOCK, GetTickCount(), FALSE);
 					if (!fKeepTitleExcerpt) {
 						StrCpyEx(szTitleExcerpt, L"");
 					}
@@ -7794,12 +7736,9 @@ static BOOL CALLBACK EnumWindProcReuseWindow(HWND hwnd, LPARAM lParam) noexcept 
 
 	if (GetClassName(hwnd, szClassName, COUNTOF(szClassName))) {
 		if (StrCaseEqual(szClassName, wchWndClass)) {
-			const DWORD dwReuseLock = GetDlgItemInt(hwnd, IDC_REUSELOCK, nullptr, FALSE);
-			if (GetTickCount() - dwReuseLock >= REUSEWINDOWLOCKTIMEOUT) {
-				*AsPointer<HWND *>(lParam) = hwnd;
-				if (IsWindowEnabled(hwnd)) {
-					bContinue = FALSE;
-				}
+			*AsPointer<HWND *>(lParam) = hwnd;
+			if (IsWindowEnabled(hwnd)) {
+				bContinue = FALSE;
 			}
 		}
 	}
@@ -7812,18 +7751,11 @@ static BOOL CALLBACK EnumWindProcSingleFileInstance(HWND hwnd, LPARAM lParam) no
 
 	if (GetClassName(hwnd, szClassName, COUNTOF(szClassName))) {
 		if (StrCaseEqual(szClassName, wchWndClass)) {
-			const DWORD dwReuseLock = GetDlgItemInt(hwnd, IDC_REUSELOCK, nullptr, FALSE);
-			if (GetTickCount() - dwReuseLock >= REUSEWINDOWLOCKTIMEOUT) {
+			WCHAR tchFileName[MAX_PATH];
+			if (GetDlgItemText(hwnd, IDC_FILENAME, tchFileName, COUNTOF(tchFileName)) && PathEquivalent(tchFileName, lpFileArg)) {
+				*AsPointer<HWND *>(lParam) = hwnd;
 				if (IsWindowEnabled(hwnd)) {
 					bContinue = FALSE;
-				}
-
-				WCHAR tchFileName[MAX_PATH] = L"";
-				GetDlgItemText(hwnd, IDC_FILENAME, tchFileName, COUNTOF(tchFileName));
-				if (PathEquivalent(tchFileName, lpFileArg)) {
-					*AsPointer<HWND *>(lParam) = hwnd;
-				} else {
-					bContinue = TRUE;
 				}
 			}
 		}
