@@ -3807,7 +3807,7 @@ void EditRemoveBlankLines(bool bMerge) noexcept {
 	SciCall_BeginUndoAction();
 	for (Sci_Line iLine = iLineStart; iLine <= iLineEnd;) {
 		Sci_Line nBlanks = 0;
-		while (iLine + nBlanks <= iLineEnd && SciCall_PositionFromLine(iLine + nBlanks) == SciCall_GetLineEndPosition(iLine + nBlanks)) {
+		while (iLine + nBlanks <= iLineEnd && SciCall_GetLineIndentPosition(iLine + nBlanks) == SciCall_GetLineEndPosition(iLine + nBlanks)) {
 			nBlanks++;
 		}
 
@@ -4443,7 +4443,7 @@ void EditGetExcerpt(LPWSTR lpszExcerpt, DWORD cchExcerpt) noexcept {
 
 	DWORD cch = 0;
 	WCHAR chPrev = L' ';
-	WCHAR *p = tch;
+	LPCWSTR p = tch;
 	while (*p != L'\0') {
 		WCHAR ch = *p++;
 		if (ch <= L' ') {
