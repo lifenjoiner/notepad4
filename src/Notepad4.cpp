@@ -378,14 +378,6 @@ enum NotepadReplacementAction {
 	NotepadReplacementAction_PrintDefault,
 };
 
-enum MatchTextFlag {
-	MatchTextFlag_None = 0,
-	MatchTextFlag_Default = 1,
-	MatchTextFlag_FindUp = 2,
-	MatchTextFlag_Regex = 4,
-	MatchTextFlag_TransformBS = 8,
-};
-
 enum RelaunchElevatedFlag {
 	RelaunchElevatedFlag_None = 0,
 	RelaunchElevatedFlag_Startup,
@@ -628,6 +620,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 
 	// Try to activate another window
 	if (ActivatePrevInst()) {
+		NP2HeapFree(lpFileArg);
 		return 0;
 	}
 
@@ -722,6 +715,33 @@ BOOL InitApplication(HINSTANCE hInstance) noexcept {
 	wc.hIconSm       = nullptr;
 
 	return RegisterClassEx(&wc);
+}
+
+static void HandleMatchText(MatchTextFlag flag, LPCWSTR lpszText, bool jumpTo) noexcept {
+	if (StrNotEmpty(lpszText) && SciCall_GetLength()) {
+		const UINT cpEdit = SciCall_GetCodePage();
+		WideCharToMultiByte(cpEdit, 0, lpszText, -1, efrData.szFind, COUNTOF(efrData.szFind), nullptr, nullptr);
+		WideCharToMultiByte(CP_UTF8, 0, lpszText, -1, efrData.szFindUTF8, COUNTOF(efrData.szFindUTF8), nullptr, nullptr);
+
+		if (flag & MatchTextFlag_Regex) {
+			efrData.fuFlags |= (iFindReplaceOption & FindReplaceOption_UseCxxRegex) ? (SCFIND_REGEXP | SCFIND_CXX11REGEX) : (SCFIND_REGEXP | SCFIND_POSIX);
+		} else if (flag & MatchTextFlag_TransformBS) {
+			efrData.option |= FindReplaceOption_TransformBackslash;
+		}
+
+		if (flag & MatchTextFlag_FindUp) {
+			if (!jumpTo) {
+				SciCall_DocumentEnd();
+			}
+			EditFindPrev(&efrData, false);
+		} else {
+			if (!jumpTo) {
+				SciCall_DocumentStart();
+			}
+			EditFindNext(&efrData, false);
+		}
+		EditEnsureSelectionVisible();
+	}
 }
 
 //=============================================================================
@@ -875,22 +895,16 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 			}
 		} else {
 			bOpened = FileLoad(FileLoadFlag_Default, lpFileArg);
-			if (bOpened) {
-				bFileLoadCalled = true;
-				if (flagJumpTo) { // Jump to position
-					EditJumpTo(iInitialLine, iInitialColumn);
-				}
-			}
+			bFileLoadCalled = bOpened;
 		}
 		NP2HeapFree(lpFileArg);
 
 		if (bOpened) {
-			if (flagChangeNotify == TripleBoolean_False) {
-				iFileWatchingMode = FileWatchingMode_None;
-				bResetFileWatching = true;
-				InstallFileWatching(false);
-			} else if (flagChangeNotify == TripleBoolean_True) {
-				iFileWatchingMode = FileWatchingMode_AutoReload;
+			if (flagJumpTo) { // Jump to position
+				EditJumpTo(iInitialLine, iInitialColumn);
+			}
+			if (flagChangeNotify != TripleBoolean_NotSet) {
+				iFileWatchingMode = (flagChangeNotify == TripleBoolean_False) ? FileWatchingMode_None : FileWatchingMode_AutoReload;
 				bResetFileWatching = true;
 				InstallFileWatching(false);
 			}
@@ -918,7 +932,6 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 	fKeepTitleExcerpt = false;
 
 	// Check for /c [if no file is specified] -- even if a file is specified
-	/*else */
 	if (flagNewFromClipboard) {
 		if (SciCall_CanPaste()) {
 			const bool back = autoCompletionConfig.bIndentText;
@@ -953,31 +966,8 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 	}
 
 	// Match Text
-	if (flagMatchText != MatchTextFlag_None && lpMatchArg) {
-		if (StrNotEmpty(lpMatchArg) && SciCall_GetLength()) {
-			const UINT cpEdit = SciCall_GetCodePage();
-			WideCharToMultiByte(cpEdit, 0, lpMatchArg, -1, efrData.szFind, COUNTOF(efrData.szFind), nullptr, nullptr);
-			WideCharToMultiByte(CP_UTF8, 0, lpMatchArg, -1, efrData.szFindUTF8, COUNTOF(efrData.szFindUTF8), nullptr, nullptr);
-
-			if (flagMatchText & MatchTextFlag_Regex) {
-				efrData.fuFlags |= (iFindReplaceOption & FindReplaceOption_UseCxxRegex) ? (SCFIND_REGEXP | SCFIND_CXX11REGEX) : (SCFIND_REGEXP | SCFIND_POSIX);
-			} else if (flagMatchText & MatchTextFlag_TransformBS) {
-				efrData.option |= FindReplaceOption_TransformBackslash;
-			}
-
-			if (flagMatchText & MatchTextFlag_FindUp) {
-				if (!flagJumpTo) {
-					SciCall_DocumentEnd();
-				}
-				EditFindPrev(&efrData, false);
-			} else {
-				if (!flagJumpTo) {
-					SciCall_DocumentStart();
-				}
-				EditFindNext(&efrData, false);
-			}
-			EditEnsureSelectionVisible();
-		}
+	if (lpMatchArg) {
+		HandleMatchText(flagMatchText, lpMatchArg, flagJumpTo);
 		LocalFree(lpMatchArg);
 	}
 
@@ -1277,8 +1267,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 		//bPendingChangeNotify = false;
 
 		if (pcds->dwData == DATA_NOTEPAD4_PARAMS) {
-			NP2PARAMS *params = static_cast<NP2PARAMS *>(NP2HeapAlloc(pcds->cbData));
-			memcpy(params, pcds->lpData, pcds->cbData);
+			const NP2PARAMS * const params = static_cast<NP2PARAMS *>(pcds->lpData);
 
 			if (params->flagReadOnlyMode) {
 				flagReadOnlyMode |= ReadOnlyMode_Current;
@@ -1290,26 +1279,24 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 				flagQuietCreate = true;
 			}
 
+			bool bOpened = true;
+			LPCWSTR lpsz = &params->wchData;
 			if (params->flagFileSpecified) {
-				bool bOpened = false;
 				iSrcEncoding = params->iSrcEncoding;
 
-				if (PathIsDirectory(&params->wchData)) {
+				if (PathIsDirectory(lpsz)) {
 					WCHAR tchFile[MAX_PATH];
-					if (OpenFileDlg(tchFile, COUNTOF(tchFile), &params->wchData)) {
+					bOpened = false;
+					if (OpenFileDlg(tchFile, COUNTOF(tchFile), lpsz)) {
 						bOpened = FileLoad(FileLoadFlag_Default, tchFile);
 					}
 				} else {
-					bOpened = FileLoad(FileLoadFlag_Default, &params->wchData);
+					bOpened = FileLoad(FileLoadFlag_Default, lpsz);
 				}
 
 				if (bOpened) {
-					if (params->flagChangeNotify == TripleBoolean_False) {
-						iFileWatchingMode = FileWatchingMode_None;
-						bResetFileWatching = true;
-						InstallFileWatching(false);
-					} else if (params->flagChangeNotify == TripleBoolean_True) {
-						iFileWatchingMode = FileWatchingMode_AutoReload;
+					if (params->flagChangeNotify != TripleBoolean_NotSet) {
+						iFileWatchingMode = (params->flagChangeNotify == TripleBoolean_False) ? FileWatchingMode_None : FileWatchingMode_AutoReload;
 						bResetFileWatching = true;
 						InstallFileWatching(false);
 					}
@@ -1329,7 +1316,8 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 					if (params->flagLexerSpecified) {
 						if (params->iInitialLexer <= 0) {
 							WCHAR wchExt[32] = L".";
-							lstrcpyn(wchExt + 1, StrEnd(&params->wchData) + 1, COUNTOF(wchExt) - 1);
+							lpsz = StrEnd(lpsz) + 1;
+							lstrcpyn(wchExt + 1, lpsz, COUNTOF(wchExt) - 1);
 							Style_SetLexerFromName(&params->wchData, wchExt);
 						} else {
 							Style_SetLexerFromID(params->iInitialLexer);
@@ -1337,8 +1325,12 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 					}
 
 					if (params->flagTitleExcerpt) {
-						lstrcpyn(szTitleExcerpt, StrEnd(&params->wchData) + 1, COUNTOF(szTitleExcerpt));
+						lpsz = StrEnd(lpsz) + 1;
+						lstrcpyn(szTitleExcerpt, lpsz, COUNTOF(szTitleExcerpt));
 						UpdateWindowTitle();
+					}
+					if (params->flagMatchText != MatchTextFlag_None) {
+						lpsz = StrEnd(lpsz) + 1;
 					}
 				}
 				// reset
@@ -1346,17 +1338,16 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 			}
 
 			if (params->flagJumpTo) {
-				if (params->iInitialLine == 0) {
-					params->iInitialLine = 1;
-				}
-				EditJumpTo(params->iInitialLine, params->iInitialColumn);
+				const Sci_Line iLine = params->iInitialLine ? params->iInitialLine : 1;
+				EditJumpTo(iLine, params->iInitialColumn);
+			}
+			if (bOpened && params->flagMatchText != MatchTextFlag_None) {
+				HandleMatchText(params->flagMatchText, lpsz, params->flagJumpTo);
 			}
 
 			flagLexerSpecified = false;
 			flagQuietCreate = false;
 			flagReadOnlyMode &= ReadOnlyMode_AllFile;
-
-			NP2HeapFree(params);
 		}
 	}
 	return TRUE;
@@ -6170,25 +6161,23 @@ CommandParseState ParseCommandLineOption(LPWSTR lp1, LPWSTR lp2) noexcept {
 			flagSetEncoding = IDM_ENCODING_ANSI - IDM_ENCODING_ANSI + 1;
 			state = CommandParseState_Consumed;
 		} else {
-			bool bFindUp = false;
-			bool bRegex = false;
-			bool bTransBS = false;
+			int flag = MatchTextFlag_None;
 
 			++opt;
 			switch (UnsafeUpper(*opt)) {
 			case L'R':
-				bRegex = true;
+				flag |= MatchTextFlag_Regex;
 				++opt;
 				break;
 
 			case L'B':
-				bTransBS = true;
+				flag |= MatchTextFlag_TransformBS;
 				++opt;
 				break;
 			}
 
 			if (*opt == L'-') {
-				bFindUp = true;
+				flag |= MatchTextFlag_FindUp;
 				++opt;
 			}
 			if (*opt != L'\0') {
@@ -6202,10 +6191,7 @@ CommandParseState ParseCommandLineOption(LPWSTR lp1, LPWSTR lp2) noexcept {
 				}
 
 				lpMatchArg = StrDup(lp1);
-				flagMatchText = static_cast<MatchTextFlag>(MatchTextFlag_Default
-					| (static_cast<int>(bFindUp) * MatchTextFlag_FindUp)
-					| (static_cast<int>(bRegex) * MatchTextFlag_Regex)
-					| (static_cast<int>(bTransBS) * MatchTextFlag_TransformBS));
+				flagMatchText = static_cast<MatchTextFlag>(flag | MatchTextFlag_Default);
 				state = CommandParseState_Consumed;
 			}
 		}
@@ -7720,21 +7706,6 @@ BOOL SaveFileDlg(bool Untitled, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInit
 *
 *
 ******************************************************************************/
-static BOOL CALLBACK EnumWindProcReuseWindow(HWND hwnd, LPARAM lParam) noexcept {
-	BOOL bContinue = TRUE;
-	WCHAR szClassName[64];
-
-	if (GetClassName(hwnd, szClassName, COUNTOF(szClassName))) {
-		if (StrCaseEqual(szClassName, wchWndClass)) {
-			*AsPointer<HWND *>(lParam) = hwnd;
-			if (IsWindowEnabled(hwnd)) {
-				bContinue = FALSE;
-			}
-		}
-	}
-	return bContinue;
-}
-
 static BOOL CALLBACK EnumWindProcSingleFileInstance(HWND hwnd, LPARAM lParam) noexcept {
 	BOOL bContinue = TRUE;
 	WCHAR szClassName[64];
@@ -7742,7 +7713,7 @@ static BOOL CALLBACK EnumWindProcSingleFileInstance(HWND hwnd, LPARAM lParam) no
 	if (GetClassName(hwnd, szClassName, COUNTOF(szClassName))) {
 		if (StrCaseEqual(szClassName, wchWndClass)) {
 			WCHAR tchFileName[MAX_PATH];
-			if (GetDlgItemText(hwnd, IDC_FILENAME, tchFileName, COUNTOF(tchFileName)) && PathEquivalent(tchFileName, lpFileArg)) {
+			if (lpFileArg == nullptr || (GetDlgItemText(hwnd, IDC_FILENAME, tchFileName, COUNTOF(tchFileName)) && PathEquivalent(tchFileName, lpFileArg))) {
 				*AsPointer<HWND *>(lParam) = hwnd;
 				if (IsWindowEnabled(hwnd)) {
 					bContinue = FALSE;
@@ -7753,94 +7724,95 @@ static BOOL CALLBACK EnumWindProcSingleFileInstance(HWND hwnd, LPARAM lParam) no
 	return bContinue;
 }
 
+static void ActivatePrevWindow(HWND hwnd, LPCWSTR lpszFile) noexcept {
+	DWORD cb = sizeof(NP2PARAMS);
+	int cchTitleExcerpt = 0;
+	if (lpszFile) {
+		cb += (lstrlen(lpszFile) + 1) * sizeof(WCHAR);
+		cb += (lstrlen(lpSchemeArg) + 1) * sizeof(WCHAR);
+		cchTitleExcerpt = lstrlen(szTitleExcerpt);
+		if (cchTitleExcerpt) {
+			cb += (cchTitleExcerpt + 1) * sizeof(WCHAR);
+		}
+	}
+	if (lpMatchArg) {
+		cb += (lstrlen(lpMatchArg) + 1) * sizeof(WCHAR);
+	}
+
+	static_assert(__is_standard_layout(NP2PARAMS));
+	NP2PARAMS *params = static_cast<NP2PARAMS *>(GlobalAlloc(GPTR, cb));
+	params->flagFileSpecified = false;
+	params->flagReadOnlyMode = flagReadOnlyMode & ReadOnlyMode_Current;
+	params->flagLexerSpecified = flagLexerSpecified;
+	params->flagQuietCreate = flagQuietCreate;
+	params->flagTitleExcerpt = false;
+	params->flagJumpTo = flagJumpTo;
+	params->flagChangeNotify = flagChangeNotify;
+
+	LPWSTR lpsz = &params->wchData;
+	if (lpszFile) {
+		params->flagFileSpecified = true;
+		lstrcpy(lpsz, lpszFile);
+		params->iInitialLexer = iInitialLexer;
+		if (flagLexerSpecified && lpSchemeArg) {
+			params->iInitialLexer = 0;
+			lpsz = StrEnd(lpsz) + 1;
+			lstrcpy(lpsz, lpSchemeArg);
+		}
+		if (cchTitleExcerpt) {
+			params->flagTitleExcerpt = true;
+			lpsz = StrEnd(lpsz) + 1;
+			lstrcpy(lpsz, szTitleExcerpt);
+		}
+		if (lpMatchArg) {
+			lpsz = StrEnd(lpsz) + 1;
+		}
+	}
+	if (lpMatchArg) {
+		params->flagMatchText = flagMatchText;
+		lstrcpy(lpsz, lpMatchArg);
+	}
+
+	params->iInitialLine = iInitialLine;
+	params->iInitialColumn = iInitialColumn;
+
+	params->iSrcEncoding = lpEncodingArg ? Encoding_Match(lpEncodingArg) : CPI_NONE;
+	params->flagSetEncoding = flagSetEncoding;
+	params->flagSetEOLMode = flagSetEOLMode;
+
+	COPYDATASTRUCT cds;
+	cds.dwData = DATA_NOTEPAD4_PARAMS;
+	cds.cbData = static_cast<DWORD>(GlobalSize(params));
+	cds.lpData = params;
+
+	SendMessage(hwnd, WM_COPYDATA, 0, AsInteger<LPARAM>(&cds));
+	GlobalFree(params);
+}
+
 bool ActivatePrevInst() noexcept {
-	if ((flagNoReuseWindow && !flagSingleFileInstance) || flagStartAsTrayIcon || flagNewFromClipboard || flagPasteBoard) {
-		return false;
-	}
-
-	if (flagSingleFileInstance && lpFileArg) {
-		ExpandEnvironmentStringsEx(lpFileArg, static_cast<DWORD>(NP2HeapSize(lpFileArg) / sizeof(WCHAR)));
-
-		if (PathIsRelative(lpFileArg)) {
-			WCHAR tchTmp[MAX_PATH];
-			PathCombine(tchTmp, g_wchWorkingDirectory, lpFileArg);
-			lstrcpy(lpFileArg, tchTmp);
-		}
-
-		GetLongPathName(lpFileArg, lpFileArg, MAX_PATH);
-
-		HWND hwnd = nullptr;
-		EnumWindows(EnumWindProcSingleFileInstance, AsInteger<LPARAM>(&hwnd));
-
-		if (hwnd != nullptr) {
-			// Enabled
-			if (IsWindowEnabled(hwnd)) {
-				// Make sure the previous window won't pop up a change notification message
-				//SendMessage(hwnd, APPM_CHANGENOTIFYCLEAR, 0, 0);
-
-				if (IsIconic(hwnd)) {
-					ShowWindowAsync(hwnd, SW_RESTORE);
-				}
-
-				if (!IsWindowVisible(hwnd)) {
-					SendMessage(hwnd, APPM_TRAYMESSAGE, 0, WM_LBUTTONDBLCLK);
-					SendMessage(hwnd, APPM_TRAYMESSAGE, 0, WM_LBUTTONUP);
-				}
-
-				SetForegroundWindow(hwnd);
-
-				DWORD cb = sizeof(NP2PARAMS);
-				if (lpSchemeArg) {
-					cb += (lstrlen(lpSchemeArg) + 1) * sizeof(WCHAR);
-				}
-
-				static_assert(__is_standard_layout(NP2PARAMS));
-				NP2PARAMS *params = static_cast<NP2PARAMS *>(GlobalAlloc(GPTR, cb));
-				params->flagFileSpecified = false;
-				params->flagReadOnlyMode = flagReadOnlyMode & ReadOnlyMode_Current;
-				params->flagLexerSpecified = flagLexerSpecified;
-				params->flagQuietCreate = false;
-				params->flagTitleExcerpt = false;
-				params->flagJumpTo = flagJumpTo;
-				params->flagChangeNotify = TripleBoolean_NotSet;
-				if (flagLexerSpecified && lpSchemeArg) {
-					lstrcpy(StrEnd(&params->wchData) + 1, lpSchemeArg);
-					params->iInitialLexer = 0;
-				} else {
-					params->iInitialLexer = iInitialLexer;
-				}
-				params->iInitialLine = iInitialLine;
-				params->iInitialColumn = iInitialColumn;
-
-				params->iSrcEncoding = lpEncodingArg ? Encoding_Match(lpEncodingArg) : CPI_NONE;
-				params->flagSetEncoding = flagSetEncoding;
-				params->flagSetEOLMode = flagSetEOLMode;
-
-				COPYDATASTRUCT cds;
-				cds.dwData = DATA_NOTEPAD4_PARAMS;
-				cds.cbData = static_cast<DWORD>(GlobalSize(params));
-				cds.lpData = params;
-
-				SendMessage(hwnd, WM_COPYDATA, 0, AsInteger<LPARAM>(&cds));
-				GlobalFree(params);
-
-				return true;
-			}
-
-			// Ask...
-			if (IDYES == MsgBoxAsk(MB_YESNO, IDS_ERR_PREVWINDISABLED)) {
-				return false;
-			}
-			return true;
-		}
-	}
-
-	if (flagNoReuseWindow) {
+	if (flagStartAsTrayIcon || flagNewFromClipboard || flagPasteBoard) {
 		return false;
 	}
 
 	HWND hwnd = nullptr;
-	EnumWindows(EnumWindProcReuseWindow, AsInteger<LPARAM>(&hwnd));
+	LPWSTR lpszFile = lpFileArg;
+	if (flagSingleFileInstance && lpszFile) {
+		ExpandEnvironmentStringsEx(lpszFile, static_cast<DWORD>(NP2HeapSize(lpszFile) / sizeof(WCHAR)));
+
+		if (PathIsRelative(lpszFile)) {
+			WCHAR tchTmp[MAX_PATH];
+			PathCombine(tchTmp, g_wchWorkingDirectory, lpszFile);
+			lstrcpy(lpszFile, tchTmp);
+		}
+
+		GetLongPathName(lpszFile, lpszFile, MAX_PATH);
+		EnumWindows(EnumWindProcSingleFileInstance, AsInteger<LPARAM>(&hwnd));
+		lpszFile = nullptr;
+	} else if (!flagNoReuseWindow) {
+		lpFileArg = nullptr;
+		EnumWindows(EnumWindProcSingleFileInstance, AsInteger<LPARAM>(&hwnd));
+		lpFileArg = lpszFile;
+	}
 
 	// Found a window
 	if (hwnd != nullptr) {
@@ -7860,64 +7832,16 @@ bool ActivatePrevInst() noexcept {
 
 			SetForegroundWindow(hwnd);
 
-			if (lpFileArg) {
-				ExpandEnvironmentStringsEx(lpFileArg, static_cast<DWORD>(NP2HeapSize(lpFileArg) / sizeof(WCHAR)));
+			if (lpszFile) {
+				ExpandEnvironmentStringsEx(lpszFile, static_cast<DWORD>(NP2HeapSize(lpszFile) / sizeof(WCHAR)));
 
-				if (PathIsRelative(lpFileArg)) {
+				if (PathIsRelative(lpszFile)) {
 					WCHAR tchTmp[MAX_PATH];
-					PathCombine(tchTmp, g_wchWorkingDirectory, lpFileArg);
-					lstrcpy(lpFileArg, tchTmp);
+					PathCombine(tchTmp, g_wchWorkingDirectory, lpszFile);
+					lstrcpy(lpszFile, tchTmp);
 				}
-
-				DWORD cb = sizeof(NP2PARAMS);
-				cb += (lstrlen(lpFileArg) + 1) * sizeof(WCHAR);
-
-				if (lpSchemeArg) {
-					cb += (lstrlen(lpSchemeArg) + 1) * sizeof(WCHAR);
-				}
-
-				const int cchTitleExcerpt = lstrlen(szTitleExcerpt);
-				if (cchTitleExcerpt) {
-					cb += (cchTitleExcerpt + 1) * sizeof(WCHAR);
-				}
-
-				NP2PARAMS *params = static_cast<NP2PARAMS *>(GlobalAlloc(GPTR, cb));
-				lstrcpy(&params->wchData, lpFileArg);
-				params->flagFileSpecified = true;
-				params->flagReadOnlyMode = flagReadOnlyMode & ReadOnlyMode_Current;
-				params->flagLexerSpecified = flagLexerSpecified;
-				params->flagQuietCreate = flagQuietCreate;
-				params->flagJumpTo = flagJumpTo;
-				params->flagChangeNotify = flagChangeNotify;
-				if (flagLexerSpecified && lpSchemeArg) {
-					lstrcpy(StrEnd(&params->wchData) + 1, lpSchemeArg);
-					params->iInitialLexer = 0;
-				} else {
-					params->iInitialLexer = iInitialLexer;
-				}
-				params->iInitialLine = iInitialLine;
-				params->iInitialColumn = iInitialColumn;
-
-				params->iSrcEncoding = lpEncodingArg ? Encoding_Match(lpEncodingArg) : CPI_NONE;
-				params->flagSetEncoding = flagSetEncoding;
-				params->flagSetEOLMode = flagSetEOLMode;
-
-				if (cchTitleExcerpt) {
-					lstrcpy(StrEnd(&params->wchData) + 1, szTitleExcerpt);
-					params->flagTitleExcerpt = true;
-				} else {
-					params->flagTitleExcerpt = false;
-				}
-
-				COPYDATASTRUCT cds;
-				cds.dwData = DATA_NOTEPAD4_PARAMS;
-				cds.cbData = static_cast<DWORD>(GlobalSize(params));
-				cds.lpData = params;
-
-				SendMessage(hwnd, WM_COPYDATA, 0, AsInteger<LPARAM>(&cds));
-				GlobalFree(params);
-				NP2HeapFree(lpFileArg);
 			}
+			ActivatePrevWindow(hwnd, lpszFile);
 			return true;
 		}
 
