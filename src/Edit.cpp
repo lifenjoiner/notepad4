@@ -190,7 +190,7 @@ void EditSetNewText(LPCSTR lpstrText, DWORD cbText, Sci_Line lineCount) noexcept
 //
 // EditConvertText()
 //
-bool EditConvertText(UINT cpSource, UINT cpDest, bool bSetSavePoint) noexcept {
+bool EditConvertText(UINT cpSource, UINT cpDest) noexcept {
 	if (cpSource == cpDest) {
 		return true;
 	}
@@ -236,7 +236,7 @@ bool EditConvertText(UINT cpSource, UINT cpDest, bool bSetSavePoint) noexcept {
 
 	SciCall_EmptyUndoBuffer();
 	SciCall_SetUndoCollection(true);
-	if (length == 0 && bSetSavePoint) {
+	if (length == 0 && StrIsEmpty(szCurFile)) {
 		SciCall_SetSavePoint();
 	}
 	UpdateLineNumberWidth();
@@ -302,21 +302,18 @@ char* EditGetClipboardText(HWND hwnd) noexcept {
 
 	HANDLE hmem = GetClipboardData(CF_UNICODETEXT);
 	LPCWSTR pwch = static_cast<LPCWSTR>(GlobalLock(hmem));
-	const int wlen = lstrlen(pwch);
 
 	const UINT cpEdit = SciCall_GetCodePage();
-	const int mlen = WideCharToMultiByte(cpEdit, 0, pwch, wlen + 1, nullptr, 0, nullptr, nullptr) - 1;
-	char *pmch = static_cast<char *>(LocalAlloc(LPTR, mlen + 1));
-	char *ptmp = static_cast<char *>(NP2HeapAlloc(mlen * 4 + 1));
+	const int mlen = WideCharToMultiByte(cpEdit, 0, pwch, -1, nullptr, 0, nullptr, nullptr);
+	char *pmch = static_cast<char *>(LocalAlloc(LPTR, mlen*2));
+	char *ptmp = static_cast<char *>(NP2HeapAlloc(mlen));
 
 	if (pmch && ptmp) {
-		const char *s = pmch;
-		char *d = ptmp;
-
-		WideCharToMultiByte(cpEdit, 0, pwch, wlen + 1, pmch, mlen + 1, nullptr, nullptr);
-
+		WideCharToMultiByte(cpEdit, 0, pwch, -1, ptmp, mlen, nullptr, nullptr);
 		const int iEOLMode = SciCall_GetEOLMode();
-		for (int i = 0; (i < mlen) && (*s != '\0'); i++) {
+		const char *s = ptmp;
+		char *d = pmch;
+		while (*s != '\0') {
 			if (*s == '\n' || *s == '\r') {
 				switch (iEOLMode) {
 				default: // SC_EOL_CRLF
@@ -330,8 +327,7 @@ char* EditGetClipboardText(HWND hwnd) noexcept {
 					*d++ = '\r';
 					break;
 				}
-				if ((*s == '\r') && (i + 1 < mlen) && (*(s + 1) == '\n')) {
-					i++;
+				if (*s == '\r' && s[1] == '\n') {
 					s++;
 				}
 				s++;
@@ -341,12 +337,9 @@ char* EditGetClipboardText(HWND hwnd) noexcept {
 		}
 
 		*d++ = '\0';
-		LocalFree(pmch);
-		pmch = static_cast<char *>(LocalAlloc(LPTR, (d - ptmp)));
-		strcpy(pmch, ptmp);
-		NP2HeapFree(ptmp);
 	}
 
+	NP2HeapFree(ptmp);
 	GlobalUnlock(hmem);
 	CloseClipboard();
 
@@ -364,11 +357,10 @@ LPWSTR EditGetClipboardTextW() noexcept {
 	LPWSTR ptmp = static_cast<LPWSTR>(NP2HeapAlloc((2*wlen + 1)*sizeof(WCHAR)));
 
 	if (pwch && ptmp) {
+		const int iEOLMode = SciCall_GetEOLMode();
 		LPCWSTR s = pwch;
 		LPWSTR d = ptmp;
-
-		const int iEOLMode = SciCall_GetEOLMode();
-		for (int i = 0; (i < wlen) && (*s != L'\0'); i++) {
+		while (*s != L'\0') {
 			if (*s == L'\n' || *s == L'\r') {
 				switch (iEOLMode) {
 				default: // SC_EOL_CRLF
@@ -382,8 +374,7 @@ LPWSTR EditGetClipboardTextW() noexcept {
 					*d++ = L'\r';
 					break;
 				}
-				if ((*s == L'\r') && (i + 1 < wlen) && (*(s + 1) == L'\n')) {
-					i++;
+				if (*s == L'\r' && s[1] == L'\n') {
 					s++;
 				}
 				s++;
@@ -1717,7 +1708,7 @@ LPWSTR EditURLEncodeSelection(int *pcchEscaped) noexcept {
 	DWORD cchEscapedW = static_cast<DWORD>(NP2HeapSize(pszEscapedW) / sizeof(WCHAR));
 	UrlEscape(pszTextW, pszEscapedW, &cchEscapedW, URL_ESCAPE_AS_UTF8);
 	if (!IsWin7AndAbove()) {
-		// TODO: encode some URL parts as UTF-8 then percent-escape these UTF-8 bytes.
+		// TODO: encode some URL parts as UTF-8 then percent escape these UTF-8 bytes.
 		//ParseURL(pszEscapedW, &ppu);
 	}
 
@@ -4604,6 +4595,51 @@ extern int iFindReplaceOption;
 extern int iFindReplaceOpacityLevel;
 extern int iSelectOption;
 
+void EditSaveSelectionAsFindText(EDITFINDREPLACE *lpefr, int menu, bool findSelection) noexcept {
+	if (!findSelection && (iSelectOption & SelectOption_CopySelectionAsFindText) == 0) {
+		return;
+	}
+	Sci_Position cchSelection = SciCall_GetSelTextLength();
+	if (cchSelection == 0 && findSelection) {
+		EditSelectWord();
+		cchSelection = SciCall_GetSelTextLength();
+	}
+
+	if (cchSelection > 0 && cchSelection < NP2_FIND_REPLACE_LIMIT) {
+		char mszSelection[NP2_FIND_REPLACE_LIMIT];
+
+		SciCall_GetSelText(mszSelection);
+		mszSelection[cchSelection] = 0; // zero terminate
+
+		const UINT cpEdit = SciCall_GetCodePage();
+		strcpy(lpefr->szFind, mszSelection);
+
+		if (cpEdit != SC_CP_UTF8) {
+			WCHAR wszBuf[NP2_FIND_REPLACE_LIMIT];
+			MultiByteToWideChar(cpEdit, 0, mszSelection, -1, wszBuf, COUNTOF(wszBuf));
+			WideCharToMultiByte(CP_UTF8, 0, wszBuf, -1, lpefr->szFindUTF8, COUNTOF(lpefr->szFindUTF8), nullptr, nullptr);
+		} else {
+			strcpy(lpefr->szFindUTF8, mszSelection);
+		}
+
+		lpefr->fuFlags &= SCFIND_REGEXP - 1; // clear all regex flags
+		lpefr->option &= ~FindReplaceOption_TransformBackslash;
+
+		switch (menu) {
+		case IDM_EDIT_SAVEFIND:
+			break;
+
+		case CMD_FINDNEXTSEL:
+			EditFindNext(lpefr, false);
+			break;
+
+		case CMD_FINDPREVSEL:
+			EditFindPrev(lpefr, false);
+			break;
+		}
+	}
+}
+
 static void FindReplaceSetFont(HWND hwnd, bool monospaced, HFONT *hFontFindReplaceEdit) noexcept {
 	HWND hwndFind = GetDlgItem(hwnd, IDC_FINDTEXT);
 	HWND hwndRepl = GetDlgItem(hwnd, IDC_REPLACETEXT);
@@ -6442,7 +6478,8 @@ static INT_PTR CALLBACK EditInsertTagDlgProc(HWND hwnd, UINT umsg, WPARAM wParam
 					LPCWSTR pwCur = StrChr(wszOpen, L'<');
 					if (pwCur != nullptr) {
 						LPWSTR wchIns = static_cast<LPWSTR>(NP2HeapAlloc((len + 5) * sizeof(WCHAR)));
-						StrCpyEx(wchIns, L"</");
+						wchIns[0] = L'<';
+						wchIns[1] = L' ';
 						int	cchIns = 2;
 
 						++pwCur;
@@ -6454,21 +6491,19 @@ static INT_PTR CALLBACK EditInsertTagDlgProc(HWND hwnd, UINT umsg, WPARAM wParam
 							pwCur++;
 						}
 
-						if (*pwCur == L'>' && *(pwCur - 1) != L'/') {
-							wchIns[cchIns++] = L'>';
-							wchIns[cchIns] = L'\0';
-
-							if (cchIns > 3 && !(
-									StrCaseEqual(wchIns, L"</base>") &&
-									StrCaseEqual(wchIns, L"</bgsound>") &&
-									StrCaseEqual(wchIns, L"</br>") &&
-									StrCaseEqual(wchIns, L"</embed>") &&
-									StrCaseEqual(wchIns, L"</hr>") &&
-									StrCaseEqual(wchIns, L"</img>") &&
-									StrCaseEqual(wchIns, L"</input>") &&
-									StrCaseEqual(wchIns, L"</link>") &&
-									StrCaseEqual(wchIns, L"</meta>"))) {
-
+						if (*pwCur == L'>' && pwCur[-1] != L'/') {
+							wchIns[cchIns] = L' ';
+							wchIns[cchIns + 1] = L'\0';
+							if (cchIns > 3 && (pLexCurrent->iLexer == SCLEX_HTML || pLexCurrent->iLexer == SCLEX_PHPSCRIPT)) {
+								// HTML void tag except <p>
+								pwCur = StrStrI(L" area base basefont br col command embed frame hr img input isindex keygen link meta param source track wbr ", wchIns + 1);
+								if (pwCur != nullptr) {
+									cchIns = 0;
+								}
+							}
+							if (cchIns > 2) {
+								wchIns[1] = L'/';
+								wchIns[cchIns] = L'>';
 								SetDlgItemText(hwnd, IDC_MODIFY_LINE_APPEND, wchIns);
 								bClear = false;
 							}
@@ -7023,7 +7058,7 @@ char *EditGetStringAroundCaret(LPCSTR delimiters) noexcept {
 
 extern bool bOpenFolderWithMatepath;
 
-static DWORD EditOpenSelectionCheckFile(LPCWSTR link, LPWSTR path, int cchFilePath, LPWSTR wchDirectory) noexcept {
+static DWORD EditOpenSelectionCheckFile(LPCWSTR link, LPWSTR path, DWORD cchFilePath, LPWSTR wchDirectory) noexcept {
 	if (StrStartsWith(link, L"//")) {
 		// issue #454, treat as link
 		lstrcpy(path, L"http:");
@@ -7033,7 +7068,11 @@ static DWORD EditOpenSelectionCheckFile(LPCWSTR link, LPWSTR path, int cchFilePa
 
 	DWORD dwAttributes = GetFileAttributes(link);
 	if (dwAttributes == INVALID_FILE_ATTRIBUTES) {
-		if (StrNotEmpty(szCurFile)) {
+		// handle variables expanded into absolute path, avoid touch percent encoded URL
+		if (link[0] == '%' && ExpandEnvironmentStrings(link, path, cchFilePath)) {
+			dwAttributes = GetFileAttributes(path);
+		}
+		if (dwAttributes == INVALID_FILE_ATTRIBUTES && StrNotEmpty(szCurFile)) {
 			lstrcpy(wchDirectory, szCurFile);
 			PathRemoveFileSpec(wchDirectory);
 			PathCombine(path, wchDirectory, link);
@@ -7476,7 +7515,7 @@ static LPCSTR FileVars_Find(LPCSTR pszData, LPCSTR pszName) noexcept {
 
 	LPCSTR pvStart = pszData;
 	while ((pvStart = strstr(pvStart, pszName)) != nullptr) {
-		const unsigned char chPrev = (pvStart > pszData) ? *(pvStart - 1) : 0;
+		const unsigned char chPrev = (pvStart > pszData) ? pvStart[-1] : 0;
 		const size_t len = strlen(pszName);
 		pvStart += len;
 		// match full name or suffix after hyphen
