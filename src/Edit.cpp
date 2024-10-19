@@ -55,6 +55,7 @@ extern int cxFindReplaceDlg;
 extern int iDefaultEOLMode;
 extern bool bFixLineEndings;
 extern bool bAutoStripBlanks;
+extern int iChangeHistoryMarker;
 
 // Default Codepage and Character Set
 extern int iDefaultCodePage;
@@ -140,6 +141,7 @@ void EditSetNewText(LPCSTR lpstrText, DWORD cbText, Sci_Line lineCount) noexcept
 
 	SciCall_SetReadOnly(false);
 	SciCall_Cancel();
+	SciCall_SetChangeHistory(SC_CHANGE_HISTORY_DISABLED);
 	SciCall_SetUndoCollection(false);
 	SciCall_EmptyUndoBuffer();
 	SciCall_ClearAll();
@@ -182,6 +184,7 @@ void EditSetNewText(LPCSTR lpstrText, DWORD cbText, Sci_Line lineCount) noexcept
 	SciCall_SetUndoCollection(true);
 	SciCall_EmptyUndoBuffer();
 	SciCall_SetSavePoint();
+	SciCall_SetChangeHistory(iChangeHistoryMarker);
 
 	bFreezeAppTitle = false;
 }
@@ -216,6 +219,7 @@ bool EditConvertText(UINT cpSource, UINT cpDest) noexcept {
 	bReadOnlyMode = false;
 	SciCall_SetReadOnly(false);
 	SciCall_Cancel();
+	SciCall_SetChangeHistory(SC_CHANGE_HISTORY_DISABLED);
 	SciCall_SetUndoCollection(false);
 	SciCall_EmptyUndoBuffer();
 	SciCall_ClearAll();
@@ -239,6 +243,7 @@ bool EditConvertText(UINT cpSource, UINT cpDest) noexcept {
 	if (length == 0 && StrIsEmpty(szCurFile)) {
 		SciCall_SetSavePoint();
 	}
+	SciCall_SetChangeHistory(iChangeHistoryMarker);
 	UpdateLineNumberWidth();
 	return true;
 }
@@ -262,6 +267,7 @@ void EditConvertToLargeMode() noexcept {
 	bReadOnlyMode = false;
 	SciCall_SetReadOnly(false);
 	SciCall_Cancel();
+	SciCall_SetChangeHistory(SC_CHANGE_HISTORY_DISABLED);
 	SciCall_SetUndoCollection(false);
 	SciCall_EmptyUndoBuffer();
 	SciCall_ClearAll();
@@ -285,6 +291,7 @@ void EditConvertToLargeMode() noexcept {
 	SciCall_SetUndoCollection(true);
 	SciCall_EmptyUndoBuffer();
 	SciCall_SetSavePoint();
+	SciCall_SetChangeHistory(iChangeHistoryMarker);
 
 	Style_SetLexer(pLexCurrent, true);
 	bLargeFileMode = true;
@@ -4332,19 +4339,20 @@ void EditJumpTo(Sci_Line iNewLine, Sci_Position iNewCol) noexcept {
 //
 void EditSelectEx(Sci_Position iAnchorPos, Sci_Position iCurrentPos) noexcept {
 	const Sci_Line iNewLine = SciCall_LineFromPosition(iCurrentPos);
-	const Sci_Line iAnchorLine = (iAnchorPos == iCurrentPos)? iNewLine : SciCall_LineFromPosition(iAnchorPos);
 
-	SciCall_EnsureVisible(iAnchorLine);
-	if (iAnchorLine == iNewLine) {
-		// TODO: center current line on screen when it's not visible
-	} else {
+	if (iAnchorPos != iCurrentPos) {
+		const Sci_Line iAnchorLine = SciCall_LineFromPosition(iAnchorPos);
 		// Ensure that the first and last lines of a selection are always unfolded
 		// This needs to be done *before* the SciCall_SetSel() message
-		SciCall_EnsureVisible(iNewLine);
+		if (iAnchorLine != iNewLine) {
+			SciCall_EnsureVisible(iAnchorLine);
+		}
 	}
 
 	SciCall_SetXCaretPolicy(CARET_SLOP | CARET_STRICT | CARET_EVEN, 50);
 	SciCall_SetYCaretPolicy(CARET_SLOP | CARET_STRICT | CARET_EVEN, 5);
+	// center current line on screen when it's not visible
+	SciCall_EnsureVisibleEnforcePolicy(iNewLine);
 	if (iAnchorPos == iCurrentPos) {
 		SciCall_GotoPos(iAnchorPos);
 	} else {

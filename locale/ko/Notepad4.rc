@@ -457,6 +457,7 @@ BEGIN
 		MENUITEM SEPARATOR
 		MENUITEM "줄 번호(&N)\tCtrl+Shift+N",		IDM_VIEW_LINENUMBERS
 		MENUITEM "책갈피 여백(&M)\tCtrl+Shift+M",	IDM_VIEW_MARGIN
+		MENUITEM "Change &History Marker",			IDM_VIEW_CHANGE_HISTORY_MARKER
 		MENUITEM SEPARATOR
 		MENUITEM "코드 접기 표시(&F)\tCtrl+Shift+Alt+F",IDM_VIEW_SHOW_FOLDING
 		POPUP "접기 전환(&T)"
@@ -493,8 +494,7 @@ BEGIN
 		MENUITEM "구성표 사용자 지정(&C)...\tCtrl+F12",	IDM_VIEW_SCHEME_CONFIG
 		MENUITEM "구성표 즐겨찾기(&F)...",				IDM_VIEW_SCHEME_FAVORITE
 		MENUITEM SEPARATOR
-		MENUITEM "두 번째 전역 스타일(&2)\tShift+F12",	IDM_VIEW_USE2NDGLOBALSTYLE
-		MENUITEM "기본 코드 스타일 사용(&U)",				IDM_VIEW_USEDEFAULT_CODESTYLE
+		MENUITEM "기본 코드 스타일 사용(&U)\tShift+F12",	IDM_VIEW_USEDEFAULT_CODESTYLE
 		POPUP "스타일 테마(&Y)"
 		BEGIN
 			MENUITEM "기본값(&D)",						IDM_VIEW_STYLE_THEME_DEFAULT
@@ -945,7 +945,7 @@ BEGIN
     VK_F12,         IDM_VIEW_SCHEME,            VIRTKEY, NOINVERT
     VK_F12,         IDM_VIEW_SCHEME_CONFIG,     VIRTKEY, CONTROL, NOINVERT
     VK_F12,         IDM_VIEW_DEFAULT_CODE_FONT, VIRTKEY, ALT, NOINVERT
-    VK_F12,         IDM_VIEW_USE2NDGLOBALSTYLE, VIRTKEY, SHIFT, NOINVERT
+    VK_F12,         IDM_VIEW_USEDEFAULT_CODESTYLE, VIRTKEY, SHIFT, NOINVERT
     VK_F2,          IDM_EDIT_SELTONEXT,         VIRTKEY, CONTROL, ALT, NOINVERT
     VK_F2,          IDM_EDIT_SELTOPREV,         VIRTKEY, SHIFT, CONTROL, ALT, NOINVERT
     VK_F2,          BME_EDIT_BOOKMARKNEXT,      VIRTKEY, NOINVERT
@@ -1253,6 +1253,8 @@ FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     CONTROL         "",IDC_FILEMRU,"SysListView32",LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_SHAREIMAGELISTS | LVS_AUTOARRANGE | LVS_NOCOLUMNHEADER | WS_BORDER | WS_TABSTOP,7,7,212,158
     AUTOCHECKBOX    "종료 시 최근 파일 기억(&R)",IDC_SAVEMRU,7,169,155,10,WS_TABSTOP
+    LTEXT           "Maximum files:",IDC_MRU_COUNT_LABEL,7,185,64,8
+    EDITTEXT        IDC_MRU_COUNT_VALUE,73,183,30,13,ES_NUMBER | ES_AUTOHSCROLL
     CONTROL         "<a>기록 지우기</a>",IDC_EMPTY_MRU,"SysLink",WS_TABSTOP,172,169,48,10
     DEFPUSHBUTTON   "확인",IDOK,113,183,50,14,WS_DISABLED
     PUSHBUTTON      "취소",IDCANCEL,169,183,50,14
@@ -1858,7 +1860,7 @@ BEGIN
 /e 인코딩\t파일 소스 인코딩.\n\
 /g 줄[,열]\t지정된 위치로 이동합니다 (/g -1 파일 끝).\n\
 /m 텍스트\t지정된 텍스트와 일치합니다 (/m- 마지막, /mr 정규식, /mb 백슬래시).\n\
-/l[o|p]\t수정된 파일을 자동으로 다시 불러옵니다.\n\
+/l[o]\t수정된 파일을 자동으로 다시 불러옵니다.\n\
 /q\t프롬프트없이 새 파일을 강제로 생성합니다.\n\
 /ro\t파일을 읽기 전용 모드로 엽니다.\n\
 /p\t기본 프린터 및 옵션으로 파일을 인쇄합니다.\n\
@@ -2067,7 +2069,6 @@ BEGIN
 	NP2LEX_TEXTFILE					"텍스트 파일"
 
 	NP2LEX_2NDTEXTFILE				"두 번째 텍스트 파일"
-	NP2LEX_2NDGLOBAL				"두 번째 전역 스타일"
 	NP2LEX_GLOBAL					"전역 스타일"
 END
 #endif // NP2_ENABLE_LOCALIZE_LEXER_NAME
@@ -2097,6 +2098,7 @@ BEGIN
 	NP2STYLE_CallTip				"호출팁"
 	NP2STYLE_CodeFolding			"코드 접기"
 	NP2STYLE_Link					"링크"
+	NP2STYLE_ChangeHistoryMarker	"Change History Marker"
 
 	NP2STYLE_Default				"기본값"
 END

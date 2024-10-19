@@ -106,6 +106,7 @@ WCHAR	szIniFile[MAX_PATH] = L"";
 static WCHAR szIniFile2[MAX_PATH] = L"";
 static bool bSaveSettings;
 bool	bSaveRecentFiles;
+int iMaxRecentFiles;
 static bool bSaveFindReplace;
 static WCHAR tchLastSaveCopyDir[MAX_PATH] = L"";
 WCHAR	tchOpenWithDir[MAX_PATH];
@@ -137,6 +138,7 @@ int		iZoomLevel = 100;
 bool	bShowBookmarkMargin;
 static bool bShowLineNumbers;
 static int bMarkOccurrences;
+int	iChangeHistoryMarker;
 EditAutoCompletionConfig autoCompletionConfig;
 int iSelectOption;
 static int iLineSelectionMode;
@@ -1666,9 +1668,9 @@ static inline void UpdateDocumentModificationStatus() noexcept {
 
 void UpdateBookmarkMarginWidth() noexcept {
 	// see LineMarker::Draw() for minDim.
-	const int width = bShowBookmarkMargin ? SciCall_TextHeight() - 2 : 0;
+	const int width = (bShowBookmarkMargin || iChangeHistoryMarker != SC_CHANGE_HISTORY_DISABLED) ? SciCall_TextHeight() - 2 : 0;
 	// 16px for XPM bookmark symbol.
-	//const int width = bShowBookmarkMargin ? max(SciCall_TextHeight() - 2, 16) : 0;
+	//const int width = (bShowBookmarkMargin || iChangeHistoryMarker != SC_CHANGE_HISTORY_DISABLED) ? max(SciCall_TextHeight() - 2, 16) : 0;
 	SciCall_SetMarginWidth(MarginNumber_Bookmark, width);
 }
 
@@ -1900,9 +1902,9 @@ LRESULT MsgCreate(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 
 	// File MRU
 	const int flags = MRUFlags_FilePath | (static_cast<int>(flagRelativeFileMRU) * MRUFlags_RelativePath) | (static_cast<int>(flagPortableMyDocs) * MRUFlags_PortableMyDocs);
-	mruFile.Init(MRU_KEY_RECENT_FILES, flags);
-	mruFind.Init(MRU_KEY_RECENT_FIND, MRUFlags_QuoteValue);
-	mruReplace.Init(MRU_KEY_RECENT_REPLACE, MRUFlags_QuoteValue);
+	mruFile.Init(MRU_KEY_RECENT_FILES, iMaxRecentFiles, flags);
+	mruFind.Init(MRU_KEY_RECENT_FIND, MRU_MAXITEMS, MRUFlags_QuoteValue);
+	mruReplace.Init(MRU_KEY_RECENT_REPLACE, MRU_MAXITEMS, MRUFlags_QuoteValue);
 	return 0;
 }
 
@@ -2537,7 +2539,6 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 	DisableCmd(hmenu, IDM_EDIT_STREAMCOMMENT, (pLexCurrent->lexerAttr & LexerAttr_NoBlockComment));
 
 	CheckCmd(hmenu, IDM_VIEW_SHOW_FOLDING, bShowCodeFolding);
-	CheckCmd(hmenu, IDM_VIEW_USE2NDGLOBALSTYLE, bUse2ndGlobalStyle);
 	CheckCmd(hmenu, IDM_VIEW_USEDEFAULT_CODESTYLE, pLexCurrent->bUseDefaultCodeStyle);
 	i = IDM_VIEW_STYLE_THEME_DEFAULT + np2StyleTheme;
 	CheckMenuRadioItem(hmenu, IDM_VIEW_STYLE_THEME_DEFAULT, IDM_VIEW_STYLE_THEME_DARK, i, MF_BYCOMMAND);
@@ -2555,6 +2556,7 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 	CheckCmd(hmenu, IDM_VIEW_SHOWINDENTGUIDES, bShowIndentGuides);
 	CheckCmd(hmenu, IDM_VIEW_LINENUMBERS, bShowLineNumbers);
 	CheckCmd(hmenu, IDM_VIEW_MARGIN, bShowBookmarkMargin);
+	CheckCmd(hmenu, IDM_VIEW_CHANGE_HISTORY_MARKER, iChangeHistoryMarker);
 	CheckCmd(hmenu, IDM_VIEW_AUTOCOMPLETION_IGNORECASE, autoCompletionConfig.bIgnoreCase);
 	CheckCmd(hmenu, IDM_SET_LATEX_INPUT_METHOD, autoCompletionConfig.bLaTeXInputMethod);
 	CheckCmd(hmenu, IDM_SET_MULTIPLE_SELECTION, iSelectOption & SelectOption_EnableMultipleSelection);
@@ -3741,34 +3743,23 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	break;
 
 	// Main Bookmark Functions
-	case BME_EDIT_BOOKMARKNEXT: {
-		const Sci_Position iPos = SciCall_GetCurrentPos();
-		const Sci_Line iLine = SciCall_LineFromPosition(iPos);
-
-		Sci_Line iNextLine = SciCall_MarkerNext(iLine + 1, MarkerBitmask_Bookmark);
-		if (iNextLine < 0) {
-			iNextLine = SciCall_MarkerNext(0, MarkerBitmask_Bookmark);
-		}
-
-		if (iNextLine >= 0) {
-			editMarkAll.ignoreSelectionUpdate = true;
-			SciCall_EnsureVisible(iNextLine);
-			SciCall_GotoLine(iNextLine);
-			SciCall_SetYCaretPolicy(CARET_SLOP | CARET_STRICT | CARET_EVEN, 10);
-			SciCall_ScrollCaret();
-			SciCall_SetYCaretPolicy(CARET_EVEN, 0);
-		}
-	}
-	break;
-
+	case BME_EDIT_BOOKMARKNEXT:
 	case BME_EDIT_BOOKMARKPREV: {
 		const Sci_Position iPos = SciCall_GetCurrentPos();
 		const Sci_Line iLine = SciCall_LineFromPosition(iPos);
 
-		Sci_Line iNextLine = SciCall_MarkerPrevious(iLine - 1, MarkerBitmask_Bookmark);
-		if (iNextLine < 0) {
-			const Sci_Line nLines = SciCall_GetLineCount();
-			iNextLine = SciCall_MarkerPrevious(nLines, MarkerBitmask_Bookmark);
+		Sci_Line iNextLine;
+		if (LOWORD(wParam) == BME_EDIT_BOOKMARKNEXT) {
+			iNextLine = SciCall_MarkerNext(iLine + 1, MarkerBitmask_Bookmark);
+			if (iNextLine < 0) {
+				iNextLine = SciCall_MarkerNext(0, MarkerBitmask_Bookmark);
+			}
+		} else {
+			iNextLine = SciCall_MarkerPrevious(iLine - 1, MarkerBitmask_Bookmark);
+			if (iNextLine < 0) {
+				const Sci_Line iLines = SciCall_GetLineCount();
+				iNextLine = SciCall_MarkerPrevious(iLines, MarkerBitmask_Bookmark);
+			}
 		}
 
 		if (iNextLine >= 0) {
@@ -3897,10 +3888,6 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		Style_ConfigDlg(hwndEdit);
 		break;
 
-	case IDM_VIEW_USE2NDGLOBALSTYLE:
-		Style_ToggleUse2ndGlobalStyle();
-		break;
-
 	case IDM_VIEW_USEDEFAULT_CODESTYLE:
 		Style_ToggleUseDefaultCodeStyle();
 		break;
@@ -3977,6 +3964,14 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		bShowBookmarkMargin = !bShowBookmarkMargin;
 		UpdateBookmarkMarginWidth();
 		Style_SetBookmark();
+		break;
+
+	case IDM_VIEW_CHANGE_HISTORY_MARKER:
+		if (iChangeHistoryMarker != SC_CHANGE_HISTORY_DISABLED || !SciCall_CanUndo()) {
+			iChangeHistoryMarker = (iChangeHistoryMarker == SC_CHANGE_HISTORY_DISABLED)? (SC_CHANGE_HISTORY_ENABLED | SC_CHANGE_HISTORY_MARKERS) : SC_CHANGE_HISTORY_DISABLED;
+			UpdateBookmarkMarginWidth();
+			SciCall_SetChangeHistory(iChangeHistoryMarker);
+		}
 		break;
 
 	case IDM_VIEW_AUTOCOMPLETION_SETTINGS:
@@ -4998,7 +4993,9 @@ LRESULT MsgNotify(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 				break;
 #endif
 			case MarginNumber_Bookmark:
-				EditToggleBookmarkAt(scn->position);
+				if (bShowBookmarkMargin) {
+					EditToggleBookmarkAt(scn->position);
+				}
 				break;
 			}
 			break;
@@ -5082,7 +5079,8 @@ LRESULT MsgNotify(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 				MENUITEMINFO mii;
 				mii.cbSize = sizeof(MENUITEMINFO);
 				mii.fMask = MIIM_ID | MIIM_STRING | MIIM_BITMAP;
-				for (int i = 0; i < mruFile.iSize; i++) {
+				const int count = min(mruFile.iSize, MRU_MAXITEMS);
+				for (int i = 0; i < count; i++) {
 					LPCWSTR path = mruFile.pszItems[i];
 					HBITMAP hbmp = bitmapCache.Get(path);
 					mii.wID = i + IDM_RECENT_HISTORY_START;
@@ -5249,7 +5247,9 @@ void LoadSettings() noexcept {
 	pt.x = section.GetInt(L"WindowPosX", 0);
 	pt.y = section.GetInt(L"WindowPosY", 0);
 
-	bSaveRecentFiles = section.GetBool(L"SaveRecentFiles", false);
+	iValue = section.GetInt(L"SaveRecentFiles", MRU_MAXITEMS << 1);
+	bSaveRecentFiles = iValue & true;
+	iMaxRecentFiles = max(iValue >> 1, MRU_MAXITEMS);
 	bSaveFindReplace = section.GetBool(L"SaveFindReplace", false);
 	iValue = section.GetInt(L"FindReplaceOption", FindReplaceOption_Default);
 	iFindReplaceOption = iValue & 15;
@@ -5336,6 +5336,7 @@ void LoadSettings() noexcept {
 	bShowBookmarkMargin = section.GetBool(L"ShowBookmarkMargin", false);
 	bShowLineNumbers = section.GetBool(L"ShowLineNumbers", true);
 	bShowCodeFolding = section.GetBool(L"ShowCodeFolding", true);
+	iChangeHistoryMarker = section.GetInt(L"ChangeHistoryMarker", SC_CHANGE_HISTORY_DISABLED);
 	bMarkOccurrences = section.GetInt(L"MarkOccurrences", MarkOccurrences_Enable);
 
 	bViewWhiteSpace = section.GetBool(L"ViewWhiteSpace", false);
@@ -5593,9 +5594,10 @@ void SaveSettings(bool bSaveSettingsNow) noexcept {
 		section.SetInt(L"WindowPosY", wi.y);
 	}
 
-	section.SetBoolEx(L"SaveRecentFiles", bSaveRecentFiles, false);
+	int iValue = (iMaxRecentFiles << 1) | static_cast<int>(bSaveRecentFiles);
+	section.SetIntEx(L"SaveRecentFiles", iValue, MRU_MAXITEMS << 1);
 	section.SetBoolEx(L"SaveFindReplace", bSaveFindReplace, false);
-	int iValue = iFindReplaceOption | ((efrData.option & FindReplaceOption_BehaviorMask) << 4);
+	iValue = iFindReplaceOption | ((efrData.option & FindReplaceOption_BehaviorMask) << 4);
 	section.SetIntEx(L"FindReplaceOption", iValue, FindReplaceOption_Default);
 	if (bSaveFindReplace) {
 		iValue = efrData.fuFlags | ((efrData.option & FindReplaceOption_SearchMask) << 10);
@@ -5644,6 +5646,7 @@ void SaveSettings(bool bSaveSettingsNow) noexcept {
 	section.SetBoolEx(L"ShowBookmarkMargin", bShowBookmarkMargin, false);
 	section.SetBoolEx(L"ShowLineNumbers", bShowLineNumbers, true);
 	section.SetBoolEx(L"ShowCodeFolding", bShowCodeFolding, true);
+	section.SetIntEx(L"ChangeHistoryMarker", iChangeHistoryMarker, SC_CHANGE_HISTORY_DISABLED);
 	section.SetIntEx(L"MarkOccurrences", bMarkOccurrences, MarkOccurrences_Enable);
 	section.SetBoolEx(L"ViewWhiteSpace", bViewWhiteSpace, false);
 	section.SetBoolEx(L"ViewEOLs", bViewEOLs, false);
