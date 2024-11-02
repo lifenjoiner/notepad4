@@ -138,7 +138,7 @@ Latest development builds (artifacts in Release configuration for each compiler 
 	* [Texinfo](tools/lang/Texinfo.texi), up to Texinfo 7.1.
 	* [TOML File](https://toml.io/)
 	* [TypeScript](tools/lang/TypeScript.ts), up to TypeScript 5.4.
-	* Visual Basic, VB6, VB.NET
+	* Visual Basic, VB6, VBA, VB.NET
 	* VBScript
 	* [VHDL](tools/lang/VHDL.vhdl), up to VHDL 2019.
 	* Verilog HDL, up to [Verilog](tools/lang/Verilog.v) 2005 and [SystemVerilog](tools/lang/SystemVerilog.sv) 2017.
@@ -200,6 +200,7 @@ Latest development builds (artifacts in Release configuration for each compiler 
 	* [Deutsch](https://github.com/zufuliu/notepad4/tree/main/locale/de) by [@xelsios](https://github.com/xelsios)
 	* [French](https://github.com/zufuliu/notepad4/tree/main/locale/fr) by [@VoilierBleu](https://github.com/VoilierBleu)
 	* [Italiano](https://github.com/zufuliu/notepad4/tree/main/locale/it) by [@Matteo-Nigro](https://github.com/Matteo-Nigro)
+	* [Русский](https://github.com/zufuliu/notepad4/tree/main/locale/ru) by [@tretdm](https://github.com/tretdm)
 	* [日本語](https://github.com/zufuliu/notepad4/tree/main/locale/ja) by [@maboroshin](https://github.com/maboroshin)
 	* [中文 (繁體)](https://github.com/zufuliu/notepad4/tree/main/locale/zh-Hant)
 	* [中文 (简体)](https://github.com/zufuliu/notepad4/tree/main/locale/zh-Hans)

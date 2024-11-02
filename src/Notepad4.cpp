@@ -114,8 +114,6 @@ WCHAR	tchFavoritesDir[MAX_PATH];
 static WCHAR tchDefaultDir[MAX_PATH];
 static WCHAR tchToolbarButtons[MAX_TOOLBAR_BUTTON_CONFIG_BUFFER_SIZE];
 static LPWSTR tchToolbarBitmap = nullptr;
-static LPWSTR tchToolbarBitmapHot = nullptr;
-static LPWSTR tchToolbarBitmapDisabled = nullptr;
 static TitlePathNameFormat iPathNameFormat;
 bool	fWordWrapG;
 int		iWordWrapMode;
@@ -197,7 +195,7 @@ static bool bUseInlineIME;
 static int iBidirectional;
 static bool bShowMenu;
 static bool bShowToolbar;
-static bool bAutoScaleToolbar;
+static int iAutoScaleToolbar;
 static bool bShowStatusbar;
 static bool bInFullScreenMode;
 static int iFullScreenMode;
@@ -452,12 +450,6 @@ static inline int GetDefualtRenderingTechnology() noexcept {
 static void CleanUpResources(bool initialized) noexcept {
 	if (tchToolbarBitmap != nullptr) {
 		LocalFree(tchToolbarBitmap);
-	}
-	if (tchToolbarBitmapHot != nullptr) {
-		LocalFree(tchToolbarBitmapHot);
-	}
-	if (tchToolbarBitmapDisabled != nullptr) {
-		LocalFree(tchToolbarBitmapDisabled);
 	}
 	if (lpSchemeArg) {
 		LocalFree(lpSchemeArg);
@@ -1920,75 +1912,44 @@ void CreateBars(HWND hwnd, HINSTANCE hInstance) noexcept {
 
 	SendMessage(hwndToolbar, TB_BUTTONSTRUCTSIZE, sizeof(TBBUTTON), 0);
 
-	bool bExternalBitmap = false;
+	bool internalBitmap = false;
+	const int scale = iAutoScaleToolbar;
+#if NP2_ENABLE_HIDPI_IMAGE_RESOURCE
+	const UINT dpi = (scale > USER_DEFAULT_SCREEN_DPI) ? (g_uCurrentDPI + scale - USER_DEFAULT_SCREEN_DPI) : g_uCurrentDPI;
+#else
+	const int dpi = g_uCurrentDPI;
+#endif
 	// Add normal Toolbar Bitmap
 	HBITMAP hbmp = nullptr;
 	if (tchToolbarBitmap != nullptr) {
 		hbmp = LoadBitmapFile(tchToolbarBitmap);
 	}
-	if (hbmp != nullptr) {
-		bExternalBitmap = true;
-	} else {
-		const int resource = GetBitmapResourceIdForCurrentDPI(IDB_TOOLBAR16);
+	if (hbmp == nullptr) {
+		internalBitmap = true;
+		const int resource = GetBitmapResourceIdForDPI(IDB_TOOLBAR16, dpi);
 		hbmp = static_cast<HBITMAP>(LoadImage(g_exeInstance, MAKEINTRESOURCE(resource), IMAGE_BITMAP, 0, 0, LR_CREATEDIBSECTION));
 	}
-	if (bAutoScaleToolbar) {
-		hbmp = ResizeImageForCurrentDPI(hbmp);
+	if (scale != 0) {
+		hbmp = ResizeImageForDPI(hbmp, dpi);
 	}
-	HBITMAP hbmpCopy = nullptr;
-	if (!bExternalBitmap) {
-		hbmpCopy = static_cast<HBITMAP>(CopyImage(hbmp, IMAGE_BITMAP, 0, 0, LR_CREATEDIBSECTION));
-	}
+
 	BITMAP bmp;
 	GetObject(hbmp, sizeof(BITMAP), &bmp);
-
 	HIMAGELIST himl = ImageList_Create(bmp.bmHeight, bmp.bmHeight, ILC_COLOR32 | ILC_MASK, 0, 0);
 	ImageList_AddMasked(himl, hbmp, CLR_DEFAULT);
-	DeleteObject(hbmp);
 	SendMessage(hwndToolbar, TB_SETIMAGELIST, 0, AsInteger<LPARAM>(himl));
 
-	// Optionally add hot Toolbar Bitmap
-	if (tchToolbarBitmapHot != nullptr) {
-		hbmp = LoadBitmapFile(tchToolbarBitmapHot);
-		if (hbmp != nullptr) {
-			if (bAutoScaleToolbar) {
-				hbmp = ResizeImageForCurrentDPI(hbmp);
-			}
-			GetObject(hbmp, sizeof(BITMAP), &bmp);
-			himl = ImageList_Create(bmp.bmHeight, bmp.bmHeight, ILC_COLOR32 | ILC_MASK, 0, 0);
-			ImageList_AddMasked(himl, hbmp, CLR_DEFAULT);
-			DeleteObject(hbmp);
-			SendMessage(hwndToolbar, TB_SETHOTIMAGELIST, 0, AsInteger<LPARAM>(himl));
-		}
-	}
-
-	// Optionally add disabled Toolbar Bitmap
-	if (tchToolbarBitmapDisabled != nullptr) {
-		hbmp = LoadBitmapFile(tchToolbarBitmapDisabled);
-		if (hbmp != nullptr) {
-			if (bAutoScaleToolbar) {
-				hbmp = ResizeImageForCurrentDPI(hbmp);
-			}
-			GetObject(hbmp, sizeof(BITMAP), &bmp);
-			himl = ImageList_Create(bmp.bmHeight, bmp.bmHeight, ILC_COLOR32 | ILC_MASK, 0, 0);
-			ImageList_AddMasked(himl, hbmp, CLR_DEFAULT);
-			DeleteObject(hbmp);
-			SendMessage(hwndToolbar, TB_SETDISABLEDIMAGELIST, 0, AsInteger<LPARAM>(himl));
-			bExternalBitmap = true;
-		}
-	}
-
-	if (!bExternalBitmap) {
+	if (internalBitmap) {
+		HBITMAP hbmpCopy = static_cast<HBITMAP>(CopyImage(hbmp, IMAGE_BITMAP, 0, 0, LR_CREATEDIBSECTION));
 		const bool fProcessed = BitmapAlphaBlend(hbmpCopy, GetSysColor(COLOR_3DFACE), 0x60);
 		if (fProcessed) {
 			himl = ImageList_Create(bmp.bmHeight, bmp.bmHeight, ILC_COLOR32 | ILC_MASK, 0, 0);
 			ImageList_AddMasked(himl, hbmpCopy, CLR_DEFAULT);
 			SendMessage(hwndToolbar, TB_SETDISABLEDIMAGELIST, 0, AsInteger<LPARAM>(himl));
 		}
-	}
-	if (hbmpCopy) {
 		DeleteObject(hbmpCopy);
 	}
+	DeleteObject(hbmp);
 
 #if NP2_ENABLE_CUSTOMIZE_TOOLBAR_LABELS
 	// Load toolbar labels
@@ -2251,6 +2212,9 @@ void ValidateUILangauge() noexcept {
 	case LANG_PORTUGUESE:
 		languageMenu = IDM_LANG_PORTUGUESE_BRAZIL;
 		break;
+	case LANG_RUSSIAN:
+		languageMenu = IDM_LANG_RUSSIAN;
+		break;
 	case LANG_NEUTRAL:
 	default:
 		languageMenu = IDM_LANG_USER_DEFAULT;
@@ -2291,6 +2255,9 @@ void SetUILanguage(int menu) noexcept {
 		break;
 	case IDM_LANG_PORTUGUESE_BRAZIL:
 		lang = MAKELANGID(LANG_PORTUGUESE, SUBLANG_PORTUGUESE_BRAZILIAN);
+		break;
+	case IDM_LANG_RUSSIAN:
+		lang = MAKELANGID(LANG_RUSSIAN, SUBLANG_DEFAULT);
 		break;
 	}
 
@@ -2583,7 +2550,10 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 	CheckCmd(hmenu, IDM_VIEW_MENU, bShowMenu);
 	CheckCmd(hmenu, IDM_VIEW_TOOLBAR, bShowToolbar);
 	EnableCmd(hmenu, IDM_VIEW_CUSTOMIZE_TOOLBAR, bShowToolbar);
-	CheckCmd(hmenu, IDM_VIEW_AUTO_SCALE_TOOLBAR, bAutoScaleToolbar);
+	CheckCmd(hmenu, IDM_VIEW_AUTO_SCALE_TOOLBAR, iAutoScaleToolbar);
+#if NP2_ENABLE_HIDPI_IMAGE_RESOURCE
+	CheckCmd(hmenu, IDM_VIEW_USE_LARGE_TOOLBAR, iAutoScaleToolbar > USER_DEFAULT_SCREEN_DPI);
+#endif
 	CheckCmd(hmenu, IDM_VIEW_STATUSBAR, bShowStatusbar);
 #if NP2_ENABLE_APP_LOCALIZATION_DLL
 	CheckMenuRadioItem(hmenu, IDM_LANG_USER_DEFAULT, IDM_LANG_LAST_LANGUAGE, languageMenu, MF_BYCOMMAND);
@@ -4182,9 +4152,20 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		break;
 
 	case IDM_VIEW_AUTO_SCALE_TOOLBAR:
-		bAutoScaleToolbar = !bAutoScaleToolbar;
+		iAutoScaleToolbar = iAutoScaleToolbar ? 0 : USER_DEFAULT_SCREEN_DPI;
 		MsgThemeChanged(hwnd, 0, 0);
 		break;
+
+#if NP2_ENABLE_HIDPI_IMAGE_RESOURCE
+	case IDM_VIEW_USE_LARGE_TOOLBAR:
+		if (iAutoScaleToolbar >= USER_DEFAULT_SCREEN_DPI && iAutoScaleToolbar < USER_DEFAULT_SCREEN_DPI*2) {
+			iAutoScaleToolbar += USER_DEFAULT_SCREEN_DPI/2;
+		} else {
+			iAutoScaleToolbar = USER_DEFAULT_SCREEN_DPI;
+		}
+		MsgThemeChanged(hwnd, 0, 0);
+		break;
+#endif
 
 	case IDM_VIEW_STATUSBAR:
 		bShowStatusbar = !bShowStatusbar;
@@ -4571,55 +4552,10 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	case IDM_LANG_KOREAN:
 	case IDM_LANG_PORTUGUESE_BRAZIL:
 	case IDM_LANG_FRENCH_FRANCE:
+	case IDM_LANG_RUSSIAN:
 		SetUILanguage(LOWORD(wParam));
 		break;
 #endif
-
-	// Text File
-	case IDM_LEXER_TEXTFILE:
-	case IDM_LEXER_2NDTEXTFILE:
-	case IDM_LEXER_CSV:
-	// CSS Style Sheet
-	case IDM_LEXER_CSS:
-	case IDM_LEXER_SCSS:
-	case IDM_LEXER_LESS:
-	case IDM_LEXER_HSS:
-	// JavaScript
-	case IDM_LEXER_JAVASCRIPT:
-	case IDM_LEXER_JAVASCRIPT_JSX:
-	case IDM_LEXER_TYPESCRIPT:
-	case IDM_LEXER_TYPESCRIPT_TSX:
-	// Web Source Code
-	case IDM_LEXER_WEB:
-	case IDM_LEXER_PHP:
-	case IDM_LEXER_JSP:
-	case IDM_LEXER_ASPX_CS:
-	case IDM_LEXER_ASPX_VB:
-	case IDM_LEXER_ASP_VBS:
-	case IDM_LEXER_ASP_JS:
-	case IDM_LEXER_APACHE:
-	// Markdown
-	case IDM_LEXER_MARKDOWN_GITHUB:
-	case IDM_LEXER_MARKDOWN_GITLAB:
-	case IDM_LEXER_MARKDOWN_PANDOC:
-	// Math
-	case IDM_LEXER_MATHEMATICA:
-	case IDM_LEXER_MATLAB:
-	case IDM_LEXER_OCTAVE:
-	case IDM_LEXER_SCILAB:
-	// Shell Script
-	case IDM_LEXER_BASH:
-	case IDM_LEXER_CSHELL:
-	case IDM_LEXER_M4:
-	// XML Document
-	case IDM_LEXER_XML:
-	case IDM_LEXER_XSD:
-	case IDM_LEXER_XSLT:
-	case IDM_LEXER_DTD:
-	case IDM_LEXER_PROPERTY_LIST:
-	//case IDM_LEXER_SVG:
-		Style_SetLexerByLangIndex(LOWORD(wParam));
-		break;
 
 	case CMD_TIMESTAMPS:
 		EditUpdateTimestampMatchTemplate(hwndEdit);
@@ -4725,6 +4661,11 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		break;
 
 	default: {
+		if (LOWORD(wParam) >= IDM_LEXER_TEXTFILE && LOWORD(wParam) < IDM_LEXER_LEXER_COUNT) {
+			Style_SetLexerByLangIndex(LOWORD(wParam));
+			break;
+		}
+
 		const UINT index = LOWORD(wParam) - IDM_RECENT_HISTORY_START;
 		if (index < MRU_MAXITEMS) {
 			LPCWSTR path = mruFile.pszItems[index];
@@ -5432,31 +5373,12 @@ void LoadSettings() noexcept {
 
 	bShowMenu = section.GetBool(L"ShowMenu", true);
 	bShowToolbar = section.GetBool(L"ShowToolbar", true);
-	bAutoScaleToolbar = section.GetBool(L"AutoScaleToolbar", true);
+	iAutoScaleToolbar = section.GetInt(L"AutoScaleToolbar", USER_DEFAULT_SCREEN_DPI);
 	bShowStatusbar = section.GetBool(L"ShowStatusbar", true);
 
 	iValue = section.GetInt(L"FullScreenMode", FullScreenMode_Default);
 	iFullScreenMode = iValue;
 	bInFullScreenMode = iValue & FullScreenMode_OnStartup;
-
-	// toolbar image section
-	{
-		LoadIniSection(INI_SECTION_NAME_TOOLBAR_IMAGES, pIniSectionBuf, cchIniSection);
-		section.Parse(pIniSectionBuf);
-
-		strValue = section.GetValue(L"BitmapDefault");
-		if (StrNotEmpty(strValue)) {
-			tchToolbarBitmap = StrDup(strValue);
-		}
-		strValue = section.GetValue(L"BitmapHot");
-		if (StrNotEmpty(strValue)) {
-			tchToolbarBitmapHot = StrDup(strValue);
-		}
-		strValue = section.GetValue(L"BitmapDisabled");
-		if (StrNotEmpty(strValue)) {
-			tchToolbarBitmapDisabled = StrDup(strValue);
-		}
-	}
 
 	// window position section
 	{
@@ -5704,7 +5626,7 @@ void SaveSettings(bool bSaveSettingsNow) noexcept {
 	section.SetStringEx(L"ToolbarButtons", tchToolbarButtons, DefaultToolbarButtons);
 	section.SetBoolEx(L"ShowMenu", bShowMenu, true);
 	section.SetBoolEx(L"ShowToolbar", bShowToolbar, true);
-	section.SetBoolEx(L"AutoScaleToolbar", bAutoScaleToolbar, true);
+	section.SetIntEx(L"AutoScaleToolbar", iAutoScaleToolbar, USER_DEFAULT_SCREEN_DPI);
 	section.SetBoolEx(L"ShowStatusbar", bShowStatusbar, true);
 	section.SetIntEx(L"FullScreenMode", iFullScreenMode, FullScreenMode_Default);
 
@@ -6499,8 +6421,13 @@ void LoadFlags() noexcept {
 	fNoAutoDetection = section.GetBool(L"NoAutoDetection", false);
 	fNoFileVariables = section.GetBool(L"NoFileVariables", false);
 
+	LPCWSTR strValue = section.GetValue(L"ToolbarImage");
+	if (StrNotEmpty(strValue)) {
+		tchToolbarBitmap = StrDup(strValue);
+	}
+
 	if (StrIsEmpty(g_wchAppUserModelID)) {
-		LPCWSTR strValue = section.GetValue(L"ShellAppUserModelID");
+		strValue = section.GetValue(L"ShellAppUserModelID");
 		if (StrNotEmpty(strValue)) {
 			lstrcpyn(g_wchAppUserModelID, strValue, COUNTOF(g_wchAppUserModelID));
 		} else {

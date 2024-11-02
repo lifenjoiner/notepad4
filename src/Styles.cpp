@@ -1442,6 +1442,14 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) noexcept {
 			static_assert(IDM_LEXER_TYPESCRIPT_TSX - IDM_LEXER_TYPESCRIPT == 1);
 			dialect = np2LexLangIndex - IDM_LEXER_TYPESCRIPT;
 		} break;
+
+		case NP2LEX_VBSCRIPT:
+			dialect = 2; // see LexVB.cxx
+			break;
+		case NP2LEX_VISUALBASIC: {
+			static_assert(IDM_LEXER_VBA - IDM_LEXER_VBNET == 1);
+			dialect = np2LexLangIndex - IDM_LEXER_VBNET;
+		} break;
 		}
 
 		if (dialect > 0) {
@@ -1934,6 +1942,106 @@ PEDITLEXER Style_SniffShebang(char *pchText) noexcept {
 	return nullptr;
 }
 
+void Style_SniffCSV() noexcept {
+	const Sci_Line lines = SciCall_GetLineCount();
+	const Sci_Position endPos = SciCall_PositionFromLine(min<Sci_Line>(lines, 2));
+	const char *ptr = SciCall_GetRangePointer(0, endPos);
+	if (ptr == nullptr) { // empty document
+		return;
+	}
+#if 0
+	StopWatch watch;
+	watch.Start();
+#endif
+	int table[32*2]{};
+	int offset = 0;
+	const char * const end = ptr + endPos;
+#if defined(_WIN64)
+	uint64_t maskSet = 0;
+	while (ptr < end) {
+		const uint8_t ch = *ptr++;
+		constexpr uint64_t mask = (1 << '\r') | (1 << '\n') | (1 << '\t') | (UINT64_C(1) << ',') | (UINT64_C(1) << ';');
+		if (ch == '|' || (ch <= ';' && (mask & (UINT64_C(1) << ch)) != 0)) {
+			if (ch == '\r' || ch == '\n') {
+				offset = 32;
+				if (ch == '\r' && *ptr == '\n') {
+					++ptr;
+				}
+			} else {
+				const unsigned index = offset + (ch & 31);
+				maskSet |= UINT64_C(1) << index;
+				table[index] += 1;
+			}
+		}
+	}
+	const uint32_t mask = (maskSet & UINT32_MAX) & (maskSet >> 32);
+#else
+	while (ptr < end) {
+		const uint8_t ch = *ptr++;
+		if (ch == ',' || ch == '\t' || ch == ';' || ch == '|') {
+			const unsigned index = offset + (ch & 31);
+			table[index] += 1;
+		} else if (ch == '\r' || ch == '\n') {
+			offset = 32;
+			if (ch == '\r' && *ptr == '\n') {
+				++ptr;
+			}
+		}
+	}
+	uint32_t mask = 0;
+	{
+		uint32_t value = ('\t') | ((',' & 31) << 8) | (('|' & 31) << 16) | ((';' & 31) << 24);
+		while (value) {
+			const int index = value & 0xff;
+			if (table[index] && table[32 + index]) {
+				mask |= 1U << index;
+			}
+			value >>= 8;
+		}
+	}
+#endif // _WIN64
+
+	constexpr uint32_t preferred = ';' | ('|' << 8) | ('\t' << 16) | (',' << 24);
+	uint8_t delimiter = '\0';
+	if (mask != 0) { // delimiter occurs in both row
+		uint32_t value = preferred;
+		int maxColumn = 0;
+		while (value != 0) {
+			const int index = value & 31;
+			if (mask & (1U << index)) {
+				const int first = table[index];
+				const int second = table[32 + index];
+				const int column = min(first, second);
+				if (column > maxColumn && column >= 4*abs(first - second)) { // 75%
+					maxColumn = column;
+					delimiter = value & 0xff;
+				}
+			}
+			value >>= 8;
+		}
+	}
+	if (delimiter == 0) {
+		uint32_t value = preferred;
+		int maxColumn = 0;
+		while (value != 0) {
+			const int index = value & 31;
+			const int column = table[index] + table[32 + index];
+			if (column > maxColumn) {
+				maxColumn = column;
+				delimiter = value & 0xff;
+			}
+			value >>= 8;
+		}
+	}
+#if 0
+	watch.Stop();
+	watch.ShowLog(__func__);
+#endif
+	if (delimiter != 0) {
+		iCsvOption = ('\"' << 8) | delimiter;
+	}
+}
+
 //=============================================================================
 // find lexer from <!DOCTYPE type PUBLIC > or <%@ Page Language="lang" %>
 // Style_GetDocTypeLanguage()
@@ -2329,6 +2437,12 @@ static void Style_UpdateLexerLang(LPCEDITLEXER pLex, LPCWSTR lpszExt, LPCWSTR lp
 		}
 		break;
 
+	case NP2LEX_VISUALBASIC:
+		if (StrCaseEqual(L"bas", lpszExt)) {
+			np2LexLangIndex = IDM_LEXER_VBA;
+		}
+		break;
+
 	case NP2LEX_XML:
 		if (StrCaseEqual(L"xml", lpszExt)) {
 			np2LexLangIndex = Style_GetDocTypeLanguage();
@@ -2606,6 +2720,9 @@ bool Style_SetLexerFromFile(LPCWSTR lpszFile) noexcept {
 		pLexNew = pLexArray[iDefaultLexerIndex];
 	}
 	// Apply the new lexer
+	if (pLexNew->iLexer == SCLEX_CSV) {
+		Style_SniffCSV();
+	}
 	Style_SetLexer(pLexNew, true);
 	return bFound;
 }
@@ -2620,6 +2737,9 @@ void Style_SetLexerFromName(LPCWSTR lpszFile, LPCWSTR lpszName) noexcept {
 		pLexNew = Style_MatchLexer(lpszName, true);
 	}
 	if (pLexNew != nullptr) {
+		if (pLexNew->iLexer == SCLEX_CSV) {
+			Style_SniffCSV();
+		}
 		Style_SetLexer(pLexNew, true);
 	} else {
 		Style_SetLexerFromFile(lpszFile);
@@ -2777,6 +2897,12 @@ void Style_SetLexerByLangIndex(int lang) noexcept {
 		pLex = &lexBash;
 		break;
 
+	// Visual Basic
+	case IDM_LEXER_VBNET:
+	case IDM_LEXER_VBA:
+		pLex = &lexVisualBasic;
+		break;
+
 	// XML Document
 	case IDM_LEXER_XML:
 	case IDM_LEXER_XSD:
@@ -2796,7 +2922,7 @@ void Style_SetLexerByLangIndex(int lang) noexcept {
 	}
 	if (pLex != nullptr) {
 		if (bLexerChanged || pLex != pLexCurrent || langIndex != np2LexLangIndex) {
-			Style_SetLexer(pLex, (pLex != pLexCurrent) + true);
+			Style_SetLexer(pLex, (pLex != pLexCurrent) + TRUE);
 		}
 	}
 }
@@ -2855,6 +2981,10 @@ void Style_UpdateSchemeMenu(HMENU hmenu) noexcept {
 		// Shell Script
 		case NP2LEX_BASH:
 			lang = IDM_LEXER_BASH;
+			break;
+		// Visual Basic
+		case NP2LEX_VISUALBASIC:
+			lang = IDM_LEXER_VBNET;
 			break;
 		// XML Document
 		case NP2LEX_XML:
@@ -5099,7 +5229,7 @@ void Style_SelectLexerDlg(HWND hwnd, bool favorite) noexcept {
 			if (pLexCurrent->iLexer == SCLEX_CSV) {
 				SelectCSVOptionsDlg();
 			}
-			Style_SetLexer(pLexCurrent, (pLex != pLexCurrent) + true);
+			Style_SetLexer(pLexCurrent, (pLex != pLexCurrent) + TRUE);
 		}
 	} else {
 		if (favorite) {
