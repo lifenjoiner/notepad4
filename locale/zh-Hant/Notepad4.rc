@@ -554,8 +554,9 @@ BEGIN
 		//POPUP "S&QL Dialect"
 		POPUP "&Visual Basic"
 		BEGIN
-			MENUITEM "&Visual Basic",				IDM_LEXER_VBNET
-			MENUITEM "&Office VBA",					IDM_LEXER_VBA
+			MENUITEM "Visual &Basic",				IDM_LEXER_VBNET
+			MENUITEM "&VBA / VB 6.0",				IDM_LEXER_VBA
+			MENUITEM "VB&Script",					IDM_LEXER_VBS
 		END
 		POPUP "&XML 文件"
 		BEGIN
@@ -758,6 +759,7 @@ BEGIN
 			MENUITEM "馬拉雅拉姆語轉拉丁語(&M)",		IDM_EDIT_MAP_MALAYALAM_LATIN
 		END
 		MENUITEM "URL 編碼(&U)\tCtrl+Shift+E",			IDM_EDIT_URLENCODE
+		MENUITEM "URL 元件編碼",					IDM_EDIT_URLCOMPONENTENCODE
 		MENUITEM "URL 解碼(&L)\tCtrl+Shift+R",			IDM_EDIT_URLDECODE
 	END
 	POPUP "說明(&H)"

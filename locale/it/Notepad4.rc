@@ -457,7 +457,7 @@ BEGIN
 		MENUITEM SEPARATOR
 		MENUITEM "&Numeri linee\tCtrl+Shift+N",		IDM_VIEW_LINENUMBERS
 		MENUITEM "Mar&gine segnalibri\tCtrl+Shift+M",	IDM_VIEW_MARGIN
-		MENUITEM "Cambia Marcatore &Cronologia",			IDM_VIEW_CHANGE_HISTORY_MARKER
+		MENUITEM "Marcatore &Cronologia",			IDM_VIEW_CHANGE_HISTORY_MARKER
 		MENUITEM SEPARATOR
 		MENUITEM "Mostra Code &Folding\tCtrl+Shift+Alt+F",IDM_VIEW_SHOW_FOLDING
 		POPUP "Chiudi F&olds"
@@ -554,8 +554,9 @@ BEGIN
 		//POPUP "S&QL Dialect"
 		POPUP "&Visual Basic"
 		BEGIN
-			MENUITEM "&Visual Basic",				IDM_LEXER_VBNET
-			MENUITEM "&Office VBA",					IDM_LEXER_VBA
+			MENUITEM "Visual &Basic",				IDM_LEXER_VBNET
+			MENUITEM "&VBA / VB 6.0",				IDM_LEXER_VBA
+			MENUITEM "VB&Script",					IDM_LEXER_VBS
 		END
 		POPUP "Documento &XML"
 		BEGIN
@@ -758,6 +759,7 @@ BEGIN
 			MENUITEM "&Malayalam a Latino",					IDM_EDIT_MAP_MALAYALAM_LATIN
 		END
 		MENUITEM "Codifica &URL\tCtrl+Shift+E",				IDM_EDIT_URLENCODE
+		MENUITEM "Codifica componente URL",					IDM_EDIT_URLCOMPONENTENCODE
 		MENUITEM "Decodifica UR&L\tCtrl+Shift+R",				IDM_EDIT_URLDECODE
 	END
 	POPUP "&Aiuto"
@@ -2110,7 +2112,7 @@ BEGIN
 	NP2STYLE_CallTip				"Suggerimento"
 	NP2STYLE_CodeFolding			"Code Folding"
 	NP2STYLE_Link					"Collegamento"
-	NP2STYLE_ChangeHistoryMarker	"Cambia Marcatore Cronologia"
+	NP2STYLE_ChangeHistoryMarker	"Marcatore Cronologia"
 
 	NP2STYLE_Default				"Predefinito"
 END

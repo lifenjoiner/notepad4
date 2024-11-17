@@ -554,8 +554,9 @@ BEGIN
 		//POPUP "Langage SQL"
 		POPUP "&Visual Basic"
 		BEGIN
-			MENUITEM "&Visual Basic",				IDM_LEXER_VBNET
-			MENUITEM "&Office VBA",					IDM_LEXER_VBA
+			MENUITEM "Visual &Basic",				IDM_LEXER_VBNET
+			MENUITEM "&VBA / VB 6.0",				IDM_LEXER_VBA
+			MENUITEM "VB&Script",					IDM_LEXER_VBS
 		END
 		POPUP "Document XML"
 		BEGIN
@@ -758,6 +759,7 @@ BEGIN
 			MENUITEM "&Malayalam à Latin",					IDM_EDIT_MAP_MALAYALAM_LATIN
 		END
 		MENUITEM "Encodage des &URL\tCtrl+Shift+E",				IDM_EDIT_URLENCODE
+		MENUITEM "URL Component Encode",					IDM_EDIT_URLCOMPONENTENCODE
 		MENUITEM "Décodage des UR&L\tCtrl+Shift+R",				IDM_EDIT_URLDECODE
 	END
 	POPUP "Aide"
