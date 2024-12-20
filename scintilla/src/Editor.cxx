@@ -99,6 +99,17 @@ constexpr bool IsLastStep(const DocModification &mh) noexcept {
 		&& ((mh.modificationType & finalMask) == finalMask);
 }
 
+class BatchUpdateGroup {
+	Editor *editor;
+public:
+	explicit BatchUpdateGroup(Editor *edit) noexcept : editor{edit} {
+		editor->BeginBatchUpdate();
+	}
+	~BatchUpdateGroup() {
+		editor->EndBatchUpdate();
+	}
+};
+
 }
 
 Timer::Timer() noexcept :
@@ -195,6 +206,7 @@ Editor::Editor() {
 	modEventMask = ModificationFlags::EventMaskAll;
 
 	foldAutomatic = AutomaticFold::None;
+	batchUpdateDepth = 0;
 
 	pdoc->AddWatcher(this, nullptr);
 	SetRepresentations();
@@ -516,10 +528,14 @@ void Editor::RedrawSelMargin(Sci::Line line, bool allAfter) noexcept {
 }
 
 PRectangle Editor::RectangleFromRange(Range r, int overlap) const noexcept {
-	const Sci::Line minLine = pcs->DisplayFromDoc(
-		pdoc->SciLineFromPosition(r.First()));
-	const Sci::Line maxLine = pcs->DisplayLastFromDoc(
-		pdoc->SciLineFromPosition(r.Last()));
+	const Sci::Line docLineFirst = pdoc->SciLineFromPosition(r.First());
+	const Sci::Line minLine = pcs->DisplayFromDoc(docLineFirst);
+	Sci::Line docLineLast = docLineFirst;	// Common case where range is wholly in one document line
+	if (r.Last() >= pdoc->LineStart(docLineFirst + 1)) {
+		// Range covers multiple lines so need last line
+		docLineLast = pdoc->SciLineFromPosition(r.Last());
+	}
+	const Sci::Line maxLine = pcs->DisplayLastFromDoc(docLineLast);
 	const PRectangle rcClientDrawing = GetClientDrawingRectangle();
 	PRectangle rc;
 	const int leftTextOverlap = ((xOffset == 0) && (vs.leftMarginWidth > 0)) ? 1 : 0;
@@ -799,7 +815,7 @@ Sci::Position Editor::MovePositionOutsideChar(Sci::Position pos, Sci::Position m
 }
 
 SelectionPosition Editor::MovePositionOutsideChar(SelectionPosition pos, Sci::Position moveDir, bool checkLineEnd) const noexcept {
-	const Sci::Position posMoved = pdoc->MovePositionOutsideChar(pos.Position(), moveDir, checkLineEnd);
+	const Sci::Position posMoved = pdoc->MovePositionOutsideChar(pos.Position(), static_cast<int>(moveDir), checkLineEnd);
 	if (posMoved != pos.Position())
 		pos.SetPosition(posMoved);
 	if (vs.ProtectionActive()) {
@@ -1003,21 +1019,27 @@ void Editor::MoveSelectedLines(int lineDelta) {
 	// if selection doesn't end at the beginning of a line greater than that of the start,
 	// then set it at the beginning of the next one
 	Sci::Position selectionEnd = SelectionEnd().Position();
-	const Sci::Line endLine = pdoc->SciLineFromPosition(selectionEnd);
+	Sci::Line endLine = pdoc->SciLineFromPosition(selectionEnd);
 	const Sci::Position beginningOfEndLine = pdoc->LineStart(endLine);
+	const Sci::Position docLength = pdoc->LengthNoExcept();
 	bool appendEol = false;
 	if (selectionEnd > beginningOfEndLine
 		|| selectionStart == selectionEnd) {
 		selectionEnd = pdoc->LineStart(endLine + 1);
-		appendEol = (selectionEnd == pdoc->LengthNoExcept() && pdoc->SciLineFromPosition(selectionEnd) == endLine);
+		const Sci::Line line = pdoc->SciLineFromPosition(selectionEnd);
+		appendEol = (line == endLine && selectionEnd == docLength);
+		endLine = line;
 	}
 
 	// if there's nowhere for the selection to move
 	// (i.e. at the beginning going up or at the end going down),
 	// stop it right there!
+	const bool docEndLineEmpty = pdoc->LineStart(endLine) == docLength;
 	if ((selectionStart == 0 && lineDelta < 0)
-		|| (selectionEnd == pdoc->LengthNoExcept() && lineDelta > 0)
-		|| selectionStart == selectionEnd) {
+		|| (selectionEnd == docLength && lineDelta > 0
+			&& !docEndLineEmpty) // allow moving when end line of document is empty
+		|| ((selectionStart == selectionEnd)
+			&& !(lineDelta < 0 && docEndLineEmpty && selectionEnd == docLength))) { // allow moving-up last empty line
 		return;
 	}
 
@@ -1476,13 +1498,13 @@ bool Editor::WrapOneLine(Surface *surface, Sci::Position positionInsert) {
 	return pcs->SetHeight(lineToWrap, linesWrapped);
 }
 
-void Editor::OnLineWrapped(Sci::Line lineDoc, int linesWrapped) {
+void Editor::OnLineWrapped(Sci::Line lineDoc, int linesWrapped, int option) {
 	if (Wrapping()) {
 		//printf("%s(%zd, %d)\n", __func__, lineDoc, linesWrapped);
 		if (vs.annotationVisible != AnnotationVisible::Hidden) {
 			linesWrapped += pdoc->AnnotationLines(lineDoc);
 		}
-		if (pcs->SetHeight(lineDoc, linesWrapped)) {
+		if (pcs->SetHeight(lineDoc, linesWrapped) && option == static_cast<int>(LayoutLineOption::AutoUpdate)) {
 			NeedWrapping(lineDoc, lineDoc + 1, false);
 			SetScrollBars();
 			SetVerticalScrollPos();
@@ -2794,6 +2816,12 @@ void Editor::NotifyModified(Document *, DocModification mh, void *) {
 			const Sci::Line lineDoc = pdoc->SciLineFromPosition(mh.position);
 			const Sci::Line lines = std::max<Sci::Line>(0, mh.linesAdded);
 			if (Wrapping()) {
+				// Check if this modification crosses any of the wrap points
+				if (wrapPending.NeedsWrap()) {
+					if (lineDoc < wrapPending.end) { // Inserted/deleted before or inside wrap range
+						wrapPending.end += mh.linesAdded;
+					}
+				}
 				NeedWrapping(lineDoc, lineDoc + lines + 1);
 			}
 			RefreshStyleData();
@@ -5785,8 +5813,10 @@ Sci::Position Editor::GetTag(char *tagValue, int tagNumber) {
 	const char *text = nullptr;
 	Sci::Position length = 0;
 	if ((tagNumber >= 1) && (tagNumber <= 9)) {
-		char name[3] = "\\?";
+		char name[3];
+		name[0] = '\\';
 		name[1] = static_cast<char>(tagNumber + '0');
+		name[2] = '\0';
 		length = 2;
 		text = pdoc->SubstituteByPosition(name, &length);
 	}
@@ -6092,6 +6122,10 @@ namespace {
 
 constexpr Selection::SelTypes SelTypeFromMode(SelectionMode mode) noexcept {
 	return static_cast<Selection::SelTypes>(static_cast<int>(mode) + 1);
+}
+
+constexpr int SelectionModeFromSelType(Selection::SelTypes selType) noexcept {
+	return std::max(0, static_cast<int>(selType) - 1);
 }
 
 }
@@ -6596,11 +6630,21 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		return pdoc->IsCollectingUndo();
 
 	case Message::BeginUndoAction:
-		pdoc->BeginUndoAction();
+		if (wParam == 0) {
+			pdoc->BeginUndoAction();
+		}
+		if (lParam != 0) {
+			BeginBatchUpdate();
+		}
 		return 0;
 
 	case Message::EndUndoAction:
-		pdoc->EndUndoAction();
+		if (wParam == 0) {
+			pdoc->EndUndoAction();
+		}
+		if (lParam != 0) {
+			EndBatchUpdate();
+		}
 		return 0;
 
 	case Message::GetUndoSequence:
@@ -6977,15 +7021,17 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 
 	case Message::ClearTabStops:
 		if (view.ClearTabstops(LineFromUPtr(wParam))) {
-			const DocModification mh(ModificationFlags::ChangeTabStops, 0, 0, 0, nullptr, LineFromUPtr(wParam));
-			NotifyModified(pdoc, mh, nullptr);
+			// const DocModification mh(ModificationFlags::ChangeTabStops, 0, 0, 0, nullptr, LineFromUPtr(wParam));
+			// NotifyModified(pdoc, mh, nullptr);
+			Redraw();
 		}
 		break;
 
 	case Message::AddTabStop:
 		if (view.AddTabstop(LineFromUPtr(wParam), static_cast<int>(lParam))) {
-			const DocModification mh(ModificationFlags::ChangeTabStops, 0, 0, 0, nullptr, LineFromUPtr(wParam));
-			NotifyModified(pdoc, mh, nullptr);
+			// const DocModification mh(ModificationFlags::ChangeTabStops, 0, 0, 0, nullptr, LineFromUPtr(wParam));
+			// NotifyModified(pdoc, mh, nullptr);
+			Redraw();
 		}
 		break;
 
@@ -7293,9 +7339,9 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		if (wParam <= MarkerMax) {
 			vs.markers[wParam].markType = static_cast<MarkerSymbol>(lParam);
 			vs.CalcLargestMarkerHeight();
+			InvalidateStyleData();
+			RedrawSelMargin();
 		}
-		InvalidateStyleData();
-		RedrawSelMargin();
 		break;
 
 	case Message::MarkerSymbolDefined:
@@ -7377,9 +7423,9 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		if (wParam <= MarkerMax) {
 			vs.markers[wParam].SetXPM(ConstCharPtrFromSPtr(lParam));
 			vs.CalcLargestMarkerHeight();
+			InvalidateStyleData();
+			RedrawSelMargin();
 		}
-		InvalidateStyleData();
-		RedrawSelMargin();
 		break;
 
 	case Message::RGBAImageSetWidth:
@@ -7398,9 +7444,9 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		if (wParam <= MarkerMax) {
 			vs.markers[wParam].SetRGBAImage(sizeRGBAImage, scaleRGBAImage / 100.0f, ConstUCharPtrFromSPtr(lParam));
 			vs.CalcLargestMarkerHeight();
+			InvalidateStyleData();
+			RedrawSelMargin();
 		}
-		InvalidateStyleData();
-		RedrawSelMargin();
 		break;
 
 	case Message::SetMarginTypeN:
@@ -8221,10 +8267,12 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 	case Message::GetCommandEvents:
 		return commandEvents;
 
-	case Message::ConvertEOLs:
+	case Message::ConvertEOLs: {
+		const BatchUpdateGroup group(this);
 		pdoc->ConvertLineEnds(static_cast<EndOfLine>(wParam));
 		SetSelection(sel.MainCaret(), sel.MainAnchor());	// Ensure selection inside document
 		return 0;
+	}
 
 	case Message::SetLengthForEncode:
 		lengthForEncode = PositionFromUPtr(wParam);
@@ -8240,18 +8288,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		SetSelectionMode(wParam, false);
 		break;
 	case Message::GetSelectionMode:
-		switch (sel.selType) {
-		case Selection::SelTypes::stream:
-			return static_cast<sptr_t>(SelectionMode::Stream);
-		case Selection::SelTypes::rectangle:
-			return static_cast<sptr_t>(SelectionMode::Rectangle);
-		case Selection::SelTypes::lines:
-			return static_cast<sptr_t>(SelectionMode::Lines);
-		case Selection::SelTypes::thin:
-			return static_cast<sptr_t>(SelectionMode::Thin);
-		default:	// ?!
-			return static_cast<sptr_t>(SelectionMode::Stream);
-		}
+		return SelectionModeFromSelType(sel.selType);
 	case Message::SetMoveExtendsSelection:
 		sel.SetMoveExtends(wParam != 0);
 		break;

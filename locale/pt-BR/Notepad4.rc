@@ -625,6 +625,7 @@ BEGIN
 				MENUITEM "English",					IDM_LANG_ENGLISH_US
 				MENUITEM "Français",				IDM_LANG_FRENCH_FRANCE
 				MENUITEM "Italiano",				IDM_LANG_ITALIAN
+				MENUITEM "Polski",					IDM_LANG_PORTUGUESE_BRAZIL
 				MENUITEM "Português (Brasil)",		IDM_LANG_PORTUGUESE_BRAZIL
 				MENUITEM "Русский",					IDM_LANG_RUSSIAN
 				MENUITEM "日本語",					IDM_LANG_JAPANESE
@@ -1742,6 +1743,7 @@ BEGIN
     IDS_TITLEEXCERPT        """%s"""
     IDS_READONLY_FILE       "(Read Only File)"
     IDS_READONLY_MODE       "(Read Only Mode)"
+                            // Line, Column, Character, Selected, Selected Line, Find
     IDS_STATUSITEM_FORMAT   "Ln %s / %s \nCol %s / %s \nCh %s / %s \nSel %s / %s \nSelLn %s \nFnd %s "
     IDS_ZERO_LENGTH_MATCH   "^ Zero-Length Match"
     IDS_LOADFILE            "Loading ""%s""..."
