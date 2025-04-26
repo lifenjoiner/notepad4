@@ -150,7 +150,7 @@ void EditSetNewText(LPCSTR lpstrText, DWORD cbText, Sci_Line lineCount) noexcept
 
 #if defined(_WIN64)
 	// enable conversion between line endings
-	if (bLargeFileMode || cbText + lineCount >= MAX_NON_UTF8_SIZE) {
+	if (bLargeFileMode || cbText + lineCount >= MAX_SMALL_FILE_SIZE) {
 		constexpr int mask = SC_DOCUMENTOPTION_TEXT_LARGE | SC_DOCUMENTOPTION_STYLES_NONE;
 		const int options = SciCall_GetDocumentOptions();
 		if ((options & mask) != mask) {
@@ -834,7 +834,7 @@ void EditDetectIndentation(LPCSTR lpData, DWORD cbData, EditFileVars &fv) noexce
 	const uint8_t * const end = ptr + cbData;
 	#define MAX_DETECTED_TAB_WIDTH	8
 	// line count for ambiguous lines, line indented by 1 to 8 spaces, line starts with tab.
-	uint32_t indentLineCount[1 + MAX_DETECTED_TAB_WIDTH + 1] = { 0 };
+	uint32_t indentLineCount[1 + MAX_DETECTED_TAB_WIDTH + 1]{};
 	int prevIndentCount = 0;
 	int prevTabWidth = 0;
 
@@ -1000,7 +1000,7 @@ bool EditLoadFile(LPWSTR pszFile, EditFileIOStatus &status) noexcept {
 	//     3. Extra memory when moving gaps on editing, it may require more than 2/3 physical memory.
 	// large file TODO: https://github.com/zufuliu/notepad4/issues/125
 	// [ ] [> 4 GiB] use SetFilePointerEx() and ReadFile()/WriteFile() to read/write file.
-	// [-] [> 2 GiB] fix encoding conversion with MultiByteToWideChar() and WideCharToMultiByte().
+	// [-] [> 1 GiB] fix encoding conversion with MultiByteToWideChar() and WideCharToMultiByte().
 	LONGLONG maxFileSize = INT64_C(4) << 30;
 #else
 	// 2 GiB: ptrdiff_t / Sci_Position used in Scintilla
@@ -4369,7 +4369,7 @@ void EditEnsureConsistentLineEndings() noexcept {
 		return;
 	}
 	const size_t actions = SciCall_GetUndoActions();
-	if (lineCount + actions >= MAX_NON_UTF8_SIZE) {
+	if (lineCount + actions >= MAX_SMALL_FILE_SIZE) {
 		// Scintilla undo stack is indexed with int
 		return;
 	}
@@ -4382,7 +4382,7 @@ void EditEnsureConsistentLineEndings() noexcept {
 #endif
 		{
 			const size_t dwLength = SciCall_GetLength() + lineCount;
-			if (dwLength >= MAX_NON_UTF8_SIZE) {
+			if (dwLength >= MAX_SMALL_FILE_SIZE) {
 				return;
 			}
 		}
@@ -4982,6 +4982,7 @@ static INT_PTR CALLBACK EditFindReplaceDlgProc(HWND hwnd, UINT umsg, WPARAM wPar
 					bCloseDlg = false;
 				}
 			}
+			mask |= lpefr->option & (bIsFindDlg ? FindReplaceOption_CloseReplace : FindReplaceOption_CloseFind);
 			lpefr->option = mask;
 
 			// Save MRUs
@@ -6578,10 +6579,10 @@ void EditInsertDateTime(bool bShort) noexcept {
 }
 
 void EditUpdateTimestampMatchTemplate(HWND hwnd) noexcept {
-	WCHAR wchFind[256] = {0};
+	WCHAR wchFind[256]{};
 	IniGetString(INI_SECTION_NAME_FLAGS, L"TimeStamp", L"\\$Date:[^\\$]+\\$ | $Date: %Y/%m/%d %H:%M:%S $", wchFind, COUNTOF(wchFind));
 
-	WCHAR wchTemplate[256] = {0};
+	WCHAR wchTemplate[256]{};
 	LPWSTR pwchSep = StrChr(wchFind, L'|');
 	if (pwchSep != nullptr) {
 		lstrcpy(wchTemplate, pwchSep + 1);

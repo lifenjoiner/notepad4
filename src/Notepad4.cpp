@@ -718,8 +718,11 @@ static void HandleMatchText(MatchTextFlag flag, LPCWSTR lpszText, bool jumpTo) n
 
 		if (flag & MatchTextFlag_Regex) {
 			efrData.fuFlags |= (iFindReplaceOption & FindReplaceOption_UseCxxRegex) ? (SCFIND_REGEXP | SCFIND_CXX11REGEX) : (SCFIND_REGEXP | SCFIND_POSIX);
-		} else if (flag & MatchTextFlag_TransformBS) {
-			efrData.option |= FindReplaceOption_TransformBackslash;
+		} else {
+			efrData.fuFlags &= SCFIND_REGEXP - 1; // clear all regex flags
+			if (flag & MatchTextFlag_TransformBS) {
+				efrData.option |= FindReplaceOption_TransformBackslash;
+			}
 		}
 
 		if (flag & MatchTextFlag_FindUp) {
@@ -2392,8 +2395,6 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 		CMD_OPEN_PATH_OR_LINK,
 		CMD_TIMESTAMPS,
 		IDM_EDIT_CLEARDOCUMENT,
-		IDM_EDIT_CODE_COMPRESS,
-		IDM_EDIT_CODE_PRETTY,
 		IDM_EDIT_COMPLETEWORD,
 		IDM_EDIT_COPY,
 		IDM_EDIT_COPYALL,
@@ -2503,8 +2504,11 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 	EnableCmd(hmenu, IDM_EDIT_REMOVEDUPLICATELINE, i);
 	EnableCmd(hmenu, IDM_EDIT_MERGEDUPLICATELINE, i);
 
-	DisableCmd(hmenu, IDM_EDIT_LINECOMMENT, (pLexCurrent->lexerAttr & LexerAttr_NoLineComment));
-	DisableCmd(hmenu, IDM_EDIT_STREAMCOMMENT, (pLexCurrent->lexerAttr & LexerAttr_NoBlockComment));
+	i = pLexCurrent->lexerAttr;
+	EnableCmd(hmenu, IDM_EDIT_CODE_COMPRESS, (i & LexerAttr_CodePretty));
+	EnableCmd(hmenu, IDM_EDIT_CODE_PRETTY, (i & LexerAttr_CodePretty));
+	DisableCmd(hmenu, IDM_EDIT_LINECOMMENT, (i & LexerAttr_NoLineComment));
+	DisableCmd(hmenu, IDM_EDIT_STREAMCOMMENT, (i & LexerAttr_NoBlockComment));
 
 	CheckCmd(hmenu, IDM_VIEW_SHOW_FOLDING, bShowCodeFolding);
 	CheckCmd(hmenu, IDM_VIEW_USEDEFAULT_CODESTYLE, pLexCurrent->bUseDefaultCodeStyle);
@@ -3398,7 +3402,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	case IDM_EDIT_INSERT_GUID: {
 		GUID guid;
 		if (S_OK == CoCreateGuid(&guid)) {
-			char guidBuf[37] = {0};
+			char guidBuf[37]{};
 			sprintf(guidBuf, "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
 					static_cast<unsigned int>(guid.Data1), guid.Data2, guid.Data3,
 					guid.Data4[0], guid.Data4[1],
@@ -4922,6 +4926,7 @@ LRESULT MsgNotify(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
 		case SCN_SAVEPOINTREACHED:
 			bDocumentModified = false;
+			iOriginalEncoding = iCurrentEncoding;
 			UpdateDocumentModificationStatus();
 			break;
 
@@ -5823,10 +5828,10 @@ CommandParseState ParseCommandLineOption(LPWSTR lp1, LPWSTR lp2) noexcept {
 			state = CommandParseState_Argument;
 			if (ExtractFirstArgument(lp2, lp1, lp2)) {
 #if defined(_WIN64)
-				int64_t cord[2] = { 0 };
+				int64_t cord[2]{};
 				const int itok = ParseCommaList64(lp1, cord, COUNTOF(cord));
 #else
-				int cord[2] = { 0 };
+				int cord[2]{};
 				const int itok = ParseCommaList(lp1, cord, COUNTOF(cord));
 #endif
 				if (itok != 0) {
@@ -6174,7 +6179,7 @@ CommandParseState ParseCommandLineOption(LPWSTR lp1, LPWSTR lp2) noexcept {
 		default:
 			state = CommandParseState_Argument;
 			if (ExtractFirstArgument(lp2, lp1, lp2)) {
-				int cord[5] = { 0 };
+				int cord[5]{};
 				const int itok = ParseCommaList(lp1, cord, COUNTOF(cord));
 				if (itok >= 4) {
 					flagPosParam = true;
@@ -7222,17 +7227,17 @@ bool FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile) {
 				SciCall_DocumentEnd();
 			}
 #endif
-			if (bRestoreView) {
-				SciCall_SetSel(iAnchorPos, iCurPos);
-				const Sci_Line iCurLine = iLine - SciCall_LineFromPosition(SciCall_GetCurrentPos());
-				if (abs(iCurLine) > 5) {
-					EditJumpTo(iLine, iCol);
-				} else {
-					SciCall_EnsureVisible(iDocTopLine);
-					const Sci_Line iNewTopLine = SciCall_GetFirstVisibleLine();
-					SciCall_LineScroll(0, iVisTopLine - iNewTopLine);
-					SciCall_SetXOffset(iXOffset);
-				}
+		}
+		if (bRestoreView) {
+			SciCall_SetSel(iAnchorPos, iCurPos);
+			const Sci_Line iCurLine = iLine - SciCall_LineFromPosition(SciCall_GetCurrentPos());
+			if (abs(iCurLine) > 5) {
+				EditJumpTo(iLine, iCol);
+			} else {
+				SciCall_EnsureVisible(iDocTopLine);
+				const Sci_Line iNewTopLine = SciCall_GetFirstVisibleLine();
+				SciCall_LineScroll(0, iVisTopLine - iNewTopLine);
+				SciCall_SetXOffset(iXOffset);
 			}
 		}
 
@@ -7275,10 +7280,10 @@ bool FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile) {
 //
 //
 bool FileSave(FileSaveFlag saveFlag) noexcept {
-	const bool Untitled = StrIsEmpty(szCurFile);
 	bool bIsEmptyNewFile = false;
 
-	if (Untitled) {
+	if (StrIsEmpty(szCurFile)) {
+		saveFlag = static_cast<FileSaveFlag>(saveFlag | FileSaveFlag_Untitled);
 		const Sci_Position cchText = SciCall_GetLength();
 		if (cchText == 0) {
 			bIsEmptyNewFile = true;
@@ -7301,10 +7306,10 @@ bool FileSave(FileSaveFlag saveFlag) noexcept {
 	if (saveFlag & FileSaveFlag_Ask) {
 		// File or "Untitled" ...
 		WCHAR tch[MAX_PATH];
-		if (!Untitled) {
-			lstrcpy(tch, szCurFile);
-		} else {
+		if (saveFlag & FileSaveFlag_Untitled) {
 			GetString(IDS_UNTITLED, tch, COUNTOF(tch));
+		} else {
+			lstrcpy(tch, szCurFile);
 		}
 
 		switch (MsgBoxAsk(MB_YESNOCANCEL, IDS_ASK_SAVE, tch)) {
@@ -7323,7 +7328,7 @@ bool FileSave(FileSaveFlag saveFlag) noexcept {
 	status.iEOLMode = iCurrentEOLMode;
 
 	// Read only...
-	if (!(saveFlag & (FileSaveFlag_SaveAs | FileSaveFlag_SaveCopy)) && !Untitled) {
+	if (!(saveFlag & (FileSaveFlag_SaveAs | FileSaveFlag_SaveCopy | FileSaveFlag_Untitled))) {
 		const DWORD dwFileAttributes = GetFileAttributes(szCurFile);
 		bReadOnlyFile = (dwFileAttributes != INVALID_FILE_ATTRIBUTES) && (dwFileAttributes & FILE_ATTRIBUTE_READONLY);
 		if (bReadOnlyFile) {
@@ -7343,7 +7348,7 @@ bool FileSave(FileSaveFlag saveFlag) noexcept {
 	}
 
 	// Save As...
-	if ((saveFlag & (FileSaveFlag_SaveAs | FileSaveFlag_SaveCopy)) || Untitled) {
+	if ((saveFlag & (FileSaveFlag_SaveAs | FileSaveFlag_SaveCopy | FileSaveFlag_Untitled))) {
 		WCHAR tchInitialDir[MAX_PATH] = L"";
 		if ((saveFlag & FileSaveFlag_SaveCopy) && StrNotEmpty(tchLastSaveCopyDir)) {
 			lstrcpy(tchInitialDir, tchLastSaveCopyDir);
@@ -7352,7 +7357,7 @@ bool FileSave(FileSaveFlag saveFlag) noexcept {
 			lstrcpy(tchFile, szCurFile);
 		}
 
-		if (SaveFileDlg(Untitled, tchFile, COUNTOF(tchFile), tchInitialDir)) {
+		if (SaveFileDlg(saveFlag, tchFile, COUNTOF(tchFile), tchInitialDir)) {
 			fSuccess = FileIO(false, tchFile, saveFlag, status);
 			if (fSuccess) {
 				if (!(saveFlag & FileSaveFlag_SaveCopy)) {
@@ -7389,8 +7394,6 @@ bool FileSave(FileSaveFlag saveFlag) noexcept {
 
 	if (fSuccess) {
 		if (!(saveFlag & FileSaveFlag_SaveCopy)) {
-			bDocumentModified = false;
-			iOriginalEncoding = iCurrentEncoding;
 			mruFile.Add(szCurFile);
 			if (flagUseSystemMRU == TripleBoolean_True) {
 				SHAddToRecentDocs(SHARD_PATHW, szCurFile);
@@ -7399,7 +7402,6 @@ bool FileSave(FileSaveFlag saveFlag) noexcept {
 				&& iPathNameFormat == TitlePathNameFormat_NameOnly) {
 				iPathNameFormat = TitlePathNameFormat_NameFirst;
 			}
-			UpdateDocumentModificationStatus();
 
 			// Install watching of the current file
 			if ((saveFlag & FileSaveFlag_SaveAs) && bResetFileWatching) {
@@ -7512,7 +7514,7 @@ BOOL OpenFileDlg(LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir) noexcep
 	SetupInitialOpenSaveDir(tchInitialDir, COUNTOF(tchInitialDir), lpstrInitialDir);
 	WCHAR szFile[MAX_PATH];
 	szFile[0] = L'\0';
-	int lexers[1 + OPENDLG_MAX_LEXER_COUNT] = {0}; // 1-based filter index
+	int lexers[1 + OPENDLG_MAX_LEXER_COUNT]{}; // 1-based filter index
 	LPWSTR szFilter = Style_GetOpenDlgFilterStr(true, szCurFile, lexers);
 
 	OPENFILENAME ofn;
@@ -7548,12 +7550,12 @@ BOOL OpenFileDlg(LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir) noexcep
 // SaveFileDlg()
 //
 //
-BOOL SaveFileDlg(bool Untitled, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir) noexcept {
+BOOL SaveFileDlg(FileSaveFlag saveFlag, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir) noexcept {
 	WCHAR tchInitialDir[MAX_PATH];
 	SetupInitialOpenSaveDir(tchInitialDir, COUNTOF(tchInitialDir), lpstrInitialDir);
 	WCHAR szNewFile[MAX_PATH];
 	lstrcpy(szNewFile, lpstrFile);
-	int lexers[1 + OPENDLG_MAX_LEXER_COUNT] = {0}; // 1-based filter index
+	int lexers[1 + OPENDLG_MAX_LEXER_COUNT]{}; // 1-based filter index
 	LPWSTR szFilter = Style_GetOpenDlgFilterStr(false, szCurFile, lexers);
 
 	OPENFILENAME ofn;
@@ -7568,6 +7570,11 @@ BOOL SaveFileDlg(bool Untitled, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInit
 	ofn.Flags = OFN_HIDEREADONLY /*| OFN_NOCHANGEDIR*/ |
 				/*OFN_NODEREFERENCELINKS |*/ OFN_OVERWRITEPROMPT |
 				OFN_DONTADDTORECENT | OFN_PATHMUSTEXIST;
+	WCHAR szTitle[128];
+	if (saveFlag & FileSaveFlag_SaveCopy) {
+		GetString(IDT_FILE_SAVECOPY, szTitle, COUNTOF(szTitle));
+		ofn.lpstrTitle = szTitle;
+	}
 	if (bUseXPFileDialog) {
 		ofn.Flags |= OFN_EXPLORER | OFN_ENABLESIZING | OFN_ENABLEHOOK;
 		ofn.lpfnHook = OpenSaveFileDlgHookProc;
@@ -7578,7 +7585,7 @@ BOOL SaveFileDlg(bool Untitled, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInit
 		lstrcpyn(lpstrFile, szNewFile, cchFile);
 		const int iLexer = lexers[ofn.nFilterIndex];
 		// default scheme, current scheme and selected file type all are Text File => no lexer specified.
-		flagLexerSpecified = iLexer != 0 && !(Untitled && iLexer == NP2LEX_TEXTFILE && iLexer == lexers[0] && iLexer == pLexCurrent->rid);
+		flagLexerSpecified = iLexer != 0 && !((saveFlag & FileSaveFlag_Untitled) && iLexer == NP2LEX_TEXTFILE && iLexer == lexers[0] && iLexer == pLexCurrent->rid);
 		iInitialLexer = iLexer;
 	}
 	NP2HeapFree(szFilter);
@@ -8375,6 +8382,7 @@ void AutoSave_DoWork(FileSaveFlag saveFlag) noexcept {
 		status.iEOLMode = iCurrentEOLMode;
 		if (EditSaveFile(hwndEdit, szCurFile, FileSaveFlag_EndSession, status)) {
 			dwLastSavedDocReversion = dwCurrentDocReversion;
+			InstallFileWatching(false);
 			return;
 		}
 	}
