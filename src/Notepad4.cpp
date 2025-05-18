@@ -979,6 +979,7 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 
 	// check if a lexer was specified from the command line
 	if (flagLexerSpecified) {
+		flagLexerSpecified = false;
 		if (lpSchemeArg) {
 			Style_SetLexerFromName(szCurFile, lpSchemeArg);
 			LocalFree(lpSchemeArg);
@@ -986,7 +987,6 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 		} else {
 			Style_SetLexerFromID(iInitialLexer);
 		}
-		flagLexerSpecified = false;
 	}
 
 	// If start as tray icon, set current filename as tooltip
@@ -7170,6 +7170,7 @@ bool FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile) {
 		bool bUnknownFile = false;
 		if (!keepCurrentLexer) {
 			if (flagLexerSpecified) {
+				flagLexerSpecified = false;
 				if (pLexCurrent->rid == iInitialLexer) {
 					Style_SetLexer(pLexCurrent, true);
 				} else if (lpSchemeArg) {
@@ -7179,7 +7180,6 @@ bool FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile) {
 				} else {
 					Style_SetLexerFromID(iInitialLexer);
 				}
-				flagLexerSpecified = false;
 			} else {
 				np2LexLangIndex = 0;
 				bUnknownFile = !Style_SetLexerFromFile(szCurFile);
@@ -7285,14 +7285,18 @@ bool FileSave(FileSaveFlag saveFlag) noexcept {
 	if (StrIsEmpty(szCurFile)) {
 		saveFlag = static_cast<FileSaveFlag>(saveFlag | FileSaveFlag_Untitled);
 		const Sci_Position cchText = SciCall_GetLength();
-		if (cchText == 0) {
+		if (cchText < 2048) {
+			const char *ptr = SciCall_GetRangePointer(0, cchText);
 			bIsEmptyNewFile = true;
-		} else if (cchText < 2048) {
-			char tchText[2048] = "";
-			SciCall_GetText(COUNTOF(tchText) - 1, tchText);
-			StrTrimA(tchText, " \t\n\r"); // failure means not empty.
-			if (StrIsEmpty(tchText)) {
-				bIsEmptyNewFile = true;
+			if (ptr && cchText != 0) {
+				const char * const end = ptr + cchText;
+				do {
+					if (!IsASpace(*ptr)) {
+						bIsEmptyNewFile = false;
+						break;
+					}
+					++ptr;
+				} while (ptr < end);
 			}
 		}
 	}
@@ -7366,17 +7370,12 @@ bool FileSave(FileSaveFlag saveFlag) noexcept {
 					if (!fKeepTitleExcerpt) {
 						StrCpyEx(szTitleExcerpt, L"");
 					}
+					UpdateWindowTitle();
 					if (flagLexerSpecified) {
-						if (pLexCurrent->rid == iInitialLexer) {
-							UpdateLineNumberWidth();
-						} else if (lpSchemeArg) {
-							Style_SetLexerFromName(szCurFile, lpSchemeArg);
-							LocalFree(lpSchemeArg);
-							lpSchemeArg = nullptr;
-						} else {
+						flagLexerSpecified = false;
+						if (pLexCurrent->rid != iInitialLexer) {
 							Style_SetLexerFromID(iInitialLexer);
 						}
-						flagLexerSpecified = false;
 					} else {
 						Style_SetLexerFromFile(szCurFile);
 					}
