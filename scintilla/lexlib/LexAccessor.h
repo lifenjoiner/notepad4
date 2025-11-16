@@ -288,7 +288,7 @@ constexpr int FoldLevelFlags(int levelLine, int levelNext, bool white, bool head
 	if (white) {
 		flags |= SC_FOLDLEVELWHITEFLAG;
 	}
-	if ((levelLine < levelNext) && (headerPermitted)) {
+	if ((levelLine < levelNext) && headerPermitted) {
 		flags |= SC_FOLDLEVELHEADERFLAG;
 	}
 	return flags;
@@ -322,7 +322,7 @@ Sci_Position LexLineSkipSpaceTab(LexAccessor &styler, Sci_Line line) noexcept;
 inline Sci_Position LexSkipSpaceTab(LexAccessor &styler, Sci_Position startPos, Sci_Position endPos) noexcept {
 	for (; startPos < endPos; startPos++) {
 		const char ch = styler.SafeGetCharAt(startPos);
-		if (!(ch == ' ' || ch == '\t')) {
+		if (ch != ' ' && ch != '\t') {
 			break;
 		}
 	}
@@ -371,16 +371,30 @@ inline unsigned char LexGetNextChar(LexAccessor &styler, Sci_Position startPos, 
 	return '\0';
 }
 
+struct MatchedDelimiterCount {
+	int count;
+	int chNext;
+};
+
+inline MatchedDelimiterCount GetMatchedDelimiterCountEx(LexAccessor &styler, Sci_PositionU pos, int delimiter) noexcept {
+	int count = 0;
+	int chNext;
+	do {
+		++count;
+		++pos;
+		chNext = styler.SafeGetUCharAt(pos);
+	} while (chNext == delimiter);
+	return {count, chNext};
+}
+
 inline int GetMatchedDelimiterCount(LexAccessor &styler, Sci_PositionU pos, int delimiter) noexcept {
-	int count = 1;
-	while (true) {
-		const uint8_t ch = styler.SafeGetCharAt(++pos);
-		if (ch == delimiter) {
-			++count;
-		} else {
-			break;
-		}
-	}
+	int count = 0;
+	int chNext;
+	do {
+		++count;
+		++pos;
+		chNext = styler.SafeGetUCharAt(pos);
+	} while (chNext == delimiter);
 	return count;
 }
 

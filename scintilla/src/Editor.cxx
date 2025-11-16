@@ -735,7 +735,7 @@ void Editor::SetSelectionFromSerialized(const char *serialized) {
 		::new (&sel) Selection(serialized);
 		sel.Truncate(pdoc->Length());
 		SetRectangularRange();
-		InvalidateStyleRedraw();
+		Redraw();
 	}
 }
 #endif
@@ -4169,6 +4169,12 @@ int Editor::KeyDownWithModifiers(Keys key, KeyMod modifiers, bool *consumed) {
 
 void Editor::Indent(bool forwards, bool lineIndent) {
 	const UndoGroup ug(pdoc);
+	// Avoid problems with recalculating rectangular range multiple times by temporarily
+	// treating rectangular selection as multiple stream selection.
+	const Selection::SelTypes selType = sel.selType;
+	if (sel.IsRectangular()) {
+		sel.selType = Selection::SelTypes::stream;
+	}
 	for (size_t r = 0; r < sel.Count(); r++) {
 		const Sci::Line lineOfAnchor =
 			pdoc->SciLineFromPosition(sel.Range(r).anchor.Position());
@@ -4243,6 +4249,8 @@ void Editor::Indent(bool forwards, bool lineIndent) {
 			}
 		}
 	}
+	sel.selType = selType;	// Restore rectangular mode
+	ThinRectangularRange();
 	ContainerNeedsUpdate(Update::Selection);
 }
 
@@ -4558,7 +4566,7 @@ void Editor::DropAt(SelectionPosition position, const char *value, size_t length
 	const bool positionOnEdgeOfSelection =
 		(position == SelectionStart()) || (position == SelectionEnd());
 
-	if ((inDragDrop != DragDrop::dragging) || !(positionWasInSelection) ||
+	if ((inDragDrop != DragDrop::dragging) || !positionWasInSelection ||
 		(positionOnEdgeOfSelection && !moving)) {
 
 		const SelectionPosition selStart = SelectionStart();
@@ -6239,7 +6247,7 @@ sptr_t Editor::StringResult(sptr_t lParam, const char *val) noexcept {
 
 sptr_t Editor::BytesResult(sptr_t lParam, const unsigned char *val, size_t len) noexcept {
 	// No NUL termination: len is number of valid/displayed bytes
-	if ((lParam) && (len > 0)) {
+	if (lParam && (len > 0)) {
 		char *ptr = CharPtrFromSPtr(lParam);
 		if (val)
 			memcpy(ptr, val, len);
@@ -8962,7 +8970,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		return DefWndProc(iMessage, wParam, lParam);
 	}
 
-	// If there was a change that needs its selection saved and it wasn't explicity saved
+	// If there was a change that needs its selection saved and it wasn't explicitly saved
 	// then do that here.
 	RememberCurrentSelectionForRedoOntoStack();
 

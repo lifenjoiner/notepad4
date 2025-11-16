@@ -44,14 +44,14 @@ Latest development builds (artifacts in Release configuration for each compiler 
 	* [AWK](tools/lang/Awk.awk), up to GNU AWK 5.3.
 	* [Batch Script](tools/lang/Batch.bat), [Screenshots](https://github.com/zufuliu/notepad4/wiki/Screenshots#batch)
 	* [blockdiag](tools/lang/blockdiag.diag), seqdiag, actdiag and nwdiag
-	* [C#](tools/lang/CSharp.cs), up to C# 12.0. [Screenshots](https://github.com/zufuliu/notepad4/wiki/Screenshots#c)
+	* [C#](tools/lang/CSharp.cs), up to C# 14.0. [Screenshots](https://github.com/zufuliu/notepad4/wiki/Screenshots#c)
 		* [Vala](https://wiki.gnome.org/Projects/Vala) 0.54
 	* C/C++, [Screenshots](https://github.com/zufuliu/notepad4/wiki/Screenshots#cc)
 		* Objective-C/C++, [Screenshots](https://github.com/zufuliu/notepad4/wiki/Screenshots#objective-cc)
 		* [C Standard Library](tools/lang/C.c), up to C23.
 		* [C++ STL](tools/lang/CPP.cpp), up to C++23.
 	* [Cangjie (仓颉)](tools/lang/Cangjie.cj), up to October 2024.
-	* [CSS Style Sheet](tools/lang/CSS.css), up to September 2025.
+	* [CSS Style Sheet](tools/lang/CSS.css), up to November 2025.
 		* [SCSS Style Sheet](tools/lang/SCSS.scss), up to Dart Sass 1.50.
 		* [Less Style Sheet](tools/lang/Less.less), up to Less 4.1.
 		* [HSS Style Sheet](tools/lang/HSS.hss)
@@ -64,7 +64,7 @@ Latest development builds (artifacts in Release configuration for each compiler 
 	* [D](tools/lang/D.d), up to D language 2.0.
 	* [Dart](tools/lang/Dart.dart), up to Dart 3.4.
 	* Diff/Patch File
-	* [F#](tools/lang/FSharp.fs), up to F# 8.0.
+	* [F#](tools/lang/FSharp.fs), up to F# 9.0.
 	* [Fortran](tools/lang/Fortran.f), up to Fortran 2023.
 	* [GN Build](tools/lang/GN.gn), up to GN 2019-03-13.
 	* [Go](tools/lang/Go.go), up to Go 1.21.
@@ -74,7 +74,7 @@ Latest development builds (artifacts in Release configuration for each compiler 
 	* [Groovy](tools/lang/Groovy.groovy), up to Groovy 5.0.
 	* [Haskell](tools/lang/Haskell.hs), up to GHC 9.6.
 	* [Haxe](tools/lang/Haxe.hx), up to Haxe 4.3.
-	* [HTML](tools/lang/html.html), up to [WHATWG](https://html.spec.whatwg.org/multipage/) September 2025. [Screenshots](https://github.com/zufuliu/notepad4/wiki/Screenshots#html)
+	* [HTML](tools/lang/html.html), up to [WHATWG](https://html.spec.whatwg.org/multipage/) November 2025. [Screenshots](https://github.com/zufuliu/notepad4/wiki/Screenshots#html)
 		* ASP
 		* ASP.NET
 		* JSP
@@ -87,10 +87,11 @@ Latest development builds (artifacts in Release configuration for each compiler 
 	* [JavaScript](tools/lang/JavaScript.js), up to ECMAScript 2025 with [JSX](https://facebook.github.io/jsx/) and [Web APIs](https://developer.mozilla.org/en-US/docs/Web/API).
 	* [JSON](https://www.json.org) and [JSON5](https://json5.org/) Document
 	* [Julia Script](tools/lang/Julia.jl), up to Julia 1.9. [Screenshots](https://github.com/zufuliu/notepad4/wiki/Screenshots#julia)
-	* [Kotlin](tools/lang/Kotlin.kt), up to Kotlin 2.0.
+	* [Kotlin](tools/lang/Kotlin.kt), up to Kotlin 2.2.
 	* LaTeX
 	* Lisp Script (Common Lisp, Clojure, Scheme, etc.)
-	* [LLVM IR](tools/lang/LLVM.ll), up to LLVM 16.
+	* [LLVM IR](tools/lang/LLVM.ll), up to LLVM 21.
+		* [MLIR](tools/lang/MLIR.mlir)
 	* [Lua Script](tools/lang/Lua.lua), up to Lua 5.4.
 	* Makefile, [Screenshots](https://github.com/zufuliu/notepad4/wiki/Screenshots#makefile)
 		* nmake
@@ -113,13 +114,13 @@ Latest development builds (artifacts in Release configuration for each compiler 
 	* Pascal, Delphi
 	* [Perl](tools/lang/Perl.pl), up to Perl 5.36. [Screenshots](https://github.com/zufuliu/notepad4/wiki/Screenshots#perl)
 	* [PowerShell](tools/lang/PowerShell.ps1), up to PowerShell 7.2.
-	* [Python](tools/lang/Python.py), up to Python 3.13. [Screenshots](https://github.com/zufuliu/notepad4/wiki/Screenshots#python)
+	* [Python](tools/lang/Python.py), up to Python 3.14. [Screenshots](https://github.com/zufuliu/notepad4/wiki/Screenshots#python)
 	* [PHP Script](tools/lang/PHP.php), up to PHP 8.4. [Screenshots](https://github.com/zufuliu/notepad4/wiki/Screenshots#php)
 	* Windows Rescouce Script
 	* [R](tools/lang/R.r), up to R 4.2.
 	* [REBOL](tools/lang/Rebol.r) 3 and [Red](tools/lang/Red.red)
 	* [Ruby](tools/lang/Ruby.rb), up to Ruby 3.4. [Screenshots](https://github.com/zufuliu/notepad4/wiki/Screenshots#ruby)
-	* [Rust](tools/lang/Rust.rs), up to Rust 1.38. [Screenshots](https://github.com/zufuliu/notepad4/wiki/Screenshots#rust)
+	* [Rust](tools/lang/Rust.rs), up to Rust 1.91. [Screenshots](https://github.com/zufuliu/notepad4/wiki/Screenshots#rust)
 	* [SAS](tools/lang/SAS.sas), up to SAS Viya 2024.06.
 	* [Scala](tools/lang/Scala.scala), up to Scala 3.2.
 	* Shell Script
@@ -133,7 +134,7 @@ Latest development builds (artifacts in Release configuration for each compiler 
 		* [PostgreSQL](tools/lang/PostgreSQL.sql), PostgreSQL 14.
 		* [Transact-SQL](tools/lang/Transact-SQL.sql), SQL Server 2019.
 		* [Oracle](tools/lang/Oracle.sql), Oracle 20, incomplete.
-	* [Swift](tools/lang/Swift.swift), up to Swift 6.0.
+	* [Swift](tools/lang/Swift.swift), up to Swift 6.2.
 	* TCL, [Screenshots](https://github.com/zufuliu/notepad4/wiki/Screenshots#tcl)
 	* [Texinfo](tools/lang/Texinfo.texi), up to Texinfo 7.1.
 	* [TOML File](https://toml.io/)

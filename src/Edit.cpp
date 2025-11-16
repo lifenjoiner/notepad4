@@ -5224,7 +5224,7 @@ static INT_PTR CALLBACK EditFindReplaceDlgProc(HWND hwnd, UINT umsg, WPARAM wPar
 	}
 	break;
 
-	case WM_ACTIVATE :
+	case WM_ACTIVATE:
 		SetWindowTransparentMode(hwnd, (LOWORD(wParam) == WA_INACTIVE && (iFindReplaceOption & FindReplaceOption_TransparentMode) != 0), iFindReplaceOpacityLevel);
 		break;
 	}
@@ -5239,7 +5239,7 @@ static INT_PTR CALLBACK EditFindReplaceDlgProc(HWND hwnd, UINT umsg, WPARAM wPar
 HWND EditFindReplaceDlg(HWND hwnd, EDITFINDREPLACE *lpefr, bool bReplace) noexcept {
 	lpefr->hwnd = hwnd;
 	HWND hDlg = CreateThemedDialogParam(g_hInstance,
-								   (bReplace) ? MAKEINTRESOURCE(IDD_REPLACE) : MAKEINTRESOURCE(IDD_FIND),
+								   bReplace ? MAKEINTRESOURCE(IDD_REPLACE) : MAKEINTRESOURCE(IDD_FIND),
 								   GetParent(hwnd),
 								   EditFindReplaceDlgProc,
 								   AsInteger<LPARAM>(lpefr));

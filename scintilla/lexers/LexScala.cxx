@@ -183,7 +183,7 @@ void ColouriseScalaDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initS
 							kwType = KeywordType::Function;
 						} else if (StrEqual(s, "enum")) {
 							kwType = KeywordType::Enum;
-						} else if (StrEqualsAny(s, "return", "yield")) {
+						} else if (StrEqualsAny(s, "return", "yield", "else")) {
 							kwType = KeywordType::Return;
 						} else if (visibleChars == 3 && StrEqual(s, "end")) {
 							lineState |= PyLineStateMaskCloseBrace;
@@ -239,7 +239,7 @@ void ColouriseScalaDoc(Sci_PositionU startPos, Sci_Position lengthDoc, int initS
 		case SCE_SCALA_COMMENTBLOCK:
 		case SCE_SCALA_COMMENTBLOCKDOC:
 			if (sc.atLineStart) {
-				lineState  = PyLineStateMaskCommentLine;
+				lineState = PyLineStateMaskCommentLine;
 			}
 			if (sc.Match('*', '/')) {
 				sc.Forward();
