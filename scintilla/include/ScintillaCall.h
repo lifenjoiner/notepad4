@@ -205,8 +205,6 @@ public:
 	Scintilla::FontWeight StyleGetWeight(int style);
 	void StyleSetCharacterSet(int style, Scintilla::CharacterSet characterSet);
 	void StyleSetHotSpot(int style, bool hotspot);
-	void StyleSetCheckMonospaced(int style, bool checkMonospaced);
-	bool StyleGetCheckMonospaced(int style);
 	void StyleSetStretch(int style, Scintilla::FontStretch stretch);
 	Scintilla::FontStretch StyleGetStretch(int style);
 	void StyleSetInvisibleRepresentation(int style, const char *representation);
@@ -863,6 +861,8 @@ public:
 	void ReleaseLineCharacterIndex(Scintilla::LineCharacterIndexType lineCharacterIndex);
 	Line LineFromIndexPosition(Position pos, Scintilla::LineCharacterIndexType lineCharacterIndex);
 	Position IndexPositionFromLine(Line line, Scintilla::LineCharacterIndexType lineCharacterIndex);
+	bool DragDropEnabled();
+	void SetDragDropEnabled(bool dragDropEnabled);
 	void StartRecord();
 	void StopRecord();
 	void SetLexer(int lexer);

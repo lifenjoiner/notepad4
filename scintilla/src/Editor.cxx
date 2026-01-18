@@ -148,6 +148,7 @@ Editor::Editor() {
 	ticksToDwell = TimeForever;
 	dwelling = false;
 	dropWentOutside = false;
+	dragDropEnabled = true;
 	inDragDrop = DragDrop::none;
 	ptMouseLast.x = 0;
 	ptMouseLast.y = 0;
@@ -5064,7 +5065,7 @@ void Editor::ButtonMoveWithModifiers(Point pt, unsigned int, KeyMod modifiers) {
 		AllowVirtualSpace(virtualSpaceOptions, sel.IsRectangular()));
 	movePos = MovePositionOutsideChar(movePos, sel.MainCaret() - movePos.Position());
 
-	if (inDragDrop == DragDrop::initial) {
+	if (dragDropEnabled && inDragDrop == DragDrop::initial) {
 		if (DragThreshold(ptMouseLast, pt)) {
 			ChangeMouseCapture(false);
 			SetDragPosition(movePos);
@@ -5162,7 +5163,7 @@ void Editor::ButtonMoveWithModifiers(Point pt, unsigned int, KeyMod modifiers) {
 			}
 		}
 		// Display regular (drag) cursor over selection
-		if (PointInSelection(pt) && !SelectionEmpty()) {
+		if (dragDropEnabled && PointInSelection(pt) && !SelectionEmpty()) {
 			DisplayCursor(Window::Cursor::arrow);
 			SetHoverIndicatorPosition(Sci::invalidPosition);
 		} else {
@@ -6101,15 +6102,15 @@ void Editor::StyleSetMessage(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		const char *utf8 = ConstCharPtrFromSPtr(lParam);
 		const size_t len = strlen(utf8);
 		memcpy(vs.styles[wParam].invisibleRepresentation, utf8, len + 1);
-		vs.styles[wParam].invisibleRepresentationLength = static_cast<uint8_t>(len);
+		vs.styles[wParam].invisibleRepresentationLength = len;
 		break;
 	}
 	case Message::StyleSetHotSpot:
 		vs.styles[wParam].hotspot = lParam != 0;
 		break;
-	case Message::StyleSetCheckMonospaced:
-		vs.styles[wParam].checkMonospaced = lParam != 0;
-		break;
+	// case Message::StyleSetCheckMonospaced:
+	// 	vs.styles[wParam].checkMonospaced = lParam != 0;
+	// 	break;
 	default:
 		break;
 	}
@@ -6155,8 +6156,8 @@ sptr_t Editor::StyleGetMessage(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		return StringResult(lParam, vs.styles[wParam].invisibleRepresentation);
 	case Message::StyleGetHotSpot:
 		return vs.styles[wParam].hotspot ? 1 : 0;
-	case Message::StyleGetCheckMonospaced:
-		return vs.styles[wParam].checkMonospaced ? 1 : 0;
+	// case Message::StyleGetCheckMonospaced:
+	// 	return vs.styles[wParam].checkMonospaced ? 1 : 0;
 	default:
 		break;
 	}
@@ -6187,11 +6188,11 @@ void Editor::SetSelectionNMessage(Message iMessage, uptr_t wParam, sptr_t lParam
 		break;
 
 	case Message::SetSelectionNStart:
-		sel.Range(wParam).anchor.SetPosition(lParam);
+		sel.Range(wParam).StartSet(SelectionPosition(lParam));
 		break;
 
 	case Message::SetSelectionNEnd:
-		sel.Range(wParam).caret.SetPosition(lParam);
+		sel.Range(wParam).EndSet(SelectionPosition(lParam));
 		break;
 
 	default:
@@ -7074,6 +7075,13 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 	case Message::GetBufferedDraw:
 		return view.bufferedDraw;
 
+	case Message::GetDragDropEnabled:
+		return dragDropEnabled;
+
+	case Message::SetDragDropEnabled:
+		dragDropEnabled = wParam != 0;
+		break;
+
 	case Message::GetPhasesDraw:
 		return static_cast<sptr_t>(view.phasesDraw);
 
@@ -7657,7 +7665,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 	case Message::StyleSetVisible:
 	case Message::StyleSetChangeable:
 	case Message::StyleSetHotSpot:
-	case Message::StyleSetCheckMonospaced:
+	// case Message::StyleSetCheckMonospaced:
 	case Message::StyleSetInvisibleRepresentation:
 		StyleSetMessage(iMessage, wParam, lParam);
 		break;
@@ -7679,7 +7687,7 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 	case Message::StyleGetVisible:
 	case Message::StyleGetChangeable:
 	case Message::StyleGetHotSpot:
-	case Message::StyleGetCheckMonospaced:
+	// case Message::StyleGetCheckMonospaced:
 	case Message::StyleGetInvisibleRepresentation:
 		return StyleGetMessage(iMessage, wParam, lParam);
 
