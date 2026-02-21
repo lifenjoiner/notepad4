@@ -505,6 +505,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 #endif
 
 	g_hDefaultHeap = GetProcessHeap();
+	SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
+
 	// Don't keep working directory locked
 	WCHAR wchWorkingDirectory[MAX_PATH];
 	GetCurrentDirectory(COUNTOF(g_wchWorkingDirectory), g_wchWorkingDirectory);
@@ -518,8 +520,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 	SetCurrentDirectory(wchWorkingDirectory);
 
 	SetShortcutEnvironments(wchWorkingDirectory);
-
-	SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
 
 	// Check if running with elevated privileges
 	fIsElevated = IsElevated();
@@ -1048,6 +1048,13 @@ static inline bool IsFileStartsWithDotLog() noexcept {
 }
 #endif
 
+static void SaveAllSettings(bool destroy) noexcept {
+	SaveSettings(false);
+	mruFile.MergeSave(bSaveRecentFiles, destroy);
+	mruFind.MergeSave(bSaveFindReplace, destroy);
+	mruReplace.MergeSave(bSaveFindReplace, destroy);
+}
+
 //=============================================================================
 //
 // MainWndProc()
@@ -1108,11 +1115,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 			}
 
 			// call SaveSettings() when hwndToolbar is still valid
-			SaveSettings(false);
-
-			mruFile.MergeSave(bSaveRecentFiles);
-			mruFind.MergeSave(bSaveFindReplace);
-			mruReplace.MergeSave(bSaveFindReplace);
+			SaveAllSettings(true);
 			bitmapCache.Empty();
 
 			// Remove tray icon if necessary
@@ -3343,10 +3346,14 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	case IDM_EDIT_MAP_CYRILLIC_LATIN:
 	case IDM_EDIT_MAP_BENGALI_LATIN:
 	case IDM_EDIT_MAP_HANGUL_DECOMPOSITION:
-	case IDM_EDIT_MAP_HANJA_HANGUL:
 		BeginWaitCursor();
-		EditMapTextCase(LOWORD(wParam));
+		SciCall_CustomCaseMapping(LOWORD(wParam));
 		EndWaitCursor();
+		break;
+
+	case IDM_EDIT_MAP_HANJA_HANGUL:
+		// implemented in ScintillaWin::SelectionToHangul().
+		SendMessage(hwndEdit, WM_IME_KEYDOWN, VK_HANJA, 0);
 		break;
 
 	case IDM_EDIT_CONVERTTABS:
@@ -4613,7 +4620,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		break;
 
 	case CMD_OPENINIFILE:
-		CreateIniFile(szIniFile);
+		SaveAllSettings(false);
 		FileLoad(FileLoadFlag_Default, szIniFile);
 		break;
 
@@ -7177,6 +7184,18 @@ bool FileSave(FileSaveFlag saveFlag) noexcept {
 				iFileWatchingMode = FileWatchingMode_None;
 			}
 			InstallFileWatching(false);
+			if (PathEqual(szCurFile, szIniFile)) {
+				LoadFlags();
+				LoadSettings();
+				mruFile.Reload();
+				mruFind.Reload();
+				mruReplace.Reload();
+				if (np2StyleTheme == StyleTheme_Default) {
+					Style_LoadAll(static_cast<StyleLoadFlag>(StyleLoadFlag_Reload | StyleLoadFlag_Apply));
+				}
+			} else if (np2StyleTheme != StyleTheme_Default && PathEqual(szCurFile, darkStyleThemeFilePath)) {
+				Style_LoadAll(static_cast<StyleLoadFlag>(StyleLoadFlag_Reload | StyleLoadFlag_Apply));
+			}
 		}
 
 		AutoSave_Stop(saveFlag & FileSaveFlag_EndSession);

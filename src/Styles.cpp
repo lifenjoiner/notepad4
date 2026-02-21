@@ -284,7 +284,7 @@ static WCHAR systemTextFontName[LF_FACESIZE];
 static WCHAR defaultCodeFontName[LF_FACESIZE];
 WCHAR defaultTextFontName[LF_FACESIZE];
 
-static WCHAR darkStyleThemeFilePath[MAX_PATH];
+WCHAR darkStyleThemeFilePath[MAX_PATH];
 static WCHAR favoriteSchemesConfig[MAX_FAVORITE_SCHEMES_CONFIG_SIZE];
 
 // Currently used lexer
@@ -758,7 +758,9 @@ static int __cdecl CmpEditLexerByName(const void *p1, const void *p2) noexcept {
 //
 void Style_Load() noexcept {
 	IniSectionParser section;
-	g_AllFileExtensions = static_cast<LPWSTR>(NP2HeapAlloc(ALL_FILE_EXTENSIONS_BYTE_SIZE));
+	if (g_AllFileExtensions == nullptr) {
+		g_AllFileExtensions = static_cast<LPWSTR>(NP2HeapAlloc(ALL_FILE_EXTENSIONS_BYTE_SIZE));
+	}
 	WCHAR *pIniSectionBuf = static_cast<WCHAR *>(NP2HeapAlloc(sizeof(WCHAR) * MAX_INI_SECTION_SIZE_STYLES));
 	const DWORD cchIniSection = static_cast<DWORD>(NP2HeapSize(pIniSectionBuf) / sizeof(WCHAR));
 	section.Init(128);
@@ -797,7 +799,7 @@ void Style_Load() noexcept {
 		}
 	}
 
-	if (np2StyleTheme == StyleTheme_Dark) {
+	if (np2StyleTheme == StyleTheme_Dark && StrIsEmpty(darkStyleThemeFilePath)) {
 		FindDarkThemeFile(darkStyleThemeFilePath);
 	}
 
@@ -821,14 +823,14 @@ static void Style_LoadOne(PEDITLEXER pLex) noexcept {
 	NP2HeapFree(pIniSectionBuf);
 }
 
-static void Style_LoadAll(bool bReload, bool onlyCustom) noexcept {
+void Style_LoadAll(StyleLoadFlag loadFlag) noexcept {
 	IniSectionParser section;
 	WCHAR *pIniSectionBuf = static_cast<WCHAR *>(NP2HeapAlloc(sizeof(WCHAR) * MAX_INI_SECTION_SIZE_STYLES));
 	const DWORD cchIniSection = static_cast<DWORD>(NP2HeapSize(pIniSectionBuf) / sizeof(WCHAR));
 	section.Init(128);
 
 	// Custom colors
-	if (bReload || !bCustomColorLoaded) {
+	if (FlagSet(loadFlag, StyleLoadFlag_Reload) || !bCustomColorLoaded) {
 		bCustomColorLoaded = true;
 		LPCWSTR themePath = GetStyleThemeFilePath();
 		memcpy(customColor, defaultCustomColor, MAX_CUSTOM_COLOR_COUNT * sizeof(COLORREF));
@@ -850,10 +852,10 @@ static void Style_LoadAll(bool bReload, bool onlyCustom) noexcept {
 		}
 	}
 
-	if (!onlyCustom) {
+	if (!FlagSet(loadFlag, StyleLoadFlag_CustomColor)) {
 		for (UINT iLexer = 0; iLexer < ALL_LEXER_COUNT; iLexer++) {
 			PEDITLEXER pLex = pLexArray[iLexer];
-			if (bReload || !IsStyleLoaded(pLex)) {
+			if (FlagSet(loadFlag, StyleLoadFlag_Reload) || !IsStyleLoaded(pLex)) {
 				Style_LoadOneEx(pLex, section, pIniSectionBuf, cchIniSection);
 			}
 		}
@@ -861,6 +863,10 @@ static void Style_LoadAll(bool bReload, bool onlyCustom) noexcept {
 
 	section.Free();
 	NP2HeapFree(pIniSectionBuf);
+	if (FlagSet(loadFlag, StyleLoadFlag_Apply)) {
+		Style_LoadTabSettings(pLexCurrent);
+		Style_SetLexer(pLexCurrent, false);
+	}
 }
 
 //=============================================================================
@@ -1500,7 +1506,7 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) noexcept {
 
 		case NP2LEX_TYPESCRIPT: {
 			static_assert(IDM_LEXER_TYPESCRIPT_TSX - IDM_LEXER_TYPESCRIPT == 1);
-			dialect = np2LexLangIndex - IDM_LEXER_TYPESCRIPT;
+			dialect = max(np2LexLangIndex - IDM_LEXER_TYPESCRIPT, 0) + 2;
 		} break;
 
 		case NP2LEX_VBSCRIPT:
@@ -4183,6 +4189,29 @@ static void Style_ResetStyle(LPCEDITLEXER pLex, EDITSTYLE *pStyle) noexcept {
 // Style_ConfigDlgProc()
 //
 static INT_PTR CALLBACK Style_ConfigDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam) noexcept {
+	static const DWORD controlDefinition[] = {
+		DeferCtlMove(IDC_RESIZEGRIP3),
+		DeferCtlMove(IDOK),
+		DeferCtlMove(IDCANCEL),
+		DeferCtlSizeY(IDC_STYLELIST),
+		DeferCtlSizeX(IDC_INFO_GROUPBOX),
+		DeferCtlSizeX(IDC_STYLEEDIT_HELP),
+		DeferCtlSizeXY1(IDC_STYLEEDIT),
+		DeferCtlMoveY1(IDC_STYLELABEL_DEFAULT),
+		DeferCtlMoveY1SizeXY2(IDC_STYLEVALUE_DEFAULT),
+		DeferCtlMove(IDC_STYLEFORE),
+		DeferCtlMove(IDC_STYLEBACK),
+		DeferCtlMove(IDC_STYLEFONT),
+		DeferCtlMove(IDC_PREVIEW),
+		DeferCtlMove(IDC_STYLEDEFAULT),
+		DeferCtlMove(IDC_PREVSTYLE),
+		DeferCtlMove(IDC_NEXTSTYLE),
+		DeferCtlMoveY(IDC_IMPORT),
+		DeferCtlMoveY(IDC_EXPORT),
+		DeferCtlMoveY(IDC_RESETALL),
+		MAKELONG(IDC_STYLEEDIT, IDC_STYLEVALUE_DEFAULT),
+	};
+
 	static HWND hwndTV;
 	static bool fDragging;
 	static bool fLexerSelected;
@@ -4194,7 +4223,7 @@ static INT_PTR CALLBACK Style_ConfigDlgProc(HWND hwnd, UINT umsg, WPARAM wParam,
 
 	switch (umsg) {
 	case WM_INITDIALOG: {
-		ResizeDlg_InitY2(hwnd, &positionRecord.cxStyleCustomizeDlg, &positionRecord.cyStyleCustomizeDlg, IDC_RESIZEGRIP3, IDC_STYLEEDIT, IDC_STYLEVALUE_DEFAULT);
+		ResizeDlg_InitY2(hwnd, &positionRecord.cxStyleCustomizeDlg, &positionRecord.cyStyleCustomizeDlg, controlDefinition, COUNTOF(controlDefinition) - 1, 50);
 
 		WCHAR szTitle[1024];
 		const UINT idsTitle = (np2StyleTheme == StyleTheme_Dark) ? IDS_CONFIG_THEME_TITLE_DARK : IDS_CONFIG_THEME_TITLE_DEFAULT;
@@ -4243,34 +4272,6 @@ static INT_PTR CALLBACK Style_ConfigDlgProc(HWND hwnd, UINT umsg, WPARAM wParam,
 		DeleteBitmapButton(hwnd, IDC_NEXTSTYLE);
 	}
 	return FALSE;
-
-	case WM_SIZE: {
-		const int dx = GET_X_LPARAM(lParam);
-		const int dy = GET_Y_LPARAM(lParam);
-		const int cy = ResizeDlg_CalcDeltaY2(hwnd, dy, 50, IDC_STYLEEDIT, IDC_STYLEVALUE_DEFAULT);
-		HDWP hdwp = BeginDeferWindowPos(19);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_RESIZEGRIP3, dx, dy, SWP_NOSIZE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDOK, dx, dy, SWP_NOSIZE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDCANCEL, dx, dy, SWP_NOSIZE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_STYLELIST, 0, dy, SWP_NOMOVE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_INFO_GROUPBOX, dx, 0, SWP_NOMOVE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_STYLEEDIT_HELP, dx, 0, SWP_NOMOVE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_STYLEEDIT, dx, cy, SWP_NOMOVE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_STYLELABEL_DEFAULT, 0, cy, SWP_NOSIZE);
-		hdwp = DeferCtlPosEx(hdwp, hwnd, IDC_STYLEVALUE_DEFAULT, 0, cy, dx, dy - cy);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_STYLEFORE, dx, dy, SWP_NOSIZE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_STYLEBACK, dx, dy, SWP_NOSIZE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_STYLEFONT, dx, dy, SWP_NOSIZE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_PREVIEW, dx, dy, SWP_NOSIZE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_STYLEDEFAULT, dx, dy, SWP_NOSIZE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_PREVSTYLE, dx, dy, SWP_NOSIZE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_NEXTSTYLE, dx, dy, SWP_NOSIZE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_IMPORT, 0, dy, SWP_NOSIZE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_EXPORT, 0, dy, SWP_NOSIZE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_RESETALL, 0, dy, SWP_NOSIZE);
-		EndDeferWindowPos(hdwp);
-	}
-	return TRUE;
 
 	case WM_NOTIFY:
 		if (AsPointer<LPNMHDR>(lParam)->idFrom == IDC_STYLELIST) {
@@ -4561,7 +4562,7 @@ static INT_PTR CALLBACK Style_ConfigDlgProc(HWND hwnd, UINT umsg, WPARAM wParam,
 					Style_ResetAll(true);
 				} else {
 					// reload styles from external file
-					Style_LoadAll(true, false);
+					Style_LoadAll(StyleLoadFlag_Reload);
 					// reset file extensions to built-in default
 					Style_ResetAll(false);
 				}
@@ -4698,7 +4699,7 @@ static INT_PTR CALLBACK Style_ConfigDlgProc(HWND hwnd, UINT umsg, WPARAM wParam,
 void Style_ConfigDlg(HWND hwnd) noexcept {
 	StyleConfigDlgParam param;
 
-	Style_LoadAll(false, false);
+	Style_LoadAll(StyleLoadFlag_Default);
 	// Backup Styles
 	param.hFontTitle = nullptr;
 	param.bApply = false;
@@ -5000,6 +5001,15 @@ static void Style_GetFavoriteSchemesFromTreeView(HWND hwndTV, HTREEITEM hFavorit
 // Style_SelectLexerDlgProc()
 //
 static INT_PTR CALLBACK Style_SelectLexerDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam) noexcept {
+	static const DWORD controlDefinition[] = {
+		DeferCtlMove(IDC_RESIZEGRIP3),
+		DeferCtlMove(IDOK),
+		DeferCtlMove(IDCANCEL),
+		DeferCtlSize(IDC_STYLELIST),
+		DeferCtlMoveY(IDC_AUTOSELECT),
+		DeferCtlMoveY(IDC_DEFAULTSCHEME),
+	};
+
 	static HWND hwndTV;
 	static HTREEITEM hFavoriteNode;
 	static HTREEITEM hDraggingNode;
@@ -5009,7 +5019,7 @@ static INT_PTR CALLBACK Style_SelectLexerDlgProc(HWND hwnd, UINT umsg, WPARAM wP
 	switch (umsg) {
 	case WM_INITDIALOG: {
 		SetWindowLongPtr(hwnd, DWLP_USER, lParam);
-		ResizeDlg_Init(hwnd, &positionRecord.cxStyleSelectDlg, &positionRecord.cyStyleSelectDlg, IDC_RESIZEGRIP3);
+		ResizeDlg_Init(hwnd, &positionRecord.cxStyleSelectDlg, &positionRecord.cyStyleSelectDlg, controlDefinition, COUNTOF(controlDefinition));
 
 		const bool favorite = lParam != 0;
 		if (favorite) {
@@ -5040,20 +5050,6 @@ static INT_PTR CALLBACK Style_SelectLexerDlgProc(HWND hwnd, UINT umsg, WPARAM wP
 		}
 
 		CenterDlgInParent(hwnd);
-	}
-	return TRUE;
-
-	case WM_SIZE: {
-		const int dx = GET_X_LPARAM(lParam);
-		const int dy = GET_Y_LPARAM(lParam);
-		HDWP hdwp = BeginDeferWindowPos(6);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_RESIZEGRIP3, dx, dy, SWP_NOSIZE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDOK, dx, dy, SWP_NOSIZE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDCANCEL, dx, dy, SWP_NOSIZE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_STYLELIST, dx, dy, SWP_NOMOVE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_AUTOSELECT, 0, dy, SWP_NOSIZE);
-		hdwp = DeferCtlPos(hdwp, hwnd, IDC_DEFAULTSCHEME, 0, dy, SWP_NOSIZE);
-		EndDeferWindowPos(hdwp);
 	}
 	return TRUE;
 
@@ -5421,7 +5417,7 @@ void EditClickCallTip(HWND hwnd) noexcept {
 	callTipInfo.type = CallTipType_None;
 	if (type == CallTipType_ColorHex) {
 		if (!bCustomColorLoaded) {
-			Style_LoadAll(false, true);
+			Style_LoadAll(StyleLoadFlag_CustomColor);
 		}
 
 		const unsigned back = callTipInfo.currentColor;

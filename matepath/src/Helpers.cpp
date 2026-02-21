@@ -711,7 +711,66 @@ struct RESIZEDLG {
 	SIZE client;
 	POINT minTrackSize;
 	SIZE templateSize;
+	const DWORD *controlDefinition;
+	UINT controlCount;
 };
+
+void ResizeDlg_Size(HWND hwnd, const RESIZEDLG *pm, int dx, int dy) noexcept {
+	HDWP hdwp = BeginDeferWindowPos(pm->controlCount);
+	UINT index = 0;
+	HWND hwndLV = nullptr;
+	do {
+		DWORD definition = pm->controlDefinition[index];
+		HWND hwndCtl = GetDlgItem(hwnd, LOWORD(definition));
+		RECT rc;
+		GetWindowRect(hwndCtl, &rc);
+		MapWindowPoints(nullptr, hwnd, reinterpret_cast<LPPOINT>(&rc), 2);
+
+		int x = rc.left;
+		int y = rc.top;
+		int cx = rc.right - x;
+		int cy = rc.bottom - y;
+		DWORD flags = SWP_NOZORDER;
+
+		definition >>= 16;
+		unsigned mask = definition & RESIZE_MOVE_MASK;
+		if (mask == 0) {
+			flags |= SWP_NOMOVE;
+		} else {
+			if (mask & RESIZE_MOVE_X) {
+				x += dx;
+			}
+			if (mask & RESIZE_MOVE_Y) {
+				y += dy;
+			}
+		}
+
+		definition >>= 4;
+		mask = definition & RESIZE_SIZE_MASK;
+		if (mask == 0) {
+			flags |= SWP_NOSIZE;
+		} else {
+			if (mask & RESIZE_SIZE_X) {
+				cx += dx;
+			}
+			if (mask & RESIZE_SIZE_Y) {
+				cy += dy;
+			}
+		}
+
+		hdwp = DeferWindowPos(hdwp, hwndCtl, nullptr, x, y, cx, cy, flags);
+		if ((definition & (RESIZE_AUTOSIZE_USEHEADER >> 20)) != 0) {
+			hwndLV = hwndCtl;
+		} else if ((definition & (RESIZE_INVALIDATE_RECT >> 20)) != 0) {
+			InvalidateRect(hwndCtl, nullptr, TRUE);
+		}
+		++index;
+	} while (index < pm->controlCount);
+	EndDeferWindowPos(hdwp);
+	if (hwndLV != nullptr) {
+		ListView_SetColumnWidth(hwndLV, 0, LVSCW_AUTOSIZE_USEHEADER);
+	}
+}
 
 }
 
@@ -742,13 +801,17 @@ static LRESULT CALLBACK ResizeDlg_Proc(HWND hwnd, UINT umsg, WPARAM wParam, LPAR
 		const int cy = HIWORD(lParam);
 		const int dx = cx - pm->client.cx;
 		const int dy = cy - pm->client.cy;
-		lParam = MAKELPARAM(dx, dy); // unpack with GET_X_LPARAM() and GET_Y_LPARAM()
+		// lParam = MAKELPARAM(dx, dy); // unpack with GET_X_LPARAM() and GET_Y_LPARAM()
 		pm->client.cx = cx;
 		pm->client.cy = cy;
 		if (pm->dpiChanged) {
 			// skip first WM_SIZE message during WM_DPICHANGED, dialog control already has correct layout
 			// until end of WM_DPICHANGED block, pm->client contains outdated value
 			pm->dpiChanged = FALSE;
+			return TRUE;
+		}
+		/*if (pm->controlCount != 0)*/ {
+			ResizeDlg_Size(hwnd, pm, dx, dy);
 			return TRUE;
 		}
 	} break;
@@ -806,7 +869,7 @@ static LRESULT CALLBACK ResizeDlg_Proc(HWND hwnd, UINT umsg, WPARAM wParam, LPAR
 			*pm->cyFrame = (cy <= pm->templateSize.cy) ? 0 : cy;
 		}
 		RemoveWindowSubclass(hwnd, ResizeDlg_Proc, uIdSubclass);
-		RemoveProp(hwnd, RESIZEDLG_PROP_KEY);
+		// RemoveProp(hwnd, RESIZEDLG_PROP_KEY);
 		NP2HeapFree(pm);
 	} break;
 
@@ -817,10 +880,12 @@ static LRESULT CALLBACK ResizeDlg_Proc(HWND hwnd, UINT umsg, WPARAM wParam, LPAR
 	return DefSubclassProc(hwnd, umsg, wParam, lParam);
 }
 
-void ResizeDlg_InitEx(HWND hwnd, int *cxFrame, int *cyFrame, int nIdGrip) noexcept {
+void ResizeDlg_InitEx(HWND hwnd, int *cxFrame, int *cyFrame, const DWORD *controlDefinition, DWORD controlCount) noexcept {
 	const UINT dpi = GetWindowDPI(hwnd);
 	RESIZEDLG * const pm = static_cast<RESIZEDLG *>(NP2HeapAlloc(sizeof(RESIZEDLG)));
 	pm->dpi = dpi;
+	pm->controlDefinition = controlDefinition;
+	pm->controlCount = LOWORD(controlCount);
 
 	RECT rc = {DlgBaseUnit.cx, DlgBaseUnit.cy, 0, 0};
 	MapDialogRect(hwnd, &rc);
@@ -853,7 +918,7 @@ void ResizeDlg_InitEx(HWND hwnd, int *cxFrame, int *cyFrame, int nIdGrip) noexce
 		}
 	}
 
-	SetProp(hwnd, RESIZEDLG_PROP_KEY, pm);
+	// SetProp(hwnd, RESIZEDLG_PROP_KEY, pm);
 	SetWindowSubclass(hwnd, ResizeDlg_Proc, 0, AsInteger<DWORD_PTR>(pm));
 
 	SetWindowPos(hwnd, nullptr, 0, 0, cx, cy, SWP_NOZORDER | SWP_NOMOVE);
@@ -865,7 +930,7 @@ void ResizeDlg_InitEx(HWND hwnd, int *cxFrame, int *cyFrame, int nIdGrip) noexce
 	DeleteMenu(hmenu, SC_MAXIMIZE, MF_BYCOMMAND);
 #endif
 
-	HWND hwndCtl = GetDlgItem(hwnd, nIdGrip);
+	HWND hwndCtl = GetDlgItem(hwnd, LOWORD(pm->controlDefinition[0]));
 	const int cGrip = SystemMetricsForDpi(SM_CXHTHUMB, pm->dpi);
 	SetWindowPos(hwndCtl, nullptr, pm->client.cx - cGrip, pm->client.cy - cGrip, cGrip, cGrip, SWP_NOZORDER);
 }
@@ -1057,7 +1122,7 @@ LRESULT SendWMSize(HWND hwnd) noexcept {
 }
 
 #if NP2_ENABLE_APP_LOCALIZATION_DLL
-HMODULE LoadLocalizedResourceDLL(LANGID lang, LPCWSTR dllName) noexcept {
+HMODULE LoadLocalizedResourceDLL(UINT lang, LPCWSTR dllName) noexcept {
 	if (lang == LANG_USER_DEFAULT) {
 		lang = GetUserDefaultUILanguage();
 	}
@@ -1066,7 +1131,8 @@ HMODULE LoadLocalizedResourceDLL(LANGID lang, LPCWSTR dllName) noexcept {
 	const LANGID subLang = SUBLANGID(lang);
 	switch (PRIMARYLANGID(lang)) {
 	case LANG_ENGLISH:
-		break;
+	default:
+		return nullptr;
 	case LANG_CHINESE:
 		folder = IsChineseTraditionalSubLang(subLang) ? L"zh-Hant" : L"zh-Hans";
 		break;
@@ -1096,10 +1162,6 @@ HMODULE LoadLocalizedResourceDLL(LANGID lang, LPCWSTR dllName) noexcept {
 		break;
 	}
 
-	if (folder == nullptr) {
-		return nullptr;
-	}
-
 	WCHAR path[MAX_PATH];
 	lstrcpy(path, szExeRealPath);
 	PathRemoveFileSpec(path);
@@ -1107,7 +1169,7 @@ HMODULE LoadLocalizedResourceDLL(LANGID lang, LPCWSTR dllName) noexcept {
 	PathAppend(path, folder);
 	PathAppend(path, dllName);
 
-	const DWORD flags = IsVistaAndAbove() ? (LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE | LOAD_LIBRARY_AS_IMAGE_RESOURCE) : LOAD_LIBRARY_AS_DATAFILE;
+	constexpr DWORD flags = LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE | LOAD_LIBRARY_AS_IMAGE_RESOURCE;
 	HMODULE hDLL = LoadLibraryEx(path, nullptr, flags);
 	return hDLL;
 }

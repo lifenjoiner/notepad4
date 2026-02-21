@@ -982,9 +982,112 @@ struct RESIZEDLG {
 	SIZE client;
 	POINT minTrackSize;
 	SIZE templateSize;
+	const DWORD *controlDefinition;
+	UINT controlCount;
+
+	DWORD controlY2;
+	int percent;
 	int itemMinSize[2];
 	int itemTemplateSize[2];
 };
+
+void ResizeDlg_Size(HWND hwnd, const RESIZEDLG *pm, int dx, int dy) noexcept {
+	int delta1 = 0;
+	if (dy != 0 && pm->controlY2 != 0) {
+		const DWORD nCtlId = pm->controlY2;
+		RECT rc;
+		GetWindowRect(GetDlgItem(hwnd, LOWORD(nCtlId)), &rc);
+		const int size1 = rc.bottom - rc.top;
+		GetWindowRect(GetDlgItem(hwnd, HIWORD(nCtlId)), &rc);
+		const int size2 = rc.bottom - rc.top;
+		// calculate with total size instead of current size delta to avoid accumulated round off
+		const int total = dy + size1 + size2;
+		delta1 = MulDiv(total, pm->percent, 100);
+		// ensure control with smaller percent not got sized down to it's minimize size
+		if (pm->percent >= 50) {
+			const int minSize2 = pm->itemMinSize[1];
+			delta1 = max(total - delta1, minSize2) - size2;
+			delta1 = dy - delta1;
+		} else {
+			const int minSize1 = pm->itemMinSize[0];
+			delta1 = max(delta1, minSize1) - size1;
+		}
+		// const int delta2 = dy - delta1, minSize1 = pm->itemMinSize[0], minSize2 = pm->itemMinSize[1];
+		// if (delta1 + size1 < minSize1 || delta2 + size2 < minSize2)
+		// printf("delta: (%d, %d) => (%d, %d, %d/%d), (%d, %d, %d/%d)\n", dy, pm->percent,
+		// 	delta1, size1, size1 + delta1, minSize1, delta2, size2, size2 + delta2, minSize2);
+	}
+
+	HDWP hdwp = BeginDeferWindowPos(pm->controlCount);
+	UINT index = 0;
+	HWND hwndLV = nullptr;
+	do {
+		DWORD definition = pm->controlDefinition[index];
+		HWND hwndCtl = GetDlgItem(hwnd, LOWORD(definition));
+		RECT rc;
+		GetWindowRect(hwndCtl, &rc);
+		MapWindowPoints(nullptr, hwnd, reinterpret_cast<LPPOINT>(&rc), 2);
+
+		int x = rc.left;
+		int y = rc.top;
+		int cx = rc.right - x;
+		int cy = rc.bottom - y;
+		DWORD flags = SWP_NOZORDER;
+
+		definition >>= 16;
+		unsigned mask = definition & RESIZE_MOVE_MASK;
+		if (mask == 0) {
+			flags |= SWP_NOMOVE;
+		} else {
+			if (mask & RESIZE_MOVE_X) {
+				x += dx;
+			}
+			mask >>= 1;
+			switch (mask) {
+			case (RESIZE_MOVE_Y >> 1):
+				y += dy;
+				break;
+			case (RESIZE_MOVE_Y1 >> 1):
+				y += delta1;
+				break;
+			}
+		}
+
+		definition >>= 4;
+		mask = definition & RESIZE_SIZE_MASK;
+		if (mask == 0) {
+			flags |= SWP_NOSIZE;
+		} else {
+			if (mask & RESIZE_SIZE_X) {
+				cx += dx;
+			}
+			mask >>= 1;
+			switch (mask) {
+			case (RESIZE_SIZE_Y >> 1):
+				cy += dy;
+				break;
+			case (RESIZE_SIZE_Y1 >> 1):
+				cy += delta1;
+				break;
+			case (RESIZE_SIZE_Y2 >> 1):
+				cy += dy - delta1;
+				break;
+			}
+		}
+
+		hdwp = DeferWindowPos(hdwp, hwndCtl, nullptr, x, y, cx, cy, flags);
+		if ((definition & (RESIZE_AUTOSIZE_USEHEADER >> 20)) != 0) {
+			hwndLV = hwndCtl;
+		} else if ((definition & (RESIZE_INVALIDATE_RECT >> 20)) != 0) {
+			InvalidateRect(hwndCtl, nullptr, TRUE);
+		}
+		++index;
+	} while (index < pm->controlCount);
+	EndDeferWindowPos(hdwp);
+	if (hwndLV != nullptr) {
+		ListView_SetColumnWidth(hwndLV, 0, LVSCW_AUTOSIZE_USEHEADER);
+	}
+}
 
 }
 
@@ -1015,13 +1118,17 @@ static LRESULT CALLBACK ResizeDlg_Proc(HWND hwnd, UINT umsg, WPARAM wParam, LPAR
 		const int cy = HIWORD(lParam);
 		const int dx = cx - pm->client.cx;
 		const int dy = cy - pm->client.cy;
-		lParam = MAKELPARAM(dx, dy); // unpack with GET_X_LPARAM() and GET_Y_LPARAM()
+		// lParam = MAKELPARAM(dx, dy); // unpack with GET_X_LPARAM() and GET_Y_LPARAM()
 		pm->client.cx = cx;
 		pm->client.cy = cy;
 		if (pm->dpiChanged) {
 			// skip first WM_SIZE message during WM_DPICHANGED, dialog control already has correct layout
 			// until end of WM_DPICHANGED block, pm->client contains outdated value
 			pm->dpiChanged = FALSE;
+			return TRUE;
+		}
+		/*if (pm->controlCount != 0)*/ {
+			ResizeDlg_Size(hwnd, pm, dx, dy);
 			return TRUE;
 		}
 	} break;
@@ -1081,7 +1188,7 @@ static LRESULT CALLBACK ResizeDlg_Proc(HWND hwnd, UINT umsg, WPARAM wParam, LPAR
 			*pm->cyFrame = (cy <= pm->templateSize.cy) ? 0 : cy;
 		}
 		RemoveWindowSubclass(hwnd, ResizeDlg_Proc, uIdSubclass);
-		RemoveProp(hwnd, RESIZEDLG_PROP_KEY);
+		// RemoveProp(hwnd, RESIZEDLG_PROP_KEY);
 		NP2HeapFree(pm);
 	} break;
 
@@ -1092,10 +1199,11 @@ static LRESULT CALLBACK ResizeDlg_Proc(HWND hwnd, UINT umsg, WPARAM wParam, LPAR
 	return DefSubclassProc(hwnd, umsg, wParam, lParam);
 }
 
-void ResizeDlg_InitEx(HWND hwnd, int *cxFrame, int *cyFrame, int nIdGrip, DWORD nCtlId) noexcept {
+void ResizeDlg_InitEx(HWND hwnd, int *cxFrame, int *cyFrame, const DWORD *controlDefinition, DWORD controlCount) noexcept {
 	const UINT dpi = GetWindowDPI(hwnd);
 	RESIZEDLG * const pm = static_cast<RESIZEDLG *>(NP2HeapAlloc(sizeof(RESIZEDLG)));
 	pm->dpi = dpi;
+	pm->controlDefinition = controlDefinition;
 
 	RECT rc = {DlgBaseUnit.cx, DlgBaseUnit.cy, 0, 0};
 	MapDialogRect(hwnd, &rc);
@@ -1128,7 +1236,12 @@ void ResizeDlg_InitEx(HWND hwnd, int *cxFrame, int *cyFrame, int nIdGrip, DWORD 
 		}
 	}
 
-	if (nCtlId != 0) {
+	pm->controlCount = LOWORD(controlCount);
+	controlCount >>= 16;
+	if (controlCount != 0) {
+		const DWORD nCtlId = pm->controlDefinition[pm->controlCount];
+		pm->controlY2 = nCtlId;
+		pm->percent = controlCount;
 		GetWindowRect(GetDlgItem(hwnd, LOWORD(nCtlId)), &rc);
 		pm->itemMinSize[0] = rc.bottom - rc.top;
 		pm->itemTemplateSize[0] = MulDiv(pm->itemMinSize[0], DlgBaseUnit.cy, baseUnit.cy);
@@ -1137,7 +1250,7 @@ void ResizeDlg_InitEx(HWND hwnd, int *cxFrame, int *cyFrame, int nIdGrip, DWORD 
 		pm->itemTemplateSize[1] = MulDiv(pm->itemMinSize[1], DlgBaseUnit.cy, baseUnit.cy);
 	}
 
-	SetProp(hwnd, RESIZEDLG_PROP_KEY, pm);
+	// SetProp(hwnd, RESIZEDLG_PROP_KEY, pm);
 	SetWindowSubclass(hwnd, ResizeDlg_Proc, 0, AsInteger<DWORD_PTR>(pm));
 
 	SetWindowPos(hwnd, nullptr, 0, 0, cx, cy, SWP_NOZORDER | SWP_NOMOVE);
@@ -1149,31 +1262,9 @@ void ResizeDlg_InitEx(HWND hwnd, int *cxFrame, int *cyFrame, int nIdGrip, DWORD 
 	DeleteMenu(hmenu, SC_MAXIMIZE, MF_BYCOMMAND);
 #endif
 
-	HWND hwndCtl = GetDlgItem(hwnd, nIdGrip);
+	HWND hwndCtl = GetDlgItem(hwnd, LOWORD(pm->controlDefinition[0]));
 	const int cGrip = SystemMetricsForDpi(SM_CXHTHUMB, pm->dpi);
 	SetWindowPos(hwndCtl, nullptr, pm->client.cx - cGrip, pm->client.cy - cGrip, cGrip, cGrip, SWP_NOZORDER);
-}
-
-int ResizeDlg_CalcDeltaEx(HWND hwnd, int dy, int cy, DWORD nCtlId) noexcept {
-	if (dy >= 0) {
-		return MulDiv(dy, cy, 100);
-	}
-
-	const RESIZEDLG * const pm = static_cast<RESIZEDLG *>(GetProp(hwnd, RESIZEDLG_PROP_KEY));
-	RECT rc;
-	GetWindowRect(GetDlgItem(hwnd, LOWORD(nCtlId)), &rc);
-	const int h1 = rc.bottom - rc.top;
-	GetWindowRect(GetDlgItem(hwnd, HIWORD(nCtlId)), &rc);
-	const int h2 = rc.bottom - rc.top;
-	const int hMin1 = pm->itemMinSize[0];
-	const int hMin2 = pm->itemMinSize[1];
-	// cy + h1 >= hMin1			cy >= hMin1 - h1
-	// dy - cy + h2 >= hMin2	cy <= dy + h2 - hMin2
-	const int cyMin = hMin1 - h1;
-	const int cyMax = dy + h2 - hMin2;
-	cy = dy - MulDiv(dy, 100 - cy, 100);
-	cy = clamp(cy, cyMin, cyMax);
-	return cy;
 }
 
 HDWP DeferCtlPos(HDWP hdwp, HWND hwndDlg, int nCtlId, int dx, int dy, UINT uFlags) noexcept {
@@ -1472,7 +1563,7 @@ INT GetCheckedRadioButton(HWND hwnd, int nIDFirstButton, int nIDLastButton) noex
 }
 
 #if NP2_ENABLE_APP_LOCALIZATION_DLL
-HMODULE LoadLocalizedResourceDLL(LANGID lang, LPCWSTR dllName) noexcept {
+HMODULE LoadLocalizedResourceDLL(UINT lang, LPCWSTR dllName) noexcept {
 	if (lang == LANG_USER_DEFAULT) {
 		lang = GetUserDefaultUILanguage();
 	}
@@ -1481,7 +1572,8 @@ HMODULE LoadLocalizedResourceDLL(LANGID lang, LPCWSTR dllName) noexcept {
 	const LANGID subLang = SUBLANGID(lang);
 	switch (PRIMARYLANGID(lang)) {
 	case LANG_ENGLISH:
-		break;
+	default:
+		return nullptr;
 	case LANG_CHINESE:
 		folder = IsChineseTraditionalSubLang(subLang) ? L"zh-Hant" : L"zh-Hans";
 		break;
@@ -1511,10 +1603,6 @@ HMODULE LoadLocalizedResourceDLL(LANGID lang, LPCWSTR dllName) noexcept {
 		break;
 	}
 
-	if (folder == nullptr) {
-		return nullptr;
-	}
-
 	WCHAR path[MAX_PATH];
 	lstrcpy(path, szExeRealPath);
 	PathRemoveFileSpec(path);
@@ -1522,7 +1610,7 @@ HMODULE LoadLocalizedResourceDLL(LANGID lang, LPCWSTR dllName) noexcept {
 	PathAppend(path, folder);
 	PathAppend(path, dllName);
 
-	const DWORD flags = IsVistaAndAbove() ? (LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE | LOAD_LIBRARY_AS_IMAGE_RESOURCE) : LOAD_LIBRARY_AS_DATAFILE;
+	constexpr DWORD flags = LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE | LOAD_LIBRARY_AS_IMAGE_RESOURCE;
 	HMODULE hDLL = LoadLibraryEx(path, nullptr, flags);
 	return hDLL;
 }
@@ -2299,7 +2387,7 @@ void MRUList::Add(LPCWSTR pszNew) noexcept {
 
 void MRUList::AddMultiline(LPCWSTR pszNew) noexcept {
 	const int len = lstrlen(pszNew);
-	LPWSTR lpszEsc = static_cast<LPWSTR>(NP2HeapAlloc((4*len + 1)*sizeof(WCHAR)));
+	LPWSTR lpszEsc = static_cast<LPWSTR>(NP2HeapAlloc((kMaxBackslashEscapeCount*len + 1)*sizeof(WCHAR)));
 	AddBackslashW(lpszEsc, pszNew);
 	Add(lpszEsc);
 	NP2HeapFree(lpszEsc);
@@ -2416,7 +2504,12 @@ void MRUList::Save() const noexcept {
 	NP2HeapFree(pIniSectionBuf);
 }
 
-void MRUList::MergeSave(bool keep) noexcept {
+void MRUList::Reload() noexcept {
+	Empty(false, true);
+	Init(szRegKey, capacity, iFlags);
+}
+
+void MRUList::MergeSave(bool keep, bool destroy) noexcept {
 	if (keep && iSize > 0) {
 		LPWSTR * const current = pszItems;
 		const int count = iSize;
@@ -2429,7 +2522,9 @@ void MRUList::MergeSave(bool keep) noexcept {
 		NP2HeapFree(AsVoidPointer(current));
 		Save();
 	}
-	Empty(!keep, true);
+	if (destroy) {
+		Empty(!keep, true);
+	}
 }
 
 void MRUList::AddToCombobox(HWND hwnd) const noexcept {
