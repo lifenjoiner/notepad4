@@ -1150,27 +1150,22 @@ void Style_OnDPIChanged(LPCEDITLEXER pLex) noexcept {
 	// Extra Line Spacing
 	szValue = (pLex->rid != NP2LEX_ANSI)? lexGlobal.Styles[GlobalStyleIndex_ExtraLineSpacing].szValue
 		: pLex->Styles[ANSIArtStyleIndex_ExtraLineSpacing].szValue;
+	int iAscent = 0;
+	int iDescent = 0;
 	if (Style_StrGetSize(szValue, &iValue) && iValue != 0) {
-		int iAscent;
-		int iDescent;
-		if (iValue > 0) {
+		iValue = ScaleStylePixel(abs(iValue), scale, 0);
+		if (iValue >= 0) {
 			// 5 => iAscent = 3, iDescent = 2
-			iValue = ScaleStylePixel(iValue, scale, 0);
-			iDescent = iValue/2 ;
+			iDescent = iValue/2U;
 			iAscent = iValue - iDescent;
 		} else {
 			// -5 => iAscent = -2, iDescent = -3
-			iValue = -ScaleStylePixel(-iValue, scale, 0);
-			iAscent = iValue/2 ;
-			iDescent = iValue - iAscent;
+			iAscent = -static_cast<int>(iValue/2U);
+			iDescent = iAscent - iValue;
 		}
-
-		SciCall_SetExtraAscent(iAscent);
-		SciCall_SetExtraDescent(iDescent);
-	} else {
-		SciCall_SetExtraAscent(0);
-		SciCall_SetExtraDescent(0);
 	}
+	SciCall_SetExtraAscent(iAscent);
+	SciCall_SetExtraDescent(iDescent);
 
 	// code folding
 	iValue = ScaleStylePixel(100, scale, 100);
@@ -1798,7 +1793,7 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) noexcept {
 	Style_SetDefaultStyle(GlobalStyleIndex_ControlCharacter);
 	if (rid != NP2LEX_ANSI) {
 		Style_SetAllStyle(pLexNew, 0);
-
+		// keep sync with LexState::EnableUrlHighlight() for link style
 		switch (rid) {
 		case NP2LEX_REBOL:
 			SciCall_CopyStyles(STYLE_LINK, MULTI_STYLE(SCE_REBOL_URL, SCE_REBOL_EMAIL, 0, 0));
@@ -1810,7 +1805,7 @@ void Style_SetLexer(PEDITLEXER pLexNew, BOOL bLexerChanged) noexcept {
 				Style_LoadOne(&lexHTML);
 			}
 			if (rid == NP2LEX_MARKDOWN) {
-				SciCall_CopyStyles(STYLE_LINK, MULTI_STYLE(SCE_MARKDOWN_PLAIN_LINK, SCE_MARKDOWN_PAREN_LINK, SCE_MARKDOWN_ANGLE_LINK, STYLE_COMMENT_LINK));
+				SciCall_CopyStyles(STYLE_LINK, MULTI_STYLE(SCE_MARKDOWN_PLAIN_LINK, SCE_MARKDOWN_PAREN_LINK, SCE_MARKDOWN_ANGLE_LINK, 0));
 			} else {
 				Style_SetAllStyle(&lexJavaScript, SCE_PHP_LABEL + 1);
 				Style_SetAllStyle(&lexCSS, SCE_PHP_LABEL + SCE_JS_LABEL + 2);

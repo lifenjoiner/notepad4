@@ -202,7 +202,10 @@ class LexInterface {
 protected:
 	Document *pdoc;
 	LexerInstance instance;
-	bool performingStyle;	///< Prevent reentrance
+	bool performingStyle = false;	///< Prevent reentrance
+	bool enableUrlHighlight = false;
+	int lexerLanguage = 0;
+	uint32_t urlIgnoreStyle[8];
 public:
 	explicit LexInterface(Document *pdoc_) noexcept;
 	LexInterface(const LexInterface &) = delete;
@@ -641,14 +644,21 @@ public:
 	int CharacterCategoryOptimization() const noexcept;
 #endif
 	void SCI_METHOD StartStyling(Sci_Position position) noexcept override;
-	bool SCI_METHOD SetStyleFor(Sci_Position length, unsigned char style) override;
-	bool SCI_METHOD SetStyles(Sci_Position length, const unsigned char *styles) override;
+	bool SCI_METHOD SetStyles(Sci_Position length, const unsigned char *styles, unsigned char style) override;
+	bool SetStyleFor(Sci_Position length, unsigned char style) {
+		return SetStyles(length, nullptr, style);
+	}
+	bool SetStyles(Sci_Position length, const unsigned char *styles) {
+		return SetStyles(length, styles, 0);
+	}
 	Sci::Position GetEndStyled() const noexcept {
 		return endStyled;
 	}
 	void EnsureStyledTo(Sci::Position pos);
 	void StyleToAdjustingLineDuration(Sci::Position pos);
 	void LexerChanged(bool hasStyles_);
+	bool EnableUrlHighlight() const noexcept;
+	void HighlightUrl(Sci_PositionU startPos, Sci_Position lengthDoc, const uint32_t (&urlIgnoreStyle)[8]);
 	int GetStyleClock() const noexcept {
 		return styleClock;
 	}

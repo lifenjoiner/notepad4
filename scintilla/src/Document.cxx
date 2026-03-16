@@ -61,7 +61,7 @@ using namespace Scintilla;
 using namespace Scintilla::Internal;
 using namespace Lexilla;
 
-LexInterface::LexInterface(Document *pdoc_) noexcept : pdoc(pdoc_), performingStyle(false) {
+LexInterface::LexInterface(Document *pdoc_) noexcept : pdoc{pdoc_} {
 }
 
 LexInterface::~LexInterface() noexcept = default;
@@ -89,6 +89,9 @@ void LexInterface::Colourise(Sci::Position start, Sci::Position end) {
 			}
 			instance->Lex(start, len, styleStart, pdoc);
 			instance->Fold(start, len, styleStart, pdoc);
+			if (enableUrlHighlight) {
+				pdoc->HighlightUrl(start, len, urlIgnoreStyle);
+			}
 		}
 
 		performingStyle = false;
@@ -895,8 +898,9 @@ Sci::Position Document::NextPosition(Sci::Position pos, int moveDir) const noexc
 	const int increment = moveDir;
 	if (pos + increment <= 0)
 		return 0;
-	if (pos + increment >= cb.Length())
-		return cb.Length();
+	const Sci::Position length = cb.Length();
+	if (pos + increment >= length)
+		return length;
 
 	if (dbcsCodePage) {
 		if (CpUtf8 == dbcsCodePage) {
@@ -936,9 +940,7 @@ Sci::Position Document::NextPosition(Sci::Position pos, int moveDir) const noexc
 		} else {
 			if (moveDir > 0) {
 				const int mbsize = IsDBCSDualByteAt(pos) ? 2 : 1;
-				pos += mbsize;
-				if (pos > cb.Length())
-					pos = cb.Length();
+				pos = std::min(pos + mbsize, length);
 			} else {
 				// How to Go Backward in a DBCS String
 				// https://msdn.microsoft.com/en-us/library/cc194792.aspx
@@ -1669,7 +1671,7 @@ Sci::Position Document::SetLineIndentation(Sci::Line line, Sci::Position indent)
 Sci::Position Document::GetLineIndentPosition(Sci::Line line) const noexcept {
 	if (line < 0)
 		return 0;
-	Sci::Position pos = LineStart(line);
+	Sci::Position pos = cb.LineStart(line);
 	const Sci::Position length = LengthNoExcept();
 	while ((pos < length) && IsSpaceOrTab(cb.CharAt(pos))) {
 		pos++;
@@ -1681,7 +1683,8 @@ Sci::Position Document::GetColumn(Sci::Position pos) const noexcept {
 	Sci::Position column = 0;
 	const Sci::Line line = SciLineFromPosition(pos);
 	if (IsValidIndex(line, LinesTotal())) {
-		for (Sci::Position i = LineStart(line); i < pos;) {
+		const Sci::Position length = LengthNoExcept();
+		for (Sci::Position i = cb.LineStart(line); i < pos;) {
 			const char ch = cb.CharAt(i);
 			if (ch == '\t') {
 				column = NextTab(column, tabInChars);
@@ -1693,7 +1696,7 @@ Sci::Position Document::GetColumn(Sci::Position pos) const noexcept {
 			} else if (UTF8IsAscii(ch)) {
 				column++;
 				i++;
-			} else if (i >= LengthNoExcept()) {
+			} else if (i >= length) {
 				return column;
 			} else {
 				column++;
@@ -1761,8 +1764,9 @@ Sci::Position Document::CountUTF16(Sci::Position startPos, Sci::Position endPos)
 Sci::Position Document::FindColumn(Sci::Line line, Sci::Position column) const noexcept {
 	Sci::Position position = LineStart(line);
 	if (IsValidIndex(line, LinesTotal())) {
+		const Sci::Position length = LengthNoExcept();
 		Sci::Position columnCurrent = 0;
-		while ((columnCurrent < column) && (position < LengthNoExcept())) {
+		while ((columnCurrent < column) && (position < length)) {
 			const char ch = cb.CharAt(position);
 			if (ch == '\t') {
 				columnCurrent = NextTab(columnCurrent, tabInChars);
@@ -2531,45 +2535,18 @@ void SCI_METHOD Document::StartStyling(Sci_Position position) noexcept {
 	endStyled = position;
 }
 
-bool SCI_METHOD Document::SetStyleFor(Sci_Position length, unsigned char style) {
-	if (enteredStyling != 0 || !cb.HasStyles()) {
+bool SCI_METHOD Document::SetStyles(Sci_Position length, const unsigned char *styles, unsigned char style) {
+	if (length <= 0 || enteredStyling != 0 || !cb.HasStyles()) {
 		return false;
 	}
 	enteredStyling++;
 	const Sci::Position prevEndStyled = endStyled;
-	if (cb.SetStyleFor(endStyled, length, style)) {
+	if (cb.SetStyles(endStyled, length, styles, style)) {
 		const DocModification mh(ModificationFlags::ChangeStyle | ModificationFlags::User,
 			prevEndStyled, length);
 		NotifyModified(mh);
 	}
 	endStyled += length;
-	enteredStyling--;
-	return true;
-}
-
-bool SCI_METHOD Document::SetStyles(Sci_Position length, const unsigned char *styles) {
-	if (enteredStyling != 0 || !cb.HasStyles()) {
-		return false;
-	}
-	enteredStyling++;
-	bool didChange = false;
-	Sci::Position startMod = 0;
-	Sci::Position endMod = 0;
-	for (int iPos = 0; iPos < length; iPos++, endStyled++) {
-		PLATFORM_ASSERT(endStyled < LengthNoExcept());
-		if (cb.SetStyleAt(endStyled, styles[iPos])) {
-			if (!didChange) {
-				startMod = endStyled;
-			}
-			didChange = true;
-			endMod = endStyled;
-		}
-	}
-	if (didChange) {
-		const DocModification mh(ModificationFlags::ChangeStyle | ModificationFlags::User,
-			startMod, endMod - startMod + 1);
-		NotifyModified(mh);
-	}
 	enteredStyling--;
 	return true;
 }
