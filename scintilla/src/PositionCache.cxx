@@ -14,6 +14,7 @@
 #include <climits>
 
 #include <stdexcept>
+#include <utility>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -91,14 +92,15 @@ LineLayout::LineLayout(Sci::Line lineNumber_, int maxLineLength_) :
 
 void LineLayout::Resize(int maxLineLength_) {
 	if (maxLineLength_ > maxLineLength) {
-		const size_t lineAllocation = maxLineLength_ + 1;
+		constexpr size_t sentinel = sizeof(int); // fix out-of-bounds read for KeyFromString()
+		const size_t lineAllocation = maxLineLength_ + sentinel;
 		auto chars_ = std::make_unique<char[]>(lineAllocation);
 		chars.swap(chars_);
 		auto styles_ = std::make_unique<unsigned char[]>(lineAllocation);
 		styles.swap(styles_);
 		// Extra position allocated as sometimes the Windows
 		// GetTextExtentExPoint API writes an extra element.
-		auto positions_ = std::make_unique<XYPOSITION[]>(lineAllocation + 1);
+		auto positions_ = std::make_unique<XYPOSITION[]>(lineAllocation);
 		positions.swap(positions_);
 		lineStarts.reset();
 		bidiData.reset();
@@ -122,8 +124,8 @@ void LineLayout::EnsureBidiData() {
 }
 
 void LineLayout::ClearPositions() const noexcept {
-	//std::fill_n(positions.get(), maxLineLength + 2, 0.0f);
-	memset(positions.get(), 0, (maxLineLength + 2) * sizeof(XYPOSITION));
+	//std::fill_n(positions.get(), maxLineLength + sizeof(int), 0.0f);
+	memset(positions.get(), 0, (maxLineLength + sizeof(int)) * sizeof(XYPOSITION));
 }
 
 void LineLayout::Invalidate(ValidLevel validity_) noexcept {
@@ -831,7 +833,7 @@ LineLayout *LineLayoutCache::Retrieve(Sci::Line lineNumber, Sci::Line lineCaret,
 namespace {
 
 // Simply pack the (maximum 4) character bytes into an int
-#if USE_ADDRESS_SANITIZER
+#if 0
 constexpr unsigned int KeyFromString(std::string_view charBytes) noexcept {
 	PLATFORM_ASSERT(charBytes.length() <= 4);
 	unsigned int k = 0;

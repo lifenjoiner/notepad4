@@ -24,7 +24,7 @@ class LexAccessor {
 		bufferSize = 4096,
 		slopSize = bufferSize / 8,
 	};
-	char buf[bufferSize + 4];
+	char buf[bufferSize + sizeof(int)];
 	const EncodingType encodingType;
 	Sci_Position startPos = 0;
 	Sci_Position endPos = 0;
@@ -65,9 +65,9 @@ public:
 		lenDoc(pAccess->Length()) {
 		// Prevent warnings by static analyzers about uninitialized buf and styleBuf.
 		// zero unused padding to prevent potential out of bounds bug.
-		memset(buf, 0, 4);
-		memset(buf + bufferSize, 0, 4);
-		memset(styleBuf, 0, 4);
+		memset(buf, 0, sizeof(int));
+		memset(buf + bufferSize, 0, sizeof(int));
+		memset(styleBuf, 0, sizeof(int));
 	}
 	char operator[](Sci_Position position) noexcept {
 		if (position < startPos || position >= endPos) {
@@ -192,7 +192,7 @@ public:
 	}
 	void Flush() {
 		if (validLen > 0) {
-			pAccess->SetStyles(validLen, styleBuf, 0);
+			pAccess->SetStyles(validLen, styleBuf);
 			startPosStyling += validLen;
 			validLen = 0;
 		}
@@ -220,9 +220,9 @@ public:
 		ColorTo(pos + 1, chAttr);
 	}
 #endif
-	// styling in range [startSeg, endPos_)
+	SCI_noinline
 	void ColorTo(Sci_PositionU endPos_, int chAttr) {
-		// Only perform styling if non empty range
+		// Only perform styling for non empty range [startSeg, endPos_)
 		assert(endPos_ >= startSeg && endPos_ <= static_cast<Sci_PositionU>(Length()));
 		if (endPos_ > startSeg) {
 			Sci_PositionU len = endPos_ - startSeg;
@@ -241,7 +241,7 @@ public:
 				} while (len != 0);
 			} else {
 				// Too big for buffer so send directly
-				pAccess->SetStyles(len, nullptr, attr);
+				pAccess->SetStyleFor(len, attr);
 			}
 		}
 	}

@@ -104,15 +104,19 @@ void IniClearAllSectionEx(LPCWSTR lpszPrefix, LPCWSTR lpszIniFile, bool bDelete)
 //
 // Manipulation of (cached) ini file sections
 //
-void IniSectionParser::Init(UINT capacity_) noexcept {
+LPWSTR IniSectionParser::Init(UINT capacity_, DWORD cchIniSection) noexcept {
 	count = 0;
 	capacity = capacity_;
 	head = nullptr;
 #if IniSectionParserUseSentinelNode
-	nodeList = static_cast<IniKeyValueNode *>(NP2HeapAlloc((capacity_ + 1) * sizeof(IniKeyValueNode)));
+	const size_t allocSize = (capacity_ + 1)*sizeof(IniKeyValueNode) + cchIniSection*sizeof(WCHAR);
+	nodeList = static_cast<IniKeyValueNode *>(NP2HeapAlloc(allocSize));
 	sentinel = &nodeList[capacity_];
+	return reinterpret_cast<LPWSTR>(sentinel + 1);
 #else
-	nodeList = static_cast<IniKeyValueNode *>(NP2HeapAlloc(capacity_ * sizeof(IniKeyValueNode)));
+	const size_t allocSize = capacity_*sizeof(IniKeyValueNode) + cchIniSection*sizeof(WCHAR);
+	nodeList = static_cast<IniKeyValueNode *>(NP2HeapAlloc(allocSize));
+	return reinterpret_cast<LPWSTR>(nodeList + capacity_);
 #endif
 }
 
@@ -240,13 +244,13 @@ LPCWSTR IniSectionParser::UnsafeGetValue(LPCWSTR key, int keyLen) noexcept {
 }
 
 void IniSectionParser::GetStringImpl(LPCWSTR key, int keyLen, LPCWSTR lpDefault, LPWSTR lpReturnedString, int cchReturnedString) noexcept {
-	LPCWSTR value = GetValueImpl(key, keyLen);
+	LPCWSTR value = count ? UnsafeGetValue(key, keyLen) : nullptr;
 	// allow empty string value
 	lstrcpyn(lpReturnedString, ((value == nullptr) ? lpDefault : value), cchReturnedString);
 }
 
 int IniSectionParser::GetIntImpl(LPCWSTR key, int keyLen, int iDefault) noexcept {
-	LPCWSTR value = GetValueImpl(key, keyLen);
+	LPCWSTR value = count ? UnsafeGetValue(key, keyLen) : nullptr;
 	if (value && CRTStrToInt(value, &keyLen)) {
 		return keyLen;
 	}
@@ -254,7 +258,7 @@ int IniSectionParser::GetIntImpl(LPCWSTR key, int keyLen, int iDefault) noexcept
 }
 
 bool IniSectionParser::GetBoolImpl(LPCWSTR key, int keyLen, bool bDefault) noexcept {
-	LPCWSTR value = GetValueImpl(key, keyLen);
+	LPCWSTR value = count ? UnsafeGetValue(key, keyLen) : nullptr;
 	if (value) {
 		const UINT t = *value - L'0';
 		if (t <= TRUE) {
@@ -272,6 +276,18 @@ void IniSectionBuilder::SetString(LPCWSTR key, LPCWSTR value) noexcept {
 	p = StrEnd(p) + 1;
 	*p = L'\0';
 	next = p;
+}
+
+void IniSectionBuilder::SetInt(LPCWSTR key, int i) noexcept {
+	WCHAR tch[16];
+	_ltow(i, tch, 10);
+	SetString(key, tch);
+}
+
+void IniSectionBuilder::SetStringEx(LPCWSTR key, LPCWSTR value, LPCWSTR lpDefault) noexcept {
+	if (!StrCaseEqual(value, lpDefault)) {
+		SetString(key, value);
+	}
 }
 
 void IniSectionBuilder::SetQuotedString(LPCWSTR key, LPCWSTR value) noexcept {
@@ -335,13 +351,13 @@ LSTATUS Registry_DeleteTree(HKEY hKey, LPCWSTR lpSubKey) noexcept {
 }
 #endif
 
-int ParseCommaList(LPCWSTR str, int result[], int count) noexcept {
+UINT ParseCommaList(LPCWSTR str, int result[], UINT count) noexcept {
 	if (StrIsEmpty(str)) {
 		return 0;
 	}
 
-	int index = 0;
-	while (index < count) {
+	UINT index = 0;
+	while (index != count) {
 		LPWSTR end;
 		result[index] = static_cast<int>(wcstol(str, &end, 10));
 		if (str == end) {
@@ -357,13 +373,13 @@ int ParseCommaList(LPCWSTR str, int result[], int count) noexcept {
 	return index;
 }
 
-int ParseCommaList64(LPCWSTR str, int64_t result[], int count) noexcept {
+UINT ParseCommaList64(LPCWSTR str, int64_t result[], UINT count) noexcept {
 	if (StrIsEmpty(str)) {
 		return 0;
 	}
 
-	int index = 0;
-	while (index < count) {
+	UINT index = 0;
+	while (index != count) {
 		LPWSTR end;
 		result[index] = _wcstoi64(str, &end, 10);
 		if (str == end) {
@@ -803,10 +819,11 @@ BOOL IsFontAvailable(LPCWSTR lpszFontName) noexcept {
 //
 void SetClipData(HWND hwnd, LPCWSTR pszData) noexcept {
 	if (OpenClipboard(hwnd)) {
-		EmptyClipboard();
-		HANDLE hData = GlobalAlloc(GHND, sizeof(WCHAR) * (lstrlen(pszData) + 1));
+		const size_t size = sizeof(WCHAR) * (lstrlen(pszData) + 1U);
+		HANDLE hData = GlobalAlloc(GHND, size);
 		WCHAR *pData = static_cast<WCHAR *>(GlobalLock(hData));
-		lstrcpyn(pData, pszData, static_cast<int>(GlobalSize(hData) / sizeof(WCHAR)));
+		memcpy(pData, pszData, size);
+		EmptyClipboard();
 		GlobalUnlock(hData);
 		SetClipboardData(CF_UNICODETEXT, hData);
 		CloseClipboard();
@@ -1307,49 +1324,79 @@ void ResizeDlgCtl(HWND hwndDlg, int nCtlId, int dx, int dy) noexcept {
 
 // https://docs.microsoft.com/en-us/windows/desktop/Controls/subclassing-overview
 // https://support.microsoft.com/en-us/help/102589/how-to-use-the-enter-key-from-edit-controls-in-a-dialog-box
-// Ctrl+A: https://stackoverflow.com/questions/10127054/select-all-text-in-edit-contol-by-clicking-ctrla
 static LRESULT CALLBACK MultilineEditProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData) noexcept {
-	UNREFERENCED_PARAMETER(dwRefData);
+	HWND hwndParent = AsPointer<HWND>(dwRefData);
 
 	switch (umsg) {
 	case WM_GETDLGCODE:
-		if (GetWindowStyle(hwnd) & ES_WANTRETURN) {
-			return DLGC_WANTALLKEYS | DLGC_HASSETSEL;
+		if (uIdSubclass & ES_WANTRETURN) {
+			return DLGC_WANTARROWS | DLGC_WANTALLKEYS | DLGC_HASSETSEL | DLGC_WANTCHARS;
 		}
 		break;
 
 	case WM_CHAR:
+		// Ctrl+A: https://stackoverflow.com/questions/10127054/select-all-text-in-edit-contol-by-clicking-ctrla
 		if (wParam == 1) { // Ctrl+A
 			Edit_SetSel(hwnd, 0, -1);
 			return TRUE;
 		}
-		break;
-
-	case WM_KEYDOWN:
-		if (wParam == VK_ESCAPE) {
-			SendMessage(GetParent(hwnd), WM_CLOSE, 0, 0);
+		if ((wParam == VK_TAB || wParam == VK_RETURN) && !KeyboardIsKeyDown(VK_SHIFT)) {
 			return TRUE;
 		}
-		if (wParam == VK_TAB && KeyboardIsKeyDown(VK_SHIFT)) {
-			// normally focus on previous control that has the WS_TABSTOP style set.
-			// focus on next control when the ES_WANTRETURN style is set (acts as normal Tab key).
-			const bool previous = (GetWindowStyle(hwnd) & ES_WANTRETURN) == 0;
-			HWND hwndParent = GetParent(hwnd);
-			HWND hwndCtl = GetNextDlgTabItem(hwndParent, hwnd, previous);
-			if (hwndCtl == hwnd) {
-				hwndCtl = GetNextDlgTabItem(hwndParent, hwnd, !previous);
-			}
-			// TODO: find first control when hwnd is last tab item on this dialog.
-			if (hwndCtl != hwnd) {
-				PostMessage(hwndParent, WM_NEXTDLGCTL, AsInteger<WPARAM>(hwndCtl), TRUE);
-			}
-		}
 		break;
+
+	case WM_KEYDOWN: {
+		if (wParam == VK_ESCAPE) {
+			SendMessage(hwndParent, WM_CLOSE, 0, 0);
+			return TRUE;
+		}
+		const bool shift = KeyboardIsKeyDown(VK_SHIFT);
+		if (wParam == VK_RETURN && !shift) {
+			constexpr WORD nCtlId = IDOK; // SendMessage(hwndParent, DM_GETDEFID, 0, 0);
+			SendWMCommand(hwndParent, nCtlId);
+			return TRUE;
+		}
+		if (wParam == VK_TAB && !shift) {
+			// focus on next control for Tab, and previous control for Shift+Tab
+			PostMessage(hwndParent, WM_NEXTDLGCTL, FALSE, FALSE);
+			return TRUE;
+		}
+		if (wParam == VK_BACK /*&& (uIdSubclass & ES_WANTRETURN) != 0*/ && KeyboardIsKeyDown(VK_CONTROL)) {
+			// Ctrl+Backspace => Ctrl+Shift+Left, Backspace https://github.com/dotnet/winforms/issues/259
+			INPUT input[8];
+			memset(input, 0, sizeof(input));
+			// press Ctrl+Shift+Left
+			input[0].type = INPUT_KEYBOARD;
+			input[0].ki.wVk = VK_CONTROL;
+			input[1].type = INPUT_KEYBOARD;
+			input[1].ki.wVk = VK_SHIFT;
+			input[2].type = INPUT_KEYBOARD;
+			input[2].ki.wVk = VK_LEFT;
+			// release Ctrl+Shift+Left
+			input[3].type = INPUT_KEYBOARD;
+			input[3].ki.wVk = VK_LEFT;
+			input[3].ki.dwFlags = KEYEVENTF_KEYUP;
+			input[4].type = INPUT_KEYBOARD;
+			input[4].ki.wVk = VK_SHIFT;
+			input[4].ki.dwFlags = KEYEVENTF_KEYUP;
+			input[5].type = INPUT_KEYBOARD;
+			input[5].ki.wVk = VK_CONTROL;
+			input[5].ki.dwFlags = KEYEVENTF_KEYUP;
+			// press & release Backspace
+			input[6].type = INPUT_KEYBOARD;
+			input[6].ki.wVk = VK_BACK;
+			input[7].type = INPUT_KEYBOARD;
+			input[7].ki.wVk = VK_BACK;
+			input[7].ki.dwFlags = KEYEVENTF_KEYUP;
+			SendInput(COUNTOF(input), input, sizeof(INPUT));
+			return TRUE;
+		}
+	} break;
 
 	case WM_SETTEXT: {
 		const LRESULT result = DefSubclassProc(hwnd, umsg, wParam, lParam);
 		if (result) {
-			NotifyEditTextChanged(GetParent(hwnd), GetDlgCtrlID(hwnd));
+			NotifyEditTextChanged(hwndParent, GetDlgCtrlID(hwnd));
 		}
 		return result;
 	}
@@ -1366,15 +1413,18 @@ static LRESULT CALLBACK MultilineEditProc(HWND hwnd, UINT umsg, WPARAM wParam, L
 
 void MultilineEditSetup(HWND hwndDlg, int nCtlId) noexcept {
 	HWND hwnd = GetDlgItem(hwndDlg, nCtlId);
-	if (IsWin10AndAbove() && (GetWindowStyle(hwnd) & ES_WANTRETURN) != 0) {
+	const DWORD style = GetWindowStyle(hwnd);
+	if ((style & ES_WANTRETURN) == 0) {
+		// Ctrl+Backspace to delete previous word
+		// for ES_WANTRETURN, Enter key will be changed to select all text instead of line break
+		// SHAutoComplete(hwnd, SHACF_FILESYS_ONLY | SHACF_AUTOAPPEND_FORCE_OFF | SHACF_AUTOSUGGEST_FORCE_OFF);
+	} else if (IsWin10AndAbove()) {
 		extern int iCurrentEOLMode;
 		constexpr DWORD exStyle = ES_EX_ALLOWEOL_ALL | ES_EX_CONVERT_EOL_ON_PASTE;
 		SendMessage(hwnd, EM_SETEXTENDEDSTYLE, exStyle, exStyle);
 		SendMessage(hwnd, EM_SETENDOFLINE, iCurrentEOLMode + 1, 0);
 	}
-	SetWindowSubclass(hwnd, MultilineEditProc, 0, 0);
-	// Ctrl+Backspace
-	SHAutoComplete(hwnd, SHACF_FILESYS_ONLY | SHACF_AUTOAPPEND_FORCE_OFF | SHACF_AUTOSUGGEST_FORCE_OFF);
+	SetWindowSubclass(hwnd, MultilineEditProc, style, AsInteger<DWORD_PTR>(hwndDlg));
 }
 
 //=============================================================================
@@ -1601,6 +1651,9 @@ HMODULE LoadLocalizedResourceDLL(UINT lang, LPCWSTR dllName) noexcept {
 	case LANG_RUSSIAN:
 		folder = L"ru";
 		break;
+	case LANG_SLOVENIAN:
+		folder = L"sl";
+		break;
 	}
 
 	WCHAR path[MAX_PATH];
@@ -1626,16 +1679,7 @@ bool PathGetRealPath(HANDLE hFile, LPCWSTR lpszSrc, LPWSTR lpszDest) noexcept {
 				nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
 		}
 		if (hFile != INVALID_HANDLE_VALUE) {
-#if _WIN32_WINNT >= _WIN32_WINNT_VISTA
 			DWORD cch = GetFinalPathNameByHandleW(hFile, path, COUNTOF(path), FILE_NAME_OPENED);
-#else
-			using GetFinalPathNameByHandleSig = DWORD (WINAPI *)(HANDLE hFile, LPWSTR lpszFilePath, DWORD cchFilePath, DWORD dwFlags);
-			static GetFinalPathNameByHandleSig pfnGetFinalPathNameByHandle = nullptr;
-			if (pfnGetFinalPathNameByHandle == nullptr) {
-				pfnGetFinalPathNameByHandle = DLLFunctionEx<GetFinalPathNameByHandleSig>(L"kernel32.dll", "GetFinalPathNameByHandleW");
-			}
-			DWORD cch = pfnGetFinalPathNameByHandle(hFile, path, COUNTOF(path), FILE_NAME_OPENED);
-#endif
 			// TODO: support long path
 			if (closing) {
 				CloseHandle(hFile);
@@ -1687,16 +1731,7 @@ struct FILE_ID_INFO {
 static inline BOOL PathGetFileId(HANDLE hFile, FILE_ID_INFO *fileId) noexcept {
 	BOOL success = FALSE;
 	if (IsWin8AndAbove()) {
-#if _WIN32_WINNT >= _WIN32_WINNT_VISTA
 		success = GetFileInformationByHandleEx(hFile, static_cast<FILE_INFO_BY_HANDLE_CLASS>(FileIdInfo), fileId, sizeof(FILE_ID_INFO));
-#else
-		using GetFileInformationByHandleExSig = BOOL (WINAPI *)(HANDLE hFile, int FileInformationClass, LPVOID lpFileInformation, DWORD dwBufferSize);
-		static GetFileInformationByHandleExSig pfnGetFileInformationByHandleEx = nullptr;
-		if (pfnGetFileInformationByHandleEx == nullptr) {
-			pfnGetFileInformationByHandleEx = DLLFunctionEx<GetFileInformationByHandleExSig>(L"kernel32.dll", "GetFileInformationByHandleEx");
-		}
-		success = pfnGetFileInformationByHandleEx(hFile, FileIdInfo, fileId, sizeof(FILE_ID_INFO));
-#endif
 		// failed on samba: GetLastError() => ERROR_INVALID_PARAMETER
 	}
 	if (!success) {
@@ -2448,10 +2483,9 @@ void MRUList::Empty(bool save, bool destroy) noexcept {
 
 void MRUList::Load() noexcept {
 	IniSectionParser section;
-	WCHAR *pIniSectionBuf = static_cast<WCHAR *>(NP2HeapAlloc(sizeof(WCHAR) * MAX_MRU_ITEM_SIZE * capacity));
-	const DWORD cchIniSection = static_cast<DWORD>(NP2HeapSize(pIniSectionBuf) / sizeof(WCHAR));
+	const DWORD cchIniSection = MAX_MRU_ITEM_SIZE * capacity;
 
-	section.Init(capacity);
+	WCHAR * const pIniSectionBuf = section.Init(capacity, cchIniSection);
 	LoadIniSection(szRegKey, pIniSectionBuf, cchIniSection);
 	section.ParseArray(pIniSectionBuf, iFlags & MRUFlags_QuoteValue);
 	UINT n = 0;
@@ -2470,7 +2504,6 @@ void MRUList::Load() noexcept {
 
 	iSize = n;
 	section.Free();
-	NP2HeapFree(pIniSectionBuf);
 }
 
 void MRUList::Save() const noexcept {

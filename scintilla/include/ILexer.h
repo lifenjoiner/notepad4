@@ -31,13 +31,14 @@ public:
 	virtual int SCI_METHOD GetLineState(Sci_Line line) const noexcept = 0;
 	virtual int SCI_METHOD SetLineState(Sci_Line line, int state) = 0;
 	virtual void SCI_METHOD StartStyling(Sci_Position position) noexcept = 0;
-	virtual bool SCI_METHOD SetStyles(Sci_Position length, const unsigned char *styles, unsigned char style) = 0;
+	virtual bool SCI_METHOD SetStyleFor(Sci_Position length, unsigned char style) = 0;
+	virtual bool SCI_METHOD SetStyles(Sci_Position length, const unsigned char *styles) = 0;
 	virtual void SCI_METHOD DecorationSetCurrentIndicator(int indicator) noexcept = 0;
 	virtual void SCI_METHOD DecorationFillRange(Sci_Position position, int value, Sci_Position fillLength) = 0;
 	virtual void SCI_METHOD ChangeLexerState(Sci_Position start, Sci_Position end) = 0;
 	virtual int SCI_METHOD CodePage() const noexcept = 0;
 	virtual bool SCI_METHOD IsDBCSLeadByte(unsigned char ch) const noexcept = 0;
-	virtual const char * SCI_METHOD BufferPointer() = 0;
+	virtual const char * SCI_METHOD BufferPointer() noexcept = 0;
 	virtual int SCI_METHOD GetLineIndentation(Sci_Line line) const noexcept = 0;
 	virtual Sci_Position SCI_METHOD LineEnd(Sci_Line line) const noexcept = 0;
 	virtual Sci_Position SCI_METHOD GetRelativePosition(Sci_Position positionStart, Sci_Position characterOffset) const noexcept = 0;

@@ -81,7 +81,9 @@ def BuildKeywordContent(rid, lexer, keywordList, keywordCount=16):
 			items = set(items)
 			for item in items: # check ASCII graphic character
 				if any(c <= ' ' or c > '~' for c in item):
-					print(rid, item)
+					print(f'{rid} {comment}: {item}')
+				# if len(item) <= 1:
+				# 	print(f'{rid} {comment}: {item}')
 			makeLower = False
 			if attr & KeywordAttr.MakeLower:
 				lowercase = to_lower(items)
@@ -91,9 +93,9 @@ def BuildKeywordContent(rid, lexer, keywordList, keywordCount=16):
 				else:
 					if len(items) != len(unique):
 						duplicate = find_duplicate_lower(items)
-						print(rid, comment, 'duplicate words:', duplicate)
+						print(f'{rid} {comment} duplicate words: {duplicate}')
 					makeLower = True
-					items = [item[1] for item in sorted(zip(lowercase, items))]
+					items = [item[1] for item in sorted(zip(lowercase, items, strict=True))]
 			if not makeLower:
 				items = sorted(items)
 			lines = MakeKeywordLines(items, makeLower=makeLower)
@@ -102,7 +104,7 @@ def BuildKeywordContent(rid, lexer, keywordList, keywordCount=16):
 		if lines:
 			length = len(lines) + sum(len(line) for line in lines)
 			if length >= 0xffff:
-				print(rid, comment, 'string exceeds 64 KiB:', length)
+				print(f'{rid} {comment} string exceeds 64 KiB: {length}')
 			if attr & KeywordAttr.PrefixSpace:
 				attr &= ~KeywordAttr.PrefixSpace
 				lines[0] = ' ' + lines[0]
@@ -974,6 +976,38 @@ def parse_dart_api_file(path):
 		('function', keywordMap['function'], KeywordAttr.NoLexer),
 	]
 
+def parse_elixir_api_file(path):
+	sections = read_api_file(path, '#')
+	keywordMap = {}
+	for key, doc in sections:
+		items = []
+		if key == 'keywords':
+			items = doc.split()
+		elif key == 'directives':
+			items = re.findall(r'@(\w+)', doc)
+		keywordMap[key] = items
+
+	return [
+		('keywords', keywordMap['keywords'], KeywordAttr.Default),
+		('annotations', keywordMap['annotations'], KeywordAttr.NoLexer | KeywordAttr.NoAutoComp | KeywordAttr.Special),
+	]
+
+def parse_erlang_api_file(path):
+	sections = read_api_file(path, '%')
+	keywordMap = {}
+	for key, doc in sections:
+		items = []
+		if key == 'keywords':
+			items = doc.split()
+		elif key == 'directives':
+			items = re.findall(r'-(\w+)', doc)
+		keywordMap[key] = items
+
+	return [
+		('keywords', keywordMap['keywords'], KeywordAttr.Default),
+		('directives', keywordMap['directives'], KeywordAttr.NoLexer | KeywordAttr.NoAutoComp | KeywordAttr.Special),
+	]
+
 def parse_fortran_api_file(path):
 	sections = read_api_file(path, '!', commentKind=1)
 	keywordMap = {}
@@ -1705,6 +1739,15 @@ def parse_kotlin_api_file(path):
 		('KDoc', keywordMap['kdoc'], KeywordAttr.NoLexer | KeywordAttr.NoAutoComp | KeywordAttr.Special),
 	]
 
+def parse_latex_api_file(path):
+	doc = read_file(path)
+	commands = re.findall(r'\\(\w+)', doc)
+	misc = []
+	return [
+		('commands', commands, KeywordAttr.NoLexer | KeywordAttr.Special),
+		('misc', misc, KeywordAttr.NoLexer)
+	]
+
 def parse_lua_api_file(path):
 	sections = read_api_file(path, '--')
 	keywordMap = {}
@@ -1924,6 +1967,33 @@ def parse_php_api_file(path):
 		('void tag', HtmlVoidTagList, KeywordAttr.NoAutoComp | KeywordAttr.PrefixSpace),
 		('JavaScript', JavaScriptKeywordMap['keywords'], KeywordAttr.NoAutoComp),
 		('phpdoc', keywordMap['phpdoc'], KeywordAttr.NoLexer | KeywordAttr.NoAutoComp | KeywordAttr.Special),
+	]
+
+def parse_powerbuilder_api_file(path):
+	keywordMap = {}
+	sections = read_api_file(path, '//')
+	for key, doc in sections:
+		if key in ('keywords', 'types', 'directives'):
+			items = doc.split()
+			if key == 'directives':
+				directives = []
+				keywords = keywordMap['keywords']
+				for item in items:
+					if item[0] == '#':
+						directives.append(item[1:])
+					else:
+						keywords.append(item)
+				items = directives
+			keywordMap[key] = items
+
+	RemoveDuplicateKeyword(keywordMap, [
+		'types',
+		'keywords',
+	])
+	return [
+		('keywords', keywordMap['keywords'], KeywordAttr.MakeLower),
+		('type keyword', keywordMap['types'], KeywordAttr.MakeLower),
+		('preprocessor', keywordMap['directives'], KeywordAttr.NoLexer | KeywordAttr.NoAutoComp | KeywordAttr.Special),
 	]
 
 def parse_powershell_api_file(path):
@@ -2463,6 +2533,19 @@ def parse_toml_api_file(path):
 	keywords = 'false inf nan true'.split()
 	return [
 		('keywords', keywords, KeywordAttr.Default),
+	]
+
+def parse_typst_api_file(path):
+	sections = read_api_file(path, '//')
+	keywordMap = {}
+	for key, doc in sections:
+		items = []
+		if key == 'keywords':
+			items = re.findall(r'\w+', doc)
+		keywordMap[key] = items
+
+	return [
+		('keywords', keywordMap['keywords'], KeywordAttr.Default),
 	]
 
 def parse_typescript_api_file(path):

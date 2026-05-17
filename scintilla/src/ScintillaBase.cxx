@@ -1240,10 +1240,11 @@ sptr_t ScintillaBase::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 	return 0;
 }
 
+extern unsigned int dwUrlThreshold;
 bool LexState::EnableUrlHighlight() noexcept {
 	enableUrlHighlight = false;
-	if (lexerLanguage != SCLEX_CONTAINER
-		&& (static_cast<size_t>(pdoc->LengthNoExcept()) >> 28) == 0) {
+	if (lexerLanguage != SCLEX_CONTAINER && dwUrlThreshold != 0
+		&& (static_cast<unsigned int>(pdoc->LengthNoExcept()) >> 20) <= dwUrlThreshold) {
 		enableUrlHighlight = true;
 		memset(urlIgnoreStyle, 0, sizeof(urlIgnoreStyle));
 		constexpr unsigned mask = (1U << (STYLE_LASTPREDEFINED - STYLE_FIRSTPREDEFINED + 1)) - 1;
@@ -1273,7 +1274,7 @@ bool Document::EnableUrlHighlight() const noexcept {
 }
 
 void Document::HighlightUrl(Sci_PositionU startPos, Sci_Position length, const uint32_t (&urlIgnoreStyle)[8]) {
-	// ignore lexer backtrack, which is usually used to reconstruct lexer state and rarely change style
+	// ignore lexer backtracking, which is usually used to reconstruct lexer state and rarely change style
 	DecorationSetCurrentIndicator(INDICATOR_LINK);
 	DecorationFillRange(startPos, 0, length); // clear all
 	// Markdown https://github.github.com/gfm/#autolinks-extension-
