@@ -26,6 +26,7 @@
 #include <shellapi.h>
 #include <commdlg.h>
 #include <uxtheme.h>
+// #include <dbghelp.h>
 #include <cstdio>
 #include "config.h"
 #include "Helpers.h"
@@ -169,21 +170,21 @@ UINT		g_uSystemDPI = USER_DEFAULT_SCREEN_DPI;
 #if _WIN32_WINNT < _WIN32_WINNT_WIN10
 namespace {
 // scintilla\win32\PlatWin.cxx
-using GetDpiForWindowSig = UINT (WINAPI *)(HWND hwnd);
+using GetDpiForWindowSig = UINT (WINAPI *)(HWND hwnd) noexcept;
 GetDpiForWindowSig fnGetDpiForWindow = nullptr;
 
 #ifndef DPI_ENUMS_DECLARED
 #define MDT_EFFECTIVE_DPI	0
 #endif
 
-using GetDpiForMonitorSig = HRESULT (WINAPI *)(HMONITOR hmonitor, /*MONITOR_DPI_TYPE*/int dpiType, UINT *dpiX, UINT *dpiY);
+using GetDpiForMonitorSig = HRESULT (WINAPI *)(HMONITOR hmonitor, /*MONITOR_DPI_TYPE*/int dpiType, UINT *dpiX, UINT *dpiY) noexcept;
 HMODULE hShcoreDLL {};
 GetDpiForMonitorSig fnGetDpiForMonitor = nullptr;
 
-using GetSystemMetricsForDpiSig = int (WINAPI *)(int nIndex, UINT dpi);
+using GetSystemMetricsForDpiSig = int (WINAPI *)(int nIndex, UINT dpi) noexcept;
 GetSystemMetricsForDpiSig fnGetSystemMetricsForDpi = nullptr;
 
-using AdjustWindowRectExForDpiSig = BOOL (WINAPI *)(LPRECT lpRect, DWORD dwStyle, BOOL bMenu, DWORD dwExStyle, UINT dpi);
+using AdjustWindowRectExForDpiSig = BOOL (WINAPI *)(LPRECT lpRect, DWORD dwStyle, BOOL bMenu, DWORD dwExStyle, UINT dpi) noexcept;
 AdjustWindowRectExForDpiSig fnAdjustWindowRectExForDpi = nullptr;
 }
 
@@ -252,6 +253,37 @@ BOOL WINAPI ConsoleHandlerRoutine(DWORD dwCtrlType) noexcept {
 	return FALSE;
 }
 
+#if 0
+static LPTOP_LEVEL_EXCEPTION_FILTER lpTopLevelExceptionFilter = nullptr;
+static SRWLOCK srwTopLevelHandlerLock = SRWLOCK_INIT;
+static LONG WINAPI TopLevelHandler(EXCEPTION_POINTERS *ep) {
+	// printf("unhandled exception: 0x%08X\n", static_cast<unsigned>(ep->ExceptionRecord->ExceptionCode));
+	AcquireSRWLockExclusive(&srwTopLevelHandlerLock);
+	using MiniDumpWriteDumpSig = BOOL (WINAPI *)(HANDLE hProcess, DWORD ProcessId, HANDLE hFile, MINIDUMP_TYPE DumpType,
+	LPVOID ExceptionParam, LPVOID UserStreamParam, LPVOID CallbackParam) noexcept;
+	if (HMODULE hDLL = LoadLibraryExW(L"dbghelp.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32)) {
+		if (auto fnMiniDumpWriteDump = DLLFunction<MiniDumpWriteDumpSig>(hDLL, "MiniDumpWriteDump")) {
+			WCHAR tchPath[64];
+			const UINT pid = GetCurrentProcessId();
+			const UINT tid = GetCurrentThreadId();
+			wsprintf(tchPath, L"%s %u %u.dmp", WC_MATEPATH, pid, tid);
+			HANDLE hFile = CreateFile(tchPath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+				nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+			if (hFile != INVALID_HANDLE_VALUE) {
+				MINIDUMP_EXCEPTION_INFORMATION dumpInfo;
+				dumpInfo.ThreadId = tid;
+				dumpInfo.ExceptionPointers = ep;
+				dumpInfo.ClientPointers = FALSE;
+				fnMiniDumpWriteDump(GetCurrentProcess(), pid, hFile, MiniDumpNormal, &dumpInfo, nullptr, nullptr);
+				CloseHandle(hFile);
+			}
+		}
+	}
+	ReleaseSRWLockExclusive(&srwTopLevelHandlerLock);
+	return lpTopLevelExceptionFilter(ep);// C++ runtime unhandled exception filter
+}
+#endif
+
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nShowCmd) {
 	UNREFERENCED_PARAMETER(hPrevInstance);
 	UNREFERENCED_PARAMETER(lpCmdLine);
@@ -283,6 +315,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 
 	g_hDefaultHeap = GetProcessHeap();
 	SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
+	// lpTopLevelExceptionFilter = SetUnhandledExceptionFilter(TopLevelHandler);
 
 	GetProgramRealPath(szExeRealPath, COUNTOF(szExeRealPath));
 	// Command Line, Ini File and Flags
@@ -3003,7 +3036,7 @@ void FindIniFile() noexcept {
 	WCHAR appData[MAX_PATH];
 	LPWSTR lpszIniFile = szIniFile;
 	bool portable = true;
-	if (StrStr(tchModule, L"WinGet") != nullptr || StrStr(tchModule, L"hocolatey") != nullptr) {
+	if (WcsStartsWith(tchModule + 3, L"Program Files") || StrStr(tchModule, L"WinGet") != nullptr || StrStr(tchModule, L"hocolatey") != nullptr) {
 		// %LOCALAPPDATA%\Microsoft\WinGet\Packages
 		// %ProgramData%\chocolatey\lib
 		LPWSTR pszPath = nullptr;
@@ -3675,7 +3708,7 @@ static void LoadDpiForWindow() noexcept {
 	fnGetSystemMetricsForDpi = DLLFunction<GetSystemMetricsForDpiSig>(user32, "GetSystemMetricsForDpi");
 	fnAdjustWindowRectExForDpi = DLLFunction<AdjustWindowRectExForDpiSig>(user32, "AdjustWindowRectExForDpi");
 
-	using GetDpiForSystemSig = UINT (WINAPI *)(void);
+	using GetDpiForSystemSig = UINT (WINAPI *)(void) noexcept;
 	GetDpiForSystemSig fnGetDpiForSystem = DLLFunction<GetDpiForSystemSig>(user32, "GetDpiForSystem");
 	if (fnGetDpiForSystem) {
 		g_uSystemDPI = fnGetDpiForSystem();

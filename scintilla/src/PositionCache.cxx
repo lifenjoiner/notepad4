@@ -71,49 +71,36 @@ void BidiData::Resize(size_t maxLineLength_) {
 }
 
 LineLayout::LineLayout(Sci::Line lineNumber_, int maxLineLength_) :
-	lineNumber(lineNumber_),
-	lenLineStarts(0),
-	maxLineLength(-1),
-	lastSegmentEnd(0),
-	numCharsInLine(0),
-	numCharsBeforeEOL(0),
-	validity(ValidLevel::invalid),
-	xHighlightGuide(0),
-	highlightColumn(false),
-	containsCaret(false),
-	bracePreviousStyles{},
-	edgeColumn(0),
-	caretPosition(0),
-	widthLine(wrapWidthInfinite),
-	lines(1),
-	wrapIndent(0) {
+	lineNumber{lineNumber_} {
 	Resize(maxLineLength_);
 }
 
 void LineLayout::Resize(int maxLineLength_) {
 	if (maxLineLength_ > maxLineLength) {
+		lenLineStarts = 0;
 		constexpr size_t sentinel = sizeof(int); // fix out-of-bounds read for KeyFromString()
-		const size_t lineAllocation = maxLineLength_ + sentinel;
-		auto chars_ = std::make_unique<char[]>(lineAllocation);
+		constexpr size_t alignment = sizeof(XYPOSITION)*2;
+		unsigned length = maxLineLength_ + sentinel;
+		length = NP2_align_up(length, alignment);
+		const size_t lineAllocation = length;
+		length -= sentinel;
+		maxLineLength = length;
+		auto chars_ = std::make_unique_for_overwrite<char[]>(lineAllocation*(2 + sizeof(XYPOSITION)));
+		memset(&chars_[length], 0, sentinel); // ensure styles[-1] is valid
 		chars.swap(chars_);
-		auto styles_ = std::make_unique<unsigned char[]>(lineAllocation);
-		styles.swap(styles_);
+		styles = reinterpret_cast<unsigned char *>(chars.get() + lineAllocation);
 		// Extra position allocated as sometimes the Windows
 		// GetTextExtentExPoint API writes an extra element.
-		auto positions_ = std::make_unique<XYPOSITION[]>(lineAllocation);
-		positions.swap(positions_);
+		positions = reinterpret_cast<XYPOSITION *>(styles + lineAllocation);
 		lineStarts.reset();
 		bidiData.reset();
-		lenLineStarts = 0;
-		maxLineLength = maxLineLength_;
 	}
 }
 
-void LineLayout::Reset(Sci::Line lineNumber_, Sci::Position maxLineLength_) {
+void LineLayout::Reset(Sci::Line lineNumber_, int maxLineLength_) {
 	lineNumber = lineNumber_;
-	Resize(static_cast<int>(maxLineLength_));
-	lines = 0;
-	Invalidate(ValidLevel::invalid);
+	validity = ValidLevel::invalid;
+	Resize(maxLineLength_);
 }
 
 void LineLayout::EnsureBidiData() {
@@ -124,8 +111,9 @@ void LineLayout::EnsureBidiData() {
 }
 
 void LineLayout::ClearPositions() const noexcept {
-	//std::fill_n(positions.get(), maxLineLength + sizeof(int), 0.0f);
-	memset(positions.get(), 0, (maxLineLength + sizeof(int)) * sizeof(XYPOSITION));
+	const unsigned length = numCharsInLine + sizeof(int);
+	//std::fill_n(positions, length, 0.0f);
+	memset(positions, 0, length * sizeof(XYPOSITION));
 }
 
 void LineLayout::Invalidate(ValidLevel validity_) noexcept {
@@ -283,11 +271,6 @@ int LineLayout::FindPositionFromX(XYPOSITION x, Range range, bool charPosition) 
 
 Point LineLayout::PointFromPosition(int posInLine, int lineHeight, PointEnd pe) const noexcept {
 	Point pt;
-	// In case of very long line put x at arbitrary large position
-	if (posInLine > maxLineLength) {
-		pt.x = positions[maxLineLength] - positions[LineStart(lines)];
-	}
-
 	for (int subLine = 0; subLine < lines; subLine++) {
 		const Range rangeSubLine = SubLineRange(subLine, Scope::visibleOnly);
 		if (posInLine >= rangeSubLine.start) {
@@ -555,7 +538,10 @@ XYPOSITION ScreenLine::TabPositionAfter(XYPOSITION xPosition) const noexcept {
 	return (std::floor((xPosition + TabWidthMinimumPixels()) / TabWidth()) + 1) * TabWidth();
 }
 
-bool SignificantLines::LineMayCache(Sci::Line line) const noexcept {
+bool SignificantLines::LineMayCache(Sci::Line line, unsigned maxChars) const noexcept {
+	if (LineLayoutCache::UseLongCache(maxChars)) {
+		return true;
+	}
 	switch (level) {
 	case LineCache::None:
 		return false;
@@ -808,8 +794,7 @@ LineLayout *LineLayoutCache::Retrieve(Sci::Line lineNumber, Sci::Line lineCaret,
 		if (!ret->CanHold(lineNumber, maxChars)) {
 			//printf("USE line=%zd/%zd, caret=%zd/%zd top=%zd, pos=%zu, clock=%d\n",
 			//	lineNumber, ret->LineNumber(), lineCaret, lastCaretSlot, topLine, pos, styleClock_);
-			ret->~LineLayout();
-			::new (ret) LineLayout(lineNumber, maxChars);
+			ret->Reset(lineNumber, maxChars);
 		} else {
 			//printf("HIT line=%zd, caret=%zd/%zd top=%zd, pos=%zu, clock=%d, validity=%d\n",
 			//	lineNumber, lineCaret, lastCaretSlot, topLine, pos, styleClock_, ret->validity);
@@ -1322,7 +1307,7 @@ void PositionCache::MeasureWidths(Surface *surface, const Style &style, unsigned
 	PositionCacheEntry *entry = nullptr;
 	PositionCacheEntry *entry2 = nullptr;
 	const uint16_t styleNumber = styleNumber_ & UINT16_MAX;
-	constexpr size_t maxLength = (512 - 16)/(sizeof(XYPOSITION) + 1);
+	constexpr size_t maxLength = 512/(sizeof(XYPOSITION) + sizeof(char));
 	if (sv.length() <= maxLength) {
 		// Only store short strings in the cache so it doesn't churn with
 		// long comments with only a single comment.
@@ -1345,7 +1330,7 @@ void PositionCache::MeasureWidths(Surface *surface, const Style &style, unsigned
 		}
 	}
 
-	if (styleNumber_ & (1 << 16)) {
+	if (styleNumber_ & positionCacheUnicode) {
 		surface->MeasureWidthsUTF8(style.font.get(), sv, positions);
 	} else {
 		surface->MeasureWidths(style.font.get(), sv, positions);

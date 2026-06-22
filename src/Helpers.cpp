@@ -285,7 +285,7 @@ void IniSectionBuilder::SetInt(LPCWSTR key, int i) noexcept {
 }
 
 void IniSectionBuilder::SetStringEx(LPCWSTR key, LPCWSTR value, LPCWSTR lpDefault) noexcept {
-	if (!StrCaseEqual(value, lpDefault)) {
+	if (!WcsCaseEqual(value, lpDefault)) {
 		SetString(key, value);
 	}
 }
@@ -505,8 +505,8 @@ HRESULT PrivateSetCurrentProcessExplicitAppUserModelID(LPCWSTR AppID) noexcept {
 #if _WIN32_WINNT >= _WIN32_WINNT_WIN7
 	return SetCurrentProcessExplicitAppUserModelID(AppID);
 #else
-	using SetCurrentProcessExplicitAppUserModelIDSig = HRESULT (WINAPI *)(LPCWSTR AppID);
-	SetCurrentProcessExplicitAppUserModelIDSig pfnSetCurrentProcessExplicitAppUserModelID =
+	using SetCurrentProcessExplicitAppUserModelIDSig = HRESULT (WINAPI *)(LPCWSTR AppID) noexcept;
+	auto pfnSetCurrentProcessExplicitAppUserModelID =
 		DLLFunctionEx<SetCurrentProcessExplicitAppUserModelIDSig>(L"shell32.dll", "SetCurrentProcessExplicitAppUserModelID");
 	if (pfnSetCurrentProcessExplicitAppUserModelID) {
 		return pfnSetCurrentProcessExplicitAppUserModelID(AppID);
@@ -817,6 +817,7 @@ BOOL IsFontAvailable(LPCWSTR lpszFontName) noexcept {
 //
 // SetClipData()
 //
+NP2_noinline
 void SetClipData(HWND hwnd, LPCWSTR pszData) noexcept {
 	if (OpenClipboard(hwnd)) {
 		const size_t size = sizeof(WCHAR) * (lstrlen(pszData) + 1U);
@@ -1356,12 +1357,13 @@ static LRESULT CALLBACK MultilineEditProc(HWND hwnd, UINT umsg, WPARAM wParam, L
 			SendWMCommand(hwndParent, nCtlId);
 			return TRUE;
 		}
-		if (wParam == VK_TAB && !shift) {
+		const bool control = KeyboardIsKeyDown(VK_CONTROL);
+		if (wParam == VK_TAB && (control || !shift)) {
 			// focus on next control for Tab, and previous control for Shift+Tab
-			PostMessage(hwndParent, WM_NEXTDLGCTL, FALSE, FALSE);
+			PostMessage(hwndParent, WM_NEXTDLGCTL, shift, FALSE);
 			return TRUE;
 		}
-		if (wParam == VK_BACK /*&& (uIdSubclass & ES_WANTRETURN) != 0*/ && KeyboardIsKeyDown(VK_CONTROL)) {
+		if (wParam == VK_BACK /*&& (uIdSubclass & ES_WANTRETURN) != 0*/ && control) {
 			// Ctrl+Backspace => Ctrl+Shift+Left, Backspace https://github.com/dotnet/winforms/issues/259
 			INPUT input[8];
 			memset(input, 0, sizeof(input));

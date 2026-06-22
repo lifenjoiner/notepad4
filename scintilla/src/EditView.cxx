@@ -364,7 +364,7 @@ inline void UpdateMaximum(std::atomic<T> &maximum, const T &value) noexcept {
 struct LayoutWorker {
 	LineLayout * const ll;
 	const ViewStyle &vstyle;
-	Surface * const sharedSurface;
+	Surface * const surface;
 	PositionCache &posCache;
 	const EditModel &model;
 
@@ -378,7 +378,7 @@ struct LayoutWorker {
 
 	static constexpr int blockSize = EditModel::ParallelLayoutBlockSize;
 
-	void Layout(const TextSegment &ts, Surface *surface) {
+	void Layout(const TextSegment &ts) {
 		const unsigned char styleSegment = ll->styles[ts.start];
 		const Style &style = vstyle.styles[styleSegment];
 		XYPOSITION * const positions = &ll->positions[ts.start + 1];
@@ -396,7 +396,7 @@ struct LayoutWorker {
 							// ts.representation->stringRep is UTF-8.
 							std::array<XYPOSITION, Representation::maxLength + 1> positionsRepr;
 							const std::string_view stringRep = ts.representation->GetStringRep();
-							posCache.MeasureWidths(surface, styleCtrl, StyleControlChar | (1 << 16), stringRep, positionsRepr.data());
+							posCache.MeasureWidths(surface, styleCtrl, StyleControlChar | positionCacheUnicode, stringRep, positionsRepr.data());
 							representationWidth = positionsRepr[ts.representation->length - 1];
 						}
 						if (FlagSet(ts.representation->appearance, RepresentationAppearance::Blob)) {
@@ -420,7 +420,7 @@ struct LayoutWorker {
 			const std::string_view text = style.GetInvisibleRepresentation();
 			std::array<XYPOSITION, Representation::maxLength + 1> positionsRepr;
 			// invisibleRepresentation is UTF-8.
-			posCache.MeasureWidths(surface, style, styleSegment | (1 << 16), text, positionsRepr.data());
+			posCache.MeasureWidths(surface, style, styleSegment | positionCacheUnicode, text, positionsRepr.data());
 			const XYPOSITION representationWidth = positionsRepr[text.length() - 1];
 			for (int ii = 0; ii < ts.length; ii++) {
 				positions[ii] = representationWidth;
@@ -429,10 +429,10 @@ struct LayoutWorker {
 	}
 
 	uint32_t Start(Sci::Position posLineStart, uint32_t posInLine, LayoutLineOption option) {
-		textUnicode = (model.pdoc->dbcsCodePage & (1 << 15)) << 1;
+		textUnicode = (model.pdoc->dbcsCodePage & (positionCacheUnicode >> 1)) << 1;
 		const int startPos = ll->lastSegmentEnd;
 		const int endPos = ll->numCharsInLine;
-		if (endPos - startPos > blockSize*2 && !model.BidirectionalEnabled()) {
+		if (option < LayoutLineOption::Printing && endPos - startPos > blockSize*2 && !model.BidirectionalEnabled()) {
 			posInLine = std::max<uint32_t>(posInLine, std::max(startPos, ll->caretPosition)) + blockSize;
 			if (static_cast<int>(endPos - posInLine) < blockSize) {
 				posInLine = endPos;
@@ -451,7 +451,7 @@ struct LayoutWorker {
 
 		maxPosInLine = static_cast<int>(posInLine);
 		const uint32_t length = bfLayout.CurrentPos() - startPos;
-		if (length >= model.minParallelLayoutLength && model.hardwareConcurrency > 1) {
+		if (!FlagSet(option, LayoutLineOption::CallerMultiThreaded) && length >= model.minParallelLayoutLength && model.hardwareConcurrency > 1) {
 			segmentCount = static_cast<uint32_t>(segmentList.size());
 			const uint32_t threadCount = std::min(length/(blockSize/2), model.hardwareConcurrency);
 #if USE_STD_ASYNC_FUTURE
@@ -477,12 +477,11 @@ struct LayoutWorker {
 		}
 
 		void * const idleTaskTimer = model.idleTaskTimer;
-		Surface * const surface = sharedSurface;
 		int processed = 0;
 		auto it = segmentList.begin();
 		while (true) {
 			const TextSegment &ts = *it++;
-			Layout(ts, surface);
+			Layout(ts);
 			if (it == segmentList.end()) {
 				break;
 			}
@@ -499,22 +498,9 @@ struct LayoutWorker {
 		return 1;
 	}
 
-	std::unique_ptr<Surface> CreateMeasurementSurface() const {
-		// if (!surface->SupportsFeature(Supports::ThreadSafeMeasureWidths))
-		if (vstyle.technology == Technology::Default) {
-			std::unique_ptr<Surface> surf = Surface::Allocate(Technology::Default);
-			surf->Init(nullptr);
-			surf->SetMode(model.CurrentSurfaceMode());
-			return surf;
-		}
-		return {};
-	}
-
 	void DoWork() {
 		uint32_t finished = 0;
 		void * const idleTaskTimer = model.idleTaskTimer;
-		const std::unique_ptr<Surface> surf{CreateMeasurementSurface()};
-		Surface * const surface = surf ? surf.get() : sharedSurface;
 
 		int processed = 0;
 		while (true) {
@@ -524,7 +510,7 @@ struct LayoutWorker {
 			}
 
 			const TextSegment &ts = segmentList[index];
-			Layout(ts, surface);
+			Layout(ts);
 			finished = index + 1;
 			processed += ts.length;
 			if (processed >= blockSize) {
@@ -560,10 +546,9 @@ uint32_t EditView::LayoutLine(const EditModel &model, Surface *surface, const Vi
 	PLATFORM_ASSERT(ll->chars);
 	const Sci::Position posLineStart = model.pdoc->LineStart(line);
 	// If the line is very long, limit the treatment to a length that should fit in the viewport
-	const Sci::Position posLineEnd = std::min(model.pdoc->LineStart(line + 1), posLineStart + ll->maxLineLength);
+	const Sci::Position posLineEnd = model.pdoc->LineStart(line + 1);
 	// Hard to cope when too narrow, so just assume there is space
-	constexpr int minimumWidth = 20;
-	width = std::max(width, minimumWidth);
+	width = std::max(width, LineLayout::wrapWidthMinimum);
 
 	auto validity = ll->validity;
 	if (validity == LineLayout::ValidLevel::checkTextAndStyle) {
@@ -574,13 +559,12 @@ uint32_t EditView::LayoutLine(const EditModel &model, Surface *surface, const Vi
 			// See if chars, styles, indicators, are all the same
 			int allSame = 0;
 			// Check base line layout
-			const uint8_t *styles = ll->styles.get();
-
+			const uint8_t * const styles = ll->styles;
 			if (lineLength != 0) {
 				allSame = model.pdoc->CheckRange(ll->chars.get(), reinterpret_cast<const char *>(styles), posLineStart, lineLength);
 			}
 
-			const int styleByteLast = (posLineEnd == posLineStart) ? 0 : model.pdoc->StyleIndexAt(posLineEnd - 1);
+			const uint8_t styleByteLast = (posLineEnd == posLineStart) ? 0 : model.pdoc->StyleIndexAt(posLineEnd - 1);
 			allSame |= styles[lineLength] ^ styleByteLast; // For eolFilled
 			//const double duration = period.Duration()*1e3;
 			//printf("check line=%zd (%zd) allSame=%d, duration=%f\n", line + 1, lineLength, allSame, duration);
@@ -593,17 +577,18 @@ uint32_t EditView::LayoutLine(const EditModel &model, Surface *surface, const Vi
 		// Fill base line layout
 		const int lineLength = static_cast<int>(posLineEnd - posLineStart);
 		model.pdoc->GetCharRange(ll->chars.get(), posLineStart, lineLength);
-		model.pdoc->GetStyleRange(ll->styles.get(), posLineStart, lineLength);
+		model.pdoc->GetStyleRange(ll->styles, posLineStart, lineLength);
 		const int numCharsBeforeEOL = static_cast<int>(model.pdoc->LineEnd(line) - posLineStart);
-		const int numCharsInLine = vstyle.viewEOL ? lineLength : numCharsBeforeEOL;
-		const unsigned char styleByteLast = (lineLength == 0) ? 0 : ll->styles[lineLength - 1];
+		const unsigned numCharsInLine = vstyle.viewEOL ? lineLength : numCharsBeforeEOL;
+		const uint8_t styleByteLast = ll->styles[lineLength - 1]; // styles[-1] is zero sentinel
 		// Extra element at the end of the line to hold end x position and act as
-		ll->chars[numCharsInLine] = 0;   // Also triggers processing in the loops as this is a control character
+		// Also triggers processing in the loops as this is a control character
+		memset(&ll->chars[numCharsInLine], 0, sizeof(int));
+		memset(&ll->styles[numCharsInLine], 0, sizeof(int));
 		ll->styles[numCharsInLine] = styleByteLast;	// For eolFilled
 
 		// Layout the line, determining the position of each character,
 		// with an extra element at the end for the end of the line.
-		ll->ClearPositions();
 		ll->lastSegmentEnd = 0;
 		ll->numCharsInLine = numCharsInLine;
 		ll->numCharsBeforeEOL = numCharsBeforeEOL;
@@ -612,6 +597,7 @@ uint32_t EditView::LayoutLine(const EditModel &model, Surface *surface, const Vi
 		ll->edgeColumn = -1;
 		ll->widthLine = LineLayout::wrapWidthInfinite;
 		ll->lines = 1;
+		ll->ClearPositions();
 		if (numCharsInLine == 0) {
 			// empty line with viewEOL disabled
 			ll->widthLine = width;
@@ -630,7 +616,7 @@ uint32_t EditView::LayoutLine(const EditModel &model, Surface *surface, const Vi
 		&& ll->PartialPosition() && width == ll->widthLine;
 	if (validity == LineLayout::ValidLevel::invalid
 		|| (option != LayoutLineOption::PaintText && ll->PartialPosition())) {
-		//if (ll->maxLineLength > LayoutWorker::blockSize) {
+		//if (ll->numCharsInLine > LayoutWorker::blockSize) {
 		//	printf("start layout line=%zd, posInLine=%d\n", line + 1, posInLine);
 		//}
 		//const ElapsedPeriod period;
@@ -667,7 +653,7 @@ uint32_t EditView::LayoutLine(const EditModel &model, Surface *surface, const Vi
 		if (bytes > LayoutWorker::blockSize) {
 			const double duration = period.Duration()*1e3;
 			printf("layout line=%zd segment=(%u / %zu), posInLine=(%d / %d) (%u / %u, %u), duration=%f, %f\n", line + 1,
-				finishedCount, worker.segmentList.size(), worker.maxPosInLine, ll->maxLineLength,
+				finishedCount, worker.segmentList.size(), worker.maxPosInLine, ll->numCharsInLine,
 				bytes, threadCount, wrappedBytes, duration, model.durationWrapOneUnit.Duration()*1e3);
 		}
 #endif
@@ -956,7 +942,7 @@ Sci::Position EditView::StartEndDisplayLine(Surface *surface, const EditModel &m
 		const int posInLine = static_cast<int>(pos - posLineStart);
 		LineLayout * const ll = RetrieveLineLayout(line, model);
 		LayoutLine(model, surface, vs, ll, model.wrapWidth, LayoutLineOption::AutoUpdate, posInLine);
-		if (posInLine <= ll->maxLineLength) {
+		if (posInLine <= ll->numCharsInLine) {
 			for (int subLine = 0; subLine < ll->lines; subLine++) {
 				if ((posInLine >= ll->LineStart(subLine)) &&
 					(posInLine <= ll->LineStart(subLine + 1)) &&
@@ -2975,6 +2961,7 @@ Sci::Position EditView::FormatRange(bool draw, CharacterRangeFull chrg, Scintill
 	int lineVisible = 0;
 	const int widthPrint = (printParameters.wrapState == Wrap::None) ? LineLayout::wrapWidthInfinite : rc.right - rc.left - vsPrint.fixedColumnWidth;
 
+	LineLayout ll(-1, -1);
 	while (lineDoc <= linePrintLast && ypos < rc.bottom) {
 
 		// When printing, the hdc and hdcTarget may be the same, so
@@ -2985,8 +2972,11 @@ Sci::Position EditView::FormatRange(bool draw, CharacterRangeFull chrg, Scintill
 
 		// Copy this line and its styles from the document into local arrays
 		// and determine the x position at which each character starts.
-		LineLayout ll(lineDoc, static_cast<int>(model.pdoc->LineStart(lineDoc + 1) - model.pdoc->LineStart(lineDoc) + 1));
-		LayoutLine(model, surfaceMeasure, vsPrint, &ll, widthPrint, LayoutLineOption::Printing, ll.maxLineLength);
+		const Sci::Position posLineStart = model.pdoc->LineStart(lineDoc);
+		const Sci::Position posLineEnd = model.pdoc->LineStart(lineDoc + 1);
+		const int lineLength = static_cast<int>(posLineEnd - posLineStart);
+		ll.Reset(lineDoc, lineLength);
+		LayoutLine(model, surfaceMeasure, vsPrint, &ll, widthPrint, LayoutLineOption::Printing);
 
 		ll.containsCaret = false;
 
@@ -3000,8 +2990,7 @@ Sci::Position EditView::FormatRange(bool draw, CharacterRangeFull chrg, Scintill
 		// to start printing from to ensure a particular position is on the first
 		// line of the page.
 		if (lineVisible == 0) {
-			const Sci::Position startWithinLine = nPrintPos -
-				model.pdoc->LineStart(lineDoc);
+			const Sci::Position startWithinLine = nPrintPos - posLineStart;
 			for (int iwl = 0; iwl < ll.lines - 1; iwl++) {
 				if (ll.LineStart(iwl) <= startWithinLine && ll.LineStart(iwl + 1) >= startWithinLine) {
 					lineVisible = -iwl;
@@ -3048,7 +3037,7 @@ Sci::Position EditView::FormatRange(bool draw, CharacterRangeFull chrg, Scintill
 				}
 				lineVisible++;
 				if (iwl == ll.lines - 1)
-					nPrintPos = model.pdoc->LineStart(lineDoc + 1);
+					nPrintPos = posLineEnd;
 				else
 					nPrintPos += ll.LineStart(iwl + 1) - ll.LineStart(iwl);
 			}
