@@ -33,6 +33,7 @@
 #include "VectorISA.h"
 #include "config.h"
 #include "Helpers.h"
+#include "DarkMode.h"
 #include "Notepad4.h"
 #include "Edit.h"
 #include "Styles.h"
@@ -177,7 +178,6 @@ bool	bResetFileWatching;
 static DWORD dwFileCheckInterval;
 static DWORD dwAutoReloadTimeout;
 unsigned int dwUrlThreshold;
-bool bUseXPFileDialog;
 static EscFunction iEscFunction;
 static bool bAlwaysOnTop;
 static bool bMinimizeToTray;
@@ -423,6 +423,7 @@ static void CleanUpResources(bool initialized) noexcept {
 	Style_ReleaseResources();
 	Edit_ReleaseResources();
 	Scintilla_ReleaseResources();
+	DarkMode_Cleanup();
 
 	if (hTrayIcon) {
 		DestroyIcon(hTrayIcon);
@@ -439,7 +440,7 @@ static void CleanUpResources(bool initialized) noexcept {
 }
 
 static void DispatchMessageMain(MSG *msg) noexcept {
-	if (IsWindow(hDlgFindReplace) && (msg->hwnd == hDlgFindReplace || IsChild(hDlgFindReplace, msg->hwnd))) {
+	if (hDlgFindReplace != nullptr && (msg->hwnd == hDlgFindReplace || IsChild(hDlgFindReplace, msg->hwnd))) {
 		if (TranslateAccelerator(hDlgFindReplace, hAccFindReplace, msg) || IsDialogMessage(hDlgFindReplace, msg)) {
 			return;
 		}
@@ -639,6 +640,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 
 	// Load Settings
 	LoadSettings();
+	DarkMode_Init();
 
 	if (!InitApplication(hInstance)) {
 		CleanUpResources(false);
@@ -655,11 +657,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 
 	while (true) {
 		if (editMarkAll.pending) {
-			WaitableTimer_Set(timer, WaitableTimer_IdleTaskDelayTime);
-			while (editMarkAll.pending && WaitableTimer_Continue(timer)) {
-				if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
-					DispatchMessageMain(&msg);
-				}
+			while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+				DispatchMessageMain(&msg);
 			}
 			if (editMarkAll.pending) {
 				editMarkAll.Continue(timer);
@@ -1018,7 +1017,7 @@ static inline void NP2RestoreWind(HWND hwnd) noexcept {
 	ShowOwnedPopups(hwnd, TRUE);
 }
 
-static inline void ExitApplication(HWND hwnd) noexcept {
+static inline void ExitApplication(HWND hwnd) {
 	if (FileSave(FileSaveFlag_Ask)) {
 		DestroyWindow(hwnd);
 	}
@@ -1142,7 +1141,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 			}
 
 			// Destroy find / replace dialog
-			if (IsWindow(hDlgFindReplace)) {
+			if (hDlgFindReplace != nullptr) {
 				DestroyWindow(hDlgFindReplace);
 			}
 
@@ -1349,7 +1348,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 	return TRUE;
 
 	case WM_CONTEXTMENU: {
-		const int nID = GetDlgCtrlID(AsPointer<HWND>(wParam));
+		const int nID = GetWinCtrlID(AsPointer<HWND>(wParam));
 
 		if (!(nID == IDC_EDIT || nID == IDC_STATUSBAR || nID == IDC_REBAR || nID == IDC_TOOLBAR)) {
 			return DefWindowProc(hwnd, umsg, wParam, lParam);
@@ -1538,17 +1537,6 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 			return TRUE;
 		}
 		break;
-
-	case APPM_CENTER_MESSAGE_BOX: {
-		HWND box = FindWindow(L"#32770", nullptr);
-		HWND parent = GetParent(box);
-		// MessageBox belongs to us.
-		if (parent == AsPointer<HWND>(wParam) || parent == hwnd) {
-			CenterDlgInParentEx(box, parent);
-			SnapToDefaultButton(box);
-		}
-	}
-	break;
 
 	case APPM_POST_HOTSPOTCLICK: {
 		// release mouse capture and restore selection
@@ -2597,7 +2585,6 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 #if _WIN32_WINNT < _WIN32_WINNT_WIN7
 	DisableCmd(hmenu, IDM_SET_RENDER_TECH_D3D, true);
 #endif
-	CheckCmd(hmenu, IDM_SET_USE_XP_FILE_DIALOG, bUseXPFileDialog);
 	i = IDM_SET_RENDER_TECH_GDI + iRenderingTechnology;
 	CheckMenuRadioItem(hmenu, IDM_SET_RENDER_TECH_GDI, IDM_SET_RENDER_TECH_D3D, i, MF_BYCOMMAND);
 	// RTL Layout
@@ -3739,7 +3726,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	case IDM_EDIT_FIND:
 	case IDM_EDIT_REPLACE: {
 		const bool bReplace = (LOWORD(wParam) == IDM_EDIT_REPLACE) || (LOWORD(wParam) == IDT_EDIT_REPLACE);
-		if (!IsWindow(hDlgFindReplace)) {
+		if (hDlgFindReplace == nullptr) {
 			hDlgFindReplace = EditFindReplaceDlg(hwndEdit, &efrData, bReplace);
 		} else {
 			if (bReplace != (GetDlgItem(hDlgFindReplace, IDC_REPLACETEXT) != nullptr)) {
@@ -4179,11 +4166,6 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	case IDM_VIEW_SINGLEFILEINSTANCE:
 		bSingleFileInstance = !bSingleFileInstance;
 		IniSetBoolEx(INI_SECTION_NAME_FLAGS, L"SingleFileInstance", bSingleFileInstance, true);
-		break;
-
-	case IDM_SET_USE_XP_FILE_DIALOG:
-		bUseXPFileDialog = !bUseXPFileDialog;
-		IniSetBoolEx(INI_SECTION_NAME_FLAGS, L"UseXPFileDialog", bUseXPFileDialog, false);
 		break;
 
 	case IDT_VIEW_ALWAYSONTOP:
@@ -6324,12 +6306,6 @@ void LoadFlags() noexcept {
 	dwAutoReloadTimeout = section.GetInt(L"AutoReloadTimeout", 1000);
 	dwUrlThreshold = section.GetInt(L"UrlThreshold", 256);
 
-	if (IsVistaAndAbove()) {
-		bUseXPFileDialog = section.GetBool(L"UseXPFileDialog", false);
-	} else {
-		bUseXPFileDialog = true;
-	}
-
 	flagNoFadeHidden = section.GetBool(L"NoFadeHidden", false);
 
 	int iValue = section.GetInt(L"OpacityLevel", 75);
@@ -6378,7 +6354,7 @@ void FindIniFile() noexcept {
 	WCHAR appData[MAX_PATH];
 	LPWSTR lpszIniFile = szIniFile;
 	bool portable = true;
-	if (WcsStartsWith(tchModule + 3, L"Program Files") || StrStr(tchModule, L"WinGet") != nullptr || StrStr(tchModule, L"hocolatey") != nullptr) {
+	if (WcsStartsWith(tchModule, L"C:\\Program Files") || StrStr(tchModule, L"WinGet") != nullptr || StrStr(tchModule, L"hocolatey") != nullptr) {
 		// %LOCALAPPDATA%\Microsoft\WinGet\Packages
 		// %ProgramData%\chocolatey\lib
 		LPWSTR pszPath = nullptr;
@@ -7072,7 +7048,7 @@ bool FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile) {
 // FileSave()
 //
 //
-bool FileSave(FileSaveFlag saveFlag) noexcept {
+bool FileSave(FileSaveFlag saveFlag) {
 	bool bIsEmptyNewFile = false;
 
 	if (StrIsEmpty(szCurFile)) {
@@ -7289,6 +7265,7 @@ void EditApplyDefaultEncoding(LPCEDITLEXER pLex, BOOL bLexerChanged) noexcept {
 // OpenFileDlg()
 //
 //
+NP2_noinline
 void SetupInitialOpenSaveDir(wchar_t (&tchInitialDir)[MAX_PATH], LPCWSTR lpstrInitialDir) noexcept {
 	SetStrEmpty(tchInitialDir);
 	if (StrNotEmpty(lpstrInitialDir)) {
@@ -7315,40 +7292,23 @@ void SetupInitialOpenSaveDir(wchar_t (&tchInitialDir)[MAX_PATH], LPCWSTR lpstrIn
 	}
 }
 
-BOOL OpenFileDlg(LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir) noexcept {
+bool OpenFileDlg(LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir) {
 	WCHAR tchInitialDir[MAX_PATH];
 	SetupInitialOpenSaveDir(tchInitialDir, lpstrInitialDir);
-	WCHAR szFile[MAX_PATH];
-	SetStrEmpty(szFile);
 	int lexers[1 + OPENDLG_MAX_LEXER_COUNT]{}; // 1-based filter index
-	LPWSTR szFilter = Style_GetOpenDlgFilterStr(true, szCurFile, lexers);
+	FileDialog dialog{nullptr, 0, 0, FileDialogType_FileOpen, FileDialog_OpenFile, L"", };
+	// empty pszDefaultExtension: auto add first extension from current filter
+	Style_GetFileDialogFilter(dialog, szCurFile, lexers);
 
-	OPENFILENAME ofn;
-	memset(&ofn, 0, sizeof(OPENFILENAME));
-	ofn.lStructSize = sizeof(OPENFILENAME);
-	ofn.hwndOwner = hwndMain;
-	ofn.lpstrFilter = szFilter;
-	ofn.lpstrFile = szFile;
-	ofn.lpstrInitialDir = tchInitialDir;
-	ofn.lpstrDefExt = L""; // auto add first extension from current filter
-	ofn.nMaxFile = COUNTOF(szFile);
-	ofn.Flags = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | /* OFN_NOCHANGEDIR |*/ OFN_NOTESTFILECREATE |
-				OFN_DONTADDTORECENT | OFN_PATHMUSTEXIST |
-				OFN_SHAREAWARE /*| OFN_NODEREFERENCELINKS*/;
-	if (bUseXPFileDialog) {
-		ofn.Flags |= OFN_EXPLORER | OFN_ENABLESIZING | OFN_ENABLEHOOK;
-		ofn.lpfnHook = OpenSaveFileDlgHookProc;
-	}
-
-	const BOOL success = GetOpenFileName(&ofn);
-	if (success) {
+	if (LPWSTR szFile = dialog.Show(hwndMain, tchInitialDir, nullptr)) {
 		lstrcpyn(lpstrFile, szFile, cchFile);
-		const int iLexer = lexers[ofn.nFilterIndex];
-		flagLexerSpecified = iLexer != 0;
+		CoTaskMemFree(szFile);
+		const int iLexer = lexers[dialog.filterIndex];
 		iInitialLexer = iLexer;
+		flagLexerSpecified = iLexer != 0;
+		return true;
 	}
-	NP2HeapFree(szFilter);
-	return success;
+	return false;
 }
 
 //=============================================================================
@@ -7356,46 +7316,25 @@ BOOL OpenFileDlg(LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir) noexcep
 // SaveFileDlg()
 //
 //
-BOOL SaveFileDlg(FileSaveFlag saveFlag, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir) noexcept {
+bool SaveFileDlg(FileSaveFlag saveFlag, LPWSTR lpstrFile, int cchFile, LPCWSTR lpstrInitialDir) {
 	WCHAR tchInitialDir[MAX_PATH];
 	SetupInitialOpenSaveDir(tchInitialDir, lpstrInitialDir);
-	WCHAR szNewFile[MAX_PATH];
-	lstrcpy(szNewFile, lpstrFile);
 	int lexers[1 + OPENDLG_MAX_LEXER_COUNT]{}; // 1-based filter index
-	LPWSTR szFilter = Style_GetOpenDlgFilterStr(false, szCurFile, lexers);
+	FileDialog dialog{nullptr, 0, 0, FileDialogType_FileSave, FileDialog_SaveFile, L"", };
+	// empty pszDefaultExtension: auto add first extension from current filter
+	Style_GetFileDialogFilter(dialog, szCurFile, lexers);
 
-	OPENFILENAME ofn;
-	memset(&ofn, 0, sizeof(OPENFILENAME));
-	ofn.lStructSize = sizeof(OPENFILENAME);
-	ofn.hwndOwner = hwndMain;
-	ofn.lpstrFilter = szFilter;
-	ofn.lpstrFile = szNewFile;
-	ofn.lpstrInitialDir = tchInitialDir;
-	ofn.lpstrDefExt = L""; // auto add first extension from current filter
-	ofn.nMaxFile = MAX_PATH;
-	ofn.Flags = OFN_HIDEREADONLY /*| OFN_NOCHANGEDIR*/ | OFN_NOTESTFILECREATE |
-				/*OFN_NODEREFERENCELINKS |*/ OFN_OVERWRITEPROMPT |
-				OFN_DONTADDTORECENT | OFN_PATHMUSTEXIST;
-	WCHAR szTitle[128];
-	if (saveFlag & FileSaveFlag_SaveCopy) {
-		GetString(IDT_FILE_SAVECOPY, szTitle, COUNTOF(szTitle));
-		ofn.lpstrTitle = szTitle;
-	}
-	if (bUseXPFileDialog) {
-		ofn.Flags |= OFN_EXPLORER | OFN_ENABLESIZING | OFN_ENABLEHOOK;
-		ofn.lpfnHook = OpenSaveFileDlgHookProc;
-	}
-
-	const BOOL success = GetSaveFileName(&ofn);
-	if (success) {
+	const UINT idsTitle = (saveFlag & FileSaveFlag_SaveCopy) ? IDT_FILE_SAVECOPY : 0;
+	if (LPWSTR szNewFile = dialog.Show(hwndMain, tchInitialDir, lpstrFile, idsTitle)) {
 		lstrcpyn(lpstrFile, szNewFile, cchFile);
-		const int iLexer = lexers[ofn.nFilterIndex];
+		CoTaskMemFree(szNewFile);
+		const int iLexer = lexers[dialog.filterIndex];
+		iInitialLexer = iLexer;
 		// default scheme, current scheme and selected file type all are Text File => no lexer specified.
 		flagLexerSpecified = iLexer != 0 && !((saveFlag & FileSaveFlag_Untitled) && iLexer == NP2LEX_TEXTFILE && iLexer == lexers[0] && iLexer == pLexCurrent->rid);
-		iInitialLexer = iLexer;
+		return true;
 	}
-	NP2HeapFree(szFilter);
-	return success;
+	return false;
 }
 
 /******************************************************************************
@@ -7739,7 +7678,7 @@ void GetRelaunchParameters(LPWSTR szParameters, LPCWSTR lpszFile, bool newWind, 
 // RelaunchElevated()
 //
 //
-bool RelaunchElevated() noexcept {
+bool RelaunchElevated() {
 	if (!IsVistaAndAbove() || fIsElevated || flagRelaunchElevated == RelaunchElevatedFlag_None || flagDisplayHelp) {
 		return false;
 	}

@@ -35,6 +35,7 @@
 #include "SciCall.h"
 #include "VectorISA.h"
 #include "Helpers.h"
+#include "DarkMode.h"
 #include "Notepad4.h"
 #include "Edit.h"
 #include "Styles.h"
@@ -2363,9 +2364,9 @@ static int ConvertNumRadix(char *tch, uint64_t num, int radix) noexcept {
 		return sprintf(tch, "%" PRIu64, num);
 
 	case 8: {
-		char buf[2 + 22 + 1] = "";
-		int index = 2 + 22;
-		int length = 0;
+		char buf[32]{};
+		unsigned index = COUNTOF(buf) - 2;
+		unsigned length = 0;
 		while (num) {
 			const int bit = static_cast<int>(num & 7);
 			num >>= 3;
@@ -2385,10 +2386,10 @@ static int ConvertNumRadix(char *tch, uint64_t num, int radix) noexcept {
 	break;
 
 	case 2: {
-		char buf[2 + 64 + 8 + 1] = "";
-		int index = 2 + 64 + 8;
-		int length = 0;
-		int bit_count = 0;
+		char buf[80]{};
+		unsigned index = COUNTOF(buf) - 2;
+		unsigned length = 0;
+		unsigned bit_count = 0;
 		while (num) {
 			const int bit = static_cast<int>(num & 1);
 			num >>= 1;
@@ -4800,6 +4801,15 @@ static bool CopySelectionAsFindText(HWND hwnd, EDITFINDREPLACE *lpefr, bool bFir
 //
 // EditFindReplaceDlgProc()
 //
+static void UpdateFindReplaceDlgItem(HWND hwnd, BOOL bEnable) noexcept {
+	EnableWindow(GetDlgItem(hwnd, IDOK), bEnable);
+	EnableWindow(GetDlgItem(hwnd, IDC_FINDPREV), bEnable);
+	EnableWindow(GetDlgItem(hwnd, IDC_FINDALL), bEnable);
+	EnableWindow(GetDlgItem(hwnd, IDC_REPLACE), bEnable);
+	EnableWindow(GetDlgItem(hwnd, IDC_REPLACEALL), bEnable);
+	EnableWindow(GetDlgItem(hwnd, IDC_REPLACEINSEL), bEnable);
+}
+
 static INT_PTR CALLBACK EditFindReplaceDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam) noexcept {
 	static const DWORD controlDefinition[] = {
 		DeferCtlMoveX(IDC_RESIZEGRIP2),
@@ -4891,25 +4901,16 @@ static INT_PTR CALLBACK EditFindReplaceDlgProc(HWND hwnd, UINT umsg, WPARAM wPar
 			CheckDlgButton(hwnd, IDC_NOWRAP, BST_CHECKED);
 		}
 
+		const int bSwitched = bSwitchedFindReplace;
+		bSwitchedFindReplace = 0;
 		int bCloseDlg;
 		if (hwndRepl) {
-			bCloseDlg = bSwitchedFindReplace ? FindReplaceOption_CloseFind : FindReplaceOption_CloseReplace;
+			bCloseDlg = bSwitched ? FindReplaceOption_CloseFind : FindReplaceOption_CloseReplace;
 		} else {
-			bCloseDlg = bSwitchedFindReplace ? FindReplaceOption_CloseReplace : FindReplaceOption_CloseFind;
+			bCloseDlg = bSwitched ? FindReplaceOption_CloseReplace : FindReplaceOption_CloseFind;
 		}
 		if (mask & bCloseDlg) {
 			CheckDlgButton(hwnd, IDC_FINDCLOSE, BST_CHECKED);
-		}
-
-		if (!bSwitchedFindReplace) {
-			if (positionRecord.xFindReplaceDlg == 0 || positionRecord.yFindReplaceDlg == 0) {
-				CenterDlgInParent(hwnd);
-			} else {
-				SetDlgPos(hwnd, positionRecord.xFindReplaceDlg, positionRecord.yFindReplaceDlg);
-			}
-		} else {
-			bSwitchedFindReplace = 0;
-			SetDlgPos(hwnd, xFindReplaceDlgSave, yFindReplaceDlgSave);
 		}
 
 		mask = iFindReplaceOption;
@@ -4925,6 +4926,17 @@ static INT_PTR CALLBACK EditFindReplaceDlgProc(HWND hwnd, UINT umsg, WPARAM wPar
 		if (mask & FindReplaceOption_UseMonospacedFont) {
 			CheckDlgButton(hwnd, IDC_USEMONOSPACEDFONT, BST_CHECKED);
 			FindReplaceSetFont(hwnd, TRUE, &hFontFindReplaceEdit);
+		}
+
+		DarkMode_InitDialog(hwnd, DialogRefData_DefaultPosition);
+		if (!bSwitched) {
+			if (positionRecord.xFindReplaceDlg == 0 || positionRecord.yFindReplaceDlg == 0) {
+				CenterDlgInParent(hwnd);
+			} else {
+				SetDlgPos(hwnd, positionRecord.xFindReplaceDlg, positionRecord.yFindReplaceDlg);
+			}
+		} else {
+			SetDlgPos(hwnd, xFindReplaceDlgSave, yFindReplaceDlgSave);
 		}
 	}
 	return TRUE;
@@ -4950,7 +4962,9 @@ static INT_PTR CALLBACK EditFindReplaceDlgProc(HWND hwnd, UINT umsg, WPARAM wPar
 			DeleteObject(hFontFindReplaceEdit);
 			hFontFindReplaceEdit = nullptr;
 		}
-		if (umsg == WM_DPICHANGED && IsButtonChecked(hwnd, IDC_USEMONOSPACEDFONT)) {
+		if (umsg == WM_DESTROY) {
+			hDlgFindReplace = nullptr;
+		} else if (IsButtonChecked(hwnd, IDC_USEMONOSPACEDFONT)) {
 			FindReplaceSetFont(hwnd, TRUE, &hFontFindReplaceEdit);
 		}
 		return FALSE;
@@ -4961,14 +4975,7 @@ static INT_PTR CALLBACK EditFindReplaceDlgProc(HWND hwnd, UINT umsg, WPARAM wPar
 		case IDC_REPLACETEXT: {
 			HWND hwndFind = GetDlgItem(hwnd, IDC_FINDTEXT);
 			const BOOL bEnable = ComboBox_HasText(hwndFind);
-
-			EnableWindow(GetDlgItem(hwnd, IDOK), bEnable);
-			EnableWindow(GetDlgItem(hwnd, IDC_FINDPREV), bEnable);
-			EnableWindow(GetDlgItem(hwnd, IDC_FINDALL), bEnable);
-			EnableWindow(GetDlgItem(hwnd, IDC_REPLACE), bEnable);
-			EnableWindow(GetDlgItem(hwnd, IDC_REPLACEALL), bEnable);
-			EnableWindow(GetDlgItem(hwnd, IDC_REPLACEINSEL), bEnable);
-
+			UpdateFindReplaceDlgItem(hwnd, bEnable);
 			if (HIWORD(wParam) == CBN_CLOSEUP) {
 				HWND hwndCtl = GetDlgItem(hwnd, LOWORD(wParam));
 				const DWORD lSelEnd = ComboBox_GetEditSelEnd(hwndCtl);
@@ -5032,12 +5039,7 @@ static INT_PTR CALLBACK EditFindReplaceDlgProc(HWND hwnd, UINT umsg, WPARAM wPar
 			const UINT cpEdit = SciCall_GetCodePage();
 
 			if (!GetDlgItemTextA2W(cpEdit, hwnd, IDC_FINDTEXT, lpefr->szFind, COUNTOF(lpefr->szFind))) {
-				EnableWindow(GetDlgItem(hwnd, IDOK), FALSE);
-				EnableWindow(GetDlgItem(hwnd, IDC_FINDPREV), FALSE);
-				EnableWindow(GetDlgItem(hwnd, IDC_FINDALL), FALSE);
-				EnableWindow(GetDlgItem(hwnd, IDC_REPLACE), FALSE);
-				EnableWindow(GetDlgItem(hwnd, IDC_REPLACEALL), FALSE);
-				EnableWindow(GetDlgItem(hwnd, IDC_REPLACEINSEL), FALSE);
+				UpdateFindReplaceDlgItem(hwnd, FALSE);
 				return TRUE;
 			}
 
@@ -5117,7 +5119,6 @@ static INT_PTR CALLBACK EditFindReplaceDlgProc(HWND hwnd, UINT umsg, WPARAM wPar
 
 			if (bCloseDlg) {
 				DestroyWindow(hwnd);
-				hDlgFindReplace = nullptr;
 			}
 
 			switch (LOWORD(wParam)) {
@@ -6078,7 +6079,7 @@ static INT_PTR CALLBACK EditLineNumDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, 
 		wsprintf(tchLines, tchFmt, tchLn);
 		SetDlgItemText(hwnd, IDC_COLUMN_RANGE, tchLines);
 
-		CenterDlgInParent(hwnd);
+		DarkMode_InitDialog(hwnd);
 	}
 	return TRUE;
 
@@ -6188,23 +6189,12 @@ static INT_PTR CALLBACK EditModifyLinesDlgProc(HWND hwnd, UINT umsg, WPARAM wPar
 		MAKELONG(IDC_MODIFY_LINE_PREFIX, IDC_MODIFY_LINE_APPEND),
 	};
 
-	static DWORD id_hover;
-	static DWORD id_capture;
+	static int idEditBox;
 	static bool skipEmptyLine;
-	static HFONT hFontHover;
 
 	switch (umsg) {
 	case WM_INITDIALOG: {
 		ResizeDlg_InitY2(hwnd, &positionRecord.cxModifyLinesDlg, &positionRecord.cyModifyLinesDlg, controlDefinition, COUNTOF(controlDefinition) - 1, 50);
-
-		id_hover = 0;
-		id_capture = 0;
-
-		HFONT hFontNormal = GetWindowFont(hwnd);
-		LOGFONT lf;
-		GetObject(hFontNormal, sizeof(LOGFONT), &lf);
-		lf.lfUnderline = TRUE;
-		hFontHover = CreateFontIndirect(&lf);
 
 		MultilineEditSetup(hwnd, IDC_MODIFY_LINE_PREFIX);
 		SetDlgItemText(hwnd, IDC_MODIFY_LINE_PREFIX, wchPrefixLines);
@@ -6213,118 +6203,34 @@ static INT_PTR CALLBACK EditModifyLinesDlgProc(HWND hwnd, UINT umsg, WPARAM wPar
 		if (skipEmptyLine) {
 			CheckDlgButton(hwnd, IDC_MODIFY_LINE_SKIP_EMPTY, BST_CHECKED);
 		}
-		CenterDlgInParent(hwnd);
+		DarkMode_InitDialog(hwnd);
 	}
 	return TRUE;
 
-	case WM_DESTROY:
-		DeleteObject(hFontHover);
-		return FALSE;
-
-	case WM_NCACTIVATE:
-		if (!wParam) {
-			if (id_hover != 0) {
-				//int _id_hover = id_hover;
-				id_hover = 0;
-				id_capture = 0;
-				//InvalidateRect(GetDlgItem(hwnd, id_hover), nullptr, FALSE);
-			}
-		}
-		return FALSE;
-
-	case WM_CTLCOLORSTATIC: {
-		const DWORD dwId = GetWindowLong(AsPointer<HWND>(lParam), GWL_ID);
-
-		if (dwId >= IDC_MODIFY_LINE_DLN_NP && dwId <= IDC_MODIFY_LINE_ZCN_ZP) {
-			HDC hdc = AsPointer<HDC>(wParam);
-			SetBkMode(hdc, TRANSPARENT);
-			if (GetSysColorBrush(COLOR_HOTLIGHT)) {
-				SetTextColor(hdc, GetSysColor(COLOR_HOTLIGHT));
-			} else {
-				SetTextColor(hdc, RGB(0, 0, 255));
-			}
-			SelectFont(hdc, /*dwId == id_hover?*/hFontHover/*:hFontNormal*/);
-			return AsInteger<LONG_PTR>(GetSysColorBrush(COLOR_BTNFACE));
+	case WM_NOTIFY: {
+		LPNMHDR pnmhdr = AsPointer<LPNMHDR>(lParam);
+		if (pnmhdr->code == NM_CLICK && pnmhdr->idFrom >= IDC_MODIFY_LINE_DLN_NP && pnmhdr->idFrom <= IDC_MODIFY_LINE_ZCN_ZP && idEditBox != 0) {
+			WCHAR wch[16]{};
+			HWND hwndCtl = GetDlgItem(hwnd, idEditBox);
+			GetDlgItemText(hwnd, static_cast<int>(pnmhdr->idFrom), wch, COUNTOF(wch));
+			const unsigned end = (wch[7] == L'<') ? 7 : 8;
+			wch[end] = L'\0';
+			SendMessage(hwndCtl, EM_SETSEL, 0, -1);
+			SendMessage(hwndCtl, EM_REPLACESEL, TRUE, AsInteger<LPARAM>(&wch[3]));
+			PostMessage(hwnd, WM_NEXTDLGCTL, AsInteger<WPARAM>(hwndCtl), TRUE);
 		}
 	}
-	break;
-
-	case WM_MOUSEMOVE: {
-		const POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
-		HWND hwndHover = ChildWindowFromPoint(hwnd, pt);
-		const DWORD dwId = GetWindowLong(hwndHover, GWL_ID);
-
-		if (GetActiveWindow() == hwnd) {
-			if (dwId >= IDC_MODIFY_LINE_DLN_NP && dwId <= IDC_MODIFY_LINE_ZCN_ZP) {
-				if (id_capture == dwId || id_capture == 0) {
-					if (id_hover != id_capture || id_hover == 0) {
-						id_hover = dwId;
-						//InvalidateRect(GetDlgItem(hwnd, dwId), nullptr, FALSE);
-					}
-				} else if (id_hover != 0) {
-					//int _id_hover = id_hover;
-					id_hover = 0;
-					//InvalidateRect(GetDlgItem(hwnd, _id_hover), nullptr, FALSE);
-				}
-			} else if (id_hover != 0) {
-				//int _id_hover = id_hover;
-				id_hover = 0;
-				//InvalidateRect(GetDlgItem(hwnd, _id_hover), nullptr, FALSE);
-			}
-			SetCursor(LoadCursor(nullptr, (id_hover ? IDC_HAND : IDC_ARROW)));
-		}
-	}
-	break;
-
-	case WM_LBUTTONDOWN: {
-		const POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
-		HWND hwndHover = ChildWindowFromPoint(hwnd, pt);
-		const DWORD dwId = GetWindowLong(hwndHover, GWL_ID);
-
-		if (dwId >= IDC_MODIFY_LINE_DLN_NP && dwId <= IDC_MODIFY_LINE_ZCN_ZP) {
-			GetCapture();
-			id_hover = dwId;
-			id_capture = dwId;
-			//InvalidateRect(GetDlgItem(hwnd, dwId), nullptr, FALSE);
-		}
-		SetCursor(LoadCursor(nullptr, (id_hover ? IDC_HAND : IDC_ARROW)));
-	}
-	break;
-
-	case WM_LBUTTONUP: {
-		//const POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
-		//HWND hwndHover = ChildWindowFromPoint(hwnd, pt);
-		//const DWORD dwId = GetWindowLong(hwndHover, GWL_ID);
-
-		if (id_capture != 0) {
-			ReleaseCapture();
-			if (id_hover == id_capture) {
-				const DWORD id_focus = GetWindowLong(GetFocus(), GWL_ID);
-				if (id_focus == IDC_MODIFY_LINE_PREFIX || id_focus == IDC_MODIFY_LINE_APPEND) {
-					WCHAR wch[8];
-					GetDlgItemText(hwnd, id_capture, wch, COUNTOF(wch));
-					SendDlgItemMessage(hwnd, id_focus, EM_SETSEL, 0, -1);
-					SendDlgItemMessage(hwnd, id_focus, EM_REPLACESEL, TRUE, AsInteger<LPARAM>(wch));
-					PostMessage(hwnd, WM_NEXTDLGCTL, AsInteger<WPARAM>(GetFocus()), TRUE);
-				}
-			}
-			id_capture = 0;
-		}
-		SetCursor(LoadCursor(nullptr, (id_hover ? IDC_HAND : IDC_ARROW)));
-	}
-	break;
-
-	case WM_CANCELMODE:
-		if (id_capture != 0) {
-			ReleaseCapture();
-			id_hover = 0;
-			id_capture = 0;
-			SetCursor(LoadCursor(nullptr, IDC_ARROW));
-		}
-		break;
+	return TRUE;
 
 	case WM_COMMAND:
 		switch (LOWORD(wParam)) {
+		case IDC_MODIFY_LINE_PREFIX:
+		case IDC_MODIFY_LINE_APPEND:
+			if (HIWORD(wParam) == EN_SETFOCUS) {
+				idEditBox = LOWORD(wParam);
+			}
+			break;
+
 		case IDOK: {
 			NP2HeapFree(wchPrefixLines);
 			NP2HeapFree(wchAppendLines);
@@ -6365,7 +6271,7 @@ static INT_PTR CALLBACK EditAlignDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LP
 		SetWindowLongPtr(hwnd, DWLP_USER, lParam);
 		const int iAlignMode = *(AsPointer<int *>(lParam));
 		CheckRadioButton(hwnd, IDC_ALIGN_LEFT, IDC_ALIGN_JUSTIFY_PAR, iAlignMode + IDC_ALIGN_LEFT);
-		CenterDlgInParent(hwnd);
+		DarkMode_InitDialog(hwnd);
 	}
 	return TRUE;
 
@@ -6423,7 +6329,7 @@ static INT_PTR CALLBACK EditEncloseSelectionDlgProc(HWND hwnd, UINT umsg, WPARAM
 		SetDlgItemText(hwnd, IDC_MODIFY_LINE_PREFIX, wchPrefixSelection);
 		MultilineEditSetup(hwnd, IDC_MODIFY_LINE_APPEND);
 		SetDlgItemText(hwnd, IDC_MODIFY_LINE_APPEND, wchAppendSelection);
-		CenterDlgInParent(hwnd);
+		DarkMode_InitDialog(hwnd);
 	}
 	return TRUE;
 
@@ -6486,7 +6392,7 @@ static INT_PTR CALLBACK EditInsertTagDlgProc(HWND hwnd, UINT umsg, WPARAM wParam
 		SetWindowText(hwndCtl, L"<tag>");
 		SetFocus(hwndCtl);
 		PostMessage(hwndCtl, EM_SETSEL, 1, 4);
-		CenterDlgInParent(hwnd);
+		DarkMode_InitDialog(hwnd);
 	}
 	return FALSE;
 
@@ -6757,6 +6663,15 @@ void EditShowUnicodeControlCharacter(bool bShow) noexcept {
 // EditSortDlgProc()
 //
 //
+static void UpdateSortDlgItem(HWND hwnd, BOOL bEnable) noexcept {
+	EnableWindow(GetDlgItem(hwnd, IDC_SORT_MERGE_DUP), bEnable && !IsButtonChecked(hwnd, IDC_SORT_REMOVE_UNIQUE));
+	EnableWindow(GetDlgItem(hwnd, IDC_SORT_REMOVE_DUP), bEnable);
+	EnableWindow(GetDlgItem(hwnd, IDC_SORT_REMOVE_UNIQUE), bEnable);
+	EnableWindow(GetDlgItem(hwnd, IDC_SORT_IGNORE_CASE), bEnable);
+	EnableWindow(GetDlgItem(hwnd, IDC_SORT_LOGICAL_NUMBER), bEnable);
+	EnableWindow(GetDlgItem(hwnd, IDC_SORT_GROUPBY_FILE_TYPE), bEnable);
+}
+
 static INT_PTR CALLBACK EditSortDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam) noexcept {
 	switch (umsg) {
 	case WM_INITDIALOG: {
@@ -6766,12 +6681,7 @@ static INT_PTR CALLBACK EditSortDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPA
 
 		if (iSortFlags & EditSortFlag_Shuffle) {
 			CheckRadioButton(hwnd, IDC_SORT_NONE, IDC_SORT_SHUFFLE, IDC_SORT_SHUFFLE);
-			EnableWindow(GetDlgItem(hwnd, IDC_SORT_MERGE_DUP), FALSE);
-			EnableWindow(GetDlgItem(hwnd, IDC_SORT_REMOVE_DUP), FALSE);
-			EnableWindow(GetDlgItem(hwnd, IDC_SORT_REMOVE_UNIQUE), FALSE);
-			EnableWindow(GetDlgItem(hwnd, IDC_SORT_IGNORE_CASE), FALSE);
-			EnableWindow(GetDlgItem(hwnd, IDC_SORT_LOGICAL_NUMBER), FALSE);
-			EnableWindow(GetDlgItem(hwnd, IDC_SORT_GROUPBY_FILE_TYPE), FALSE);
+			UpdateSortDlgItem(hwnd, FALSE);
 		} else {
 			const int button = (iSortFlags & EditSortFlag_DontSort) ? IDC_SORT_NONE : (IDC_SORT_ASC + (iSortFlags & EditSortFlag_Descending));
 			CheckRadioButton(hwnd, IDC_SORT_NONE, IDC_SORT_SHUFFLE, button);
@@ -6808,7 +6718,7 @@ static INT_PTR CALLBACK EditSortDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPA
 			*piSortFlags |= EditSortFlag_ColumnSort;
 			CheckDlgButton(hwnd, IDC_SORT_COLUMN, BST_CHECKED);
 		}
-		CenterDlgInParent(hwnd);
+		DarkMode_InitDialog(hwnd);
 	}
 	return TRUE;
 
@@ -6859,21 +6769,8 @@ static INT_PTR CALLBACK EditSortDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPA
 		case IDC_SORT_NONE:
 		case IDC_SORT_ASC:
 		case IDC_SORT_DESC:
-			EnableWindow(GetDlgItem(hwnd, IDC_SORT_MERGE_DUP), !IsButtonChecked(hwnd, IDC_SORT_REMOVE_UNIQUE));
-			EnableWindow(GetDlgItem(hwnd, IDC_SORT_REMOVE_DUP), TRUE);
-			EnableWindow(GetDlgItem(hwnd, IDC_SORT_REMOVE_UNIQUE), TRUE);
-			EnableWindow(GetDlgItem(hwnd, IDC_SORT_IGNORE_CASE), TRUE);
-			EnableWindow(GetDlgItem(hwnd, IDC_SORT_LOGICAL_NUMBER), TRUE);
-			EnableWindow(GetDlgItem(hwnd, IDC_SORT_GROUPBY_FILE_TYPE), TRUE);
-			break;
-
 		case IDC_SORT_SHUFFLE:
-			EnableWindow(GetDlgItem(hwnd, IDC_SORT_MERGE_DUP), FALSE);
-			EnableWindow(GetDlgItem(hwnd, IDC_SORT_REMOVE_DUP), FALSE);
-			EnableWindow(GetDlgItem(hwnd, IDC_SORT_REMOVE_UNIQUE), FALSE);
-			EnableWindow(GetDlgItem(hwnd, IDC_SORT_IGNORE_CASE), FALSE);
-			EnableWindow(GetDlgItem(hwnd, IDC_SORT_LOGICAL_NUMBER), FALSE);
-			EnableWindow(GetDlgItem(hwnd, IDC_SORT_GROUPBY_FILE_TYPE), FALSE);
+			UpdateSortDlgItem(hwnd, LOWORD(wParam) != IDC_SORT_SHUFFLE);
 			break;
 
 		case IDC_SORT_REMOVE_DUP:

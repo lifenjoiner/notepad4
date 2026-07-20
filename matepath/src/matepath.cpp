@@ -30,6 +30,7 @@
 #include <cstdio>
 #include "config.h"
 #include "Helpers.h"
+#include "DarkMode.h"
 #include "../../scintilla/include/VectorISA.h"
 #include "Dlapi.h"
 #include "Dialogs.h"
@@ -101,7 +102,6 @@ EscFunction iEscFunction;
 bool	bFocusEdit;
 bool	bAlwaysOnTop;
 static bool bTransparentMode;
-bool bUseXPFileDialog;
 bool	bWindowLayoutRTL;
 bool	bMinimizeToTray;
 bool	fUseRecycleBin;
@@ -222,6 +222,7 @@ static inline bool HasFilter() noexcept {
 //
 //
 static void CleanUpResources(bool initialized) noexcept {
+	DarkMode_Cleanup();
 	if (tchToolbarBitmap != nullptr) {
 		LocalFree(tchToolbarBitmap);
 	}
@@ -356,6 +357,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 
 	// Load Settings
 	LoadSettings();
+	DarkMode_Init();
 
 	if (!InitApplication(hInstance)) {
 		CleanUpResources(false);
@@ -568,13 +570,14 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 		SendMessage(hwndToolbar, WM_SYSCOLORCHANGE, wParam, lParam);
 		const LRESULT lret = DefWindowProc(hwnd, umsg, wParam, lParam);
 
+		COLORREF color = GetSysColor(COLOR_WINDOWTEXT);
 		if (HasFilter()) {
-			ListView_SetTextColor(hwndDirList, (bDefColorFilter) ? GetSysColor(COLOR_WINDOWTEXT) : colorFilter);
-			ListView_RedrawItems(hwndDirList, 0, ListView_GetItemCount(hwndDirList) - 1);
+			color = bDefColorFilter ? color : colorFilter;
 		} else {
-			ListView_SetTextColor(hwndDirList, (bDefColorNoFilter) ? GetSysColor(COLOR_WINDOWTEXT) : colorNoFilter);
-			ListView_RedrawItems(hwndDirList, 0, ListView_GetItemCount(hwndDirList) - 1);
+			color = bDefColorNoFilter ? color : colorNoFilter;
 		}
+		ListView_SetTextColor(hwndDirList, color);
+		ListView_RedrawItems(hwndDirList, 0, ListView_GetItemCount(hwndDirList) - 1);
 		return lret;
 	}
 
@@ -663,7 +666,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 	return TRUE;
 
 	case WM_CONTEXTMENU: {
-		const int nID = GetDlgCtrlID(AsPointer<HWND>(wParam));
+		const int nID = GetWinCtrlID(AsPointer<HWND>(wParam));
 
 		if (!(nID == IDC_DIRLIST || nID == IDC_DRIVEBOX || nID == IDC_TOOLBAR || nID == IDC_STATUSBAR || nID == IDC_REBAR)) {
 			return DefWindowProc(hwnd, umsg, wParam, lParam);
@@ -775,17 +778,6 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 		}
 		break;
 
-	case APPM_CENTER_MESSAGE_BOX: {
-		HWND box = FindWindow(L"#32770", nullptr);
-		HWND parent = GetParent(box);
-		// MessageBox belongs to us.
-		if (parent == AsPointer<HWND>(wParam) || parent == hwnd) {
-			CenterDlgInParentEx(box, parent);
-			SnapToDefaultButton(box);
-		}
-	}
-	break;
-
 	default:
 		if (umsg == msgTaskbarCreated) {
 			if (!IsWindowVisible(hwnd)) {
@@ -820,7 +812,14 @@ LRESULT MsgCreate(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 					  hInstance,
 					  nullptr);
 
-	InitWindowCommon(hwndDirList);
+	DWORD exStyle = 0;
+	if (bTrackSelect) {
+		exStyle = LVS_EX_TRACKSELECT | LVS_EX_ONECLICKACTIVATE;
+	}
+	if (bFullRowSelect) {
+		exStyle |= LVS_EX_FULLROWSELECT;
+	}
+	DarkMode_InitFileListView(hwndDirList, exStyle);
 
 	const DWORD dwDriveBoxStyle = bShowDriveBox ? (WS_DRIVEBOX | WS_VISIBLE) : WS_DRIVEBOX;
 	hwndDriveBox = CreateWindowEx(
@@ -842,26 +841,7 @@ LRESULT MsgCreate(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 	DriveBox_Init(hwndDriveBox);
 	ComboBox_SetExtendedUI(hwndDriveBox, TRUE);
 	// DirList
-	const LVCOLUMN lvc = { LVCF_FMT | LVCF_TEXT, LVCFMT_LEFT, 0, nullptr, -1, 0, 0, 0
-#if _WIN32_WINNT >= _WIN32_WINNT_VISTA
-			, 0, 0, 0
-#endif
-	};
-	ListView_SetExtendedListViewStyle(hwndDirList, LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP);
-	ListView_InsertColumn(hwndDirList, 0, &lvc);
 	DirList_Init(hwndDirList);
-	if (bTrackSelect) {
-		ListView_SetExtendedListViewStyleEx(hwndDirList,
-											LVS_EX_TRACKSELECT | LVS_EX_ONECLICKACTIVATE,
-											LVS_EX_TRACKSELECT | LVS_EX_ONECLICKACTIVATE);
-	}
-	if (bFullRowSelect) {
-		ListView_SetExtendedListViewStyleEx(hwndDirList,
-											LVS_EX_FULLROWSELECT,
-											LVS_EX_FULLROWSELECT);
-		SetExplorerTheme(hwndDirList);
-	}
-
 	ListView_SetHoverTime(hwndDirList, 50);
 	// Drag & Drop
 	DragAcceptFiles(hwnd, TRUE);
@@ -1076,11 +1056,7 @@ void MsgThemeChanged(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 	DWORD dwExStyle = GetWindowExStyle(hwndDirList);
 	if (IsAppThemed()) {
 		dwExStyle &= ~WS_EX_CLIENTEDGE;
-		if (bFullRowSelect) {
-			SetExplorerTheme(hwndDirList);
-		} else {
-			SetListViewTheme(hwndDirList);
-		}
+		SetWindowTheme(hwndDirList, (bFullRowSelect ? L"Explorer" : L"Listview"), nullptr);
 	} else {
 		dwExStyle |= WS_EX_CLIENTEDGE;
 	}
@@ -1367,32 +1343,9 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		break;
 
 	case IDM_FILE_NEW: {
-		WCHAR szNewFile[MAX_PATH];
-		WCHAR szFilter[128];
-		WCHAR szTitle[32];
-
-		StrCpyEx(szNewFile, L"");
-		GetString(IDS_FILTER_ALL, szFilter, COUNTOF(szFilter));
-		PrepareFilterStr(szFilter);
-		GetString(IDS_NEWFILE, szTitle, COUNTOF(szTitle));
-
-		OPENFILENAME ofn;
-		memset(&ofn, 0, sizeof(OPENFILENAME));
-		ofn.lStructSize = sizeof(OPENFILENAME);
-		ofn.hwndOwner = hwnd;
-		ofn.lpstrFilter = szFilter;
-		ofn.lpstrFile = szNewFile;
-		ofn.nMaxFile = MAX_PATH;
-		ofn.lpstrTitle = szTitle;
-		ofn.lpstrInitialDir = szCurDir;
-		ofn.Flags = OFN_HIDEREADONLY | OFN_NOCHANGEDIR | OFN_DONTADDTORECENT | OFN_NOTESTFILECREATE |
-					OFN_NODEREFERENCELINKS | OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
-		if (bUseXPFileDialog) {
-			ofn.Flags |= OFN_EXPLORER | OFN_ENABLESIZING | OFN_ENABLEHOOK;
-			ofn.lpfnHook = OpenSaveFileDlgHookProc;
-		}
-
-		if (!GetSaveFileName(&ofn)) {
+		FileDialog dialog {nullptr, IDS_FILTER_ALL, 0, FileDialogType_SaveParseFilter, FileDialog_SaveFile | FOS_NODEREFERENCELINKS, nullptr};
+		LPWSTR szNewFile = dialog.Show(hwnd, szCurDir, nullptr, IDS_NEWFILE);
+		if (szNewFile == nullptr) {
 			break;
 		}
 
@@ -1423,6 +1376,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		} else {
 			MsgBoxWarn(MB_OK, IDS_ERR_NEW);
 		}
+		CoTaskMemFree(szNewFile);
 	}
 	break;
 
@@ -1466,28 +1420,9 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 			break;
 		}
 
-		WCHAR szNewFile[MAX_PATH];
-		lstrcpy(szNewFile, dli.szFileName);
-
-		WCHAR szFilter[128];
-		GetString(IDS_FILTER_ALL, szFilter, COUNTOF(szFilter));
-		PrepareFilterStr(szFilter);
-
-		OPENFILENAME ofn;
-		memset(&ofn, 0, sizeof(OPENFILENAME));
-		ofn.lStructSize = sizeof(OPENFILENAME);
-		ofn.hwndOwner = hwnd;
-		ofn.lpstrFilter = szFilter;
-		ofn.lpstrFile = szNewFile;
-		ofn.nMaxFile = MAX_PATH;
-		ofn.Flags = OFN_HIDEREADONLY | OFN_NOCHANGEDIR | OFN_DONTADDTORECENT | OFN_NOTESTFILECREATE |
-					OFN_NODEREFERENCELINKS | OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
-		if (bUseXPFileDialog) {
-			ofn.Flags |= OFN_EXPLORER | OFN_ENABLESIZING | OFN_ENABLEHOOK;
-			ofn.lpfnHook = OpenSaveFileDlgHookProc;
-		}
-
-		if (!GetSaveFileName(&ofn)) {
+		FileDialog dialog {nullptr, IDS_FILTER_ALL, 0, FileDialogType_SaveParseFilter, FileDialog_SaveFile | FOS_NODEREFERENCELINKS, nullptr};
+		LPWSTR szNewFile = dialog.Show(hwnd, nullptr, dli.szFileName);
+		if (szNewFile == nullptr) {
 			break;
 		}
 
@@ -1516,6 +1451,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 				}
 			}
 		}
+		CoTaskMemFree(szNewFile);
 		StatusSetSimple(hwndStatus, FALSE);
 
 		EndWaitCursor();
@@ -1767,7 +1703,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		bShowDriveBox = !bShowDriveBox;
 		ShowWindow(hwndDriveBox, bShowDriveBox ? SW_SHOW : SW_HIDE);
 		if (!bShowDriveBox) {
-			if (GetDlgCtrlID(GetFocus()) == IDC_DRIVEBOX) {
+			if (GetWinCtrlID(GetFocus()) == IDC_DRIVEBOX) {
 				SetFocus(hwndDirList);
 			}
 		}
@@ -1842,7 +1778,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
 	case ACC_NEXTCTL:
 	case ACC_PREVCTL: {
-		int nId = GetDlgCtrlID(GetFocus());
+		int nId = GetWinCtrlID(GetFocus());
 
 		if (LOWORD(wParam) == ACC_NEXTCTL) {
 			if (++nId > IDC_DIRLIST) {
@@ -2321,13 +2257,15 @@ bool ChangeDirectory(HWND hwnd, LPCWSTR lpszNewDir, bool bUpdateHistory) {
 		GetCurrentDirectory(COUNTOF(szCurDir), szCurDir);
 		SetWindowPathTitle(hwnd, szCurDir);
 
-		if (HasFilter()) {
-			ListView_SetTextColor(hwndDirList, (bDefColorFilter) ? GetSysColor(COLOR_WINDOWTEXT) : colorFilter);
-			Toolbar_SetButtonImage(hwndToolbar, IDT_VIEW_FILTER, TB_DEL_FILTER_BMP);
+		COLORREF color = GetSysColor(COLOR_WINDOWTEXT);
+		const bool has = HasFilter();
+		if (has) {
+			color = bDefColorFilter ? color : colorFilter;
 		} else {
-			ListView_SetTextColor(hwndDirList, (bDefColorNoFilter) ? GetSysColor(COLOR_WINDOWTEXT) : colorNoFilter);
-			Toolbar_SetButtonImage(hwndToolbar, IDT_VIEW_FILTER, TB_ADD_FILTER_BMP);
+			color = bDefColorNoFilter ? color : colorNoFilter;
 		}
+		Toolbar_SetButtonImage(hwndToolbar, IDT_VIEW_FILTER, (has ? TB_DEL_FILTER_BMP : TB_ADD_FILTER_BMP));
+		ListView_SetTextColor(hwndDirList, color);
 
 		const int cItems = DirList_Fill(hwndDirList, szCurDir, dwFillMask, tchFilter, bNegFilter, flagNoFadeHidden, nSortFlags, fSortRev);
 		DirList_StartIconThread(hwndDirList);
@@ -2572,12 +2510,6 @@ void LoadSettings() noexcept {
 	iValue = section.GetInt(L"EscFunction", EscFunction_None);
 	iEscFunction = clamp(static_cast<EscFunction>(iValue), EscFunction_None, EscFunction_Exit);
 
-	if (IsVistaAndAbove()) {
-		bUseXPFileDialog = section.GetBool(L"UseXPFileDialog", false);
-	} else {
-		bUseXPFileDialog = true;
-	}
-
 	dwFillMask = section.GetInt(L"FillMask", DL_ALLOBJECTS);
 	if (dwFillMask & ~DL_ALLOBJECTS) {
 		dwFillMask = DL_ALLOBJECTS;
@@ -2748,10 +2680,6 @@ void SaveSettings(bool bSaveSettingsNow) noexcept {
 	section.SetBoolEx(L"TransparentMode", bTransparentMode, false);
 	section.SetBoolEx(L"WindowLayoutRTL", bWindowLayoutRTL, false);
 	section.SetIntEx(L"EscFunction", static_cast<int>(iEscFunction), EscFunction_None);
-
-	if (IsVistaAndAbove()) {
-		section.SetBoolEx(L"UseXPFileDialog", bUseXPFileDialog, false);
-	}
 
 	section.SetIntEx(L"FillMask", dwFillMask, DL_ALLOBJECTS);
 	section.SetIntEx(L"SortOptions", nSortFlags, DS_NAME);
@@ -3036,7 +2964,7 @@ void FindIniFile() noexcept {
 	WCHAR appData[MAX_PATH];
 	LPWSTR lpszIniFile = szIniFile;
 	bool portable = true;
-	if (WcsStartsWith(tchModule + 3, L"Program Files") || StrStr(tchModule, L"WinGet") != nullptr || StrStr(tchModule, L"hocolatey") != nullptr) {
+	if (WcsStartsWith(tchModule, L"C:\\Program Files") || StrStr(tchModule, L"WinGet") != nullptr || StrStr(tchModule, L"hocolatey") != nullptr) {
 		// %LOCALAPPDATA%\Microsoft\WinGet\Packages
 		// %ProgramData%\chocolatey\lib
 		LPWSTR pszPath = nullptr;

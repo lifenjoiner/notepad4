@@ -31,6 +31,7 @@
 #include "SciCall.h"
 #include "config.h"
 #include "Helpers.h"
+#include "DarkMode.h"
 #include "VectorISA.h"
 #include "GraphicUtils.h"
 #include "Notepad4.h"
@@ -371,7 +372,6 @@ extern LineHighlightMode iHighlightCurrentLine;
 extern bool	bShowBookmarkMargin;
 extern bool bShowCodeFolding;
 extern int	iZoomLevel;
-extern bool bUseXPFileDialog;
 extern bool flagSimpleIndentGuides;
 
 // LF_FACESIZE is 32, LOCALE_NAME_MAX_LENGTH is 85
@@ -969,29 +969,9 @@ void Style_Save() noexcept {
 //
 // Style_Import()
 //
-bool Style_Import(HWND hwnd) noexcept {
-	WCHAR szFile[MAX_PATH * 2] = L"";
-	WCHAR szFilter[256];
-
-	GetString(IDS_FILTER_INI, szFilter, COUNTOF(szFilter));
-	PrepareFilterStr(szFilter);
-
-	OPENFILENAME ofn;
-	memset(&ofn, 0, sizeof(OPENFILENAME));
-	ofn.lStructSize	= sizeof(OPENFILENAME);
-	ofn.hwndOwner	= hwnd;
-	ofn.lpstrFilter	= szFilter;
-	ofn.lpstrFile	= szFile;
-	ofn.lpstrDefExt	= L"ini";
-	ofn.nMaxFile	= COUNTOF(szFile);
-	ofn.Flags		= OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_NOCHANGEDIR | OFN_DONTADDTORECENT | OFN_NOTESTFILECREATE
-					  | OFN_PATHMUSTEXIST | OFN_SHAREAWARE /*| OFN_NODEREFERENCELINKS*/;
-	if (bUseXPFileDialog) {
-		ofn.Flags |= OFN_EXPLORER | OFN_ENABLESIZING | OFN_ENABLEHOOK;
-		ofn.lpfnHook = OpenSaveFileDlgHookProc;
-	}
-
-	if (GetOpenFileName(&ofn)) {
+bool Style_Import(HWND hwnd) {
+	FileDialog dialog {nullptr, IDS_FILTER_INI, 0, FileDialogType_OpenParseFilter, FileDialog_OpenFile, L"ini"};
+	if (LPWSTR szFile = dialog.Show(hwnd, nullptr, nullptr)) {
 		IniSectionParser section;
 		constexpr DWORD cchIniSection = MAX_INI_SECTION_SIZE_STYLES;
 		WCHAR * const pIniSectionBuf = section.Init(128, cchIniSection);
@@ -1032,6 +1012,7 @@ bool Style_Import(HWND hwnd) noexcept {
 		}
 
 		section.Free();
+		CoTaskMemFree(szFile);
 		return true;
 	}
 	return false;
@@ -1041,29 +1022,9 @@ bool Style_Import(HWND hwnd) noexcept {
 //
 // Style_Export()
 //
-bool Style_Export(HWND hwnd) noexcept {
-	WCHAR szFile[MAX_PATH * 2] = L"";
-	WCHAR szFilter[256];
-
-	GetString(IDS_FILTER_INI, szFilter, COUNTOF(szFilter));
-	PrepareFilterStr(szFilter);
-
-	OPENFILENAME ofn;
-	memset(&ofn, 0, sizeof(OPENFILENAME));
-	ofn.lStructSize = sizeof(OPENFILENAME);
-	ofn.hwndOwner	= hwnd;
-	ofn.lpstrFilter = szFilter;
-	ofn.lpstrFile	= szFile;
-	ofn.lpstrDefExt = L"ini";
-	ofn.nMaxFile	= COUNTOF(szFile);
-	ofn.Flags		= /*OFN_FILEMUSTEXIST |*/ OFN_HIDEREADONLY | OFN_NOCHANGEDIR | OFN_DONTADDTORECENT | OFN_NOTESTFILECREATE
-					  | OFN_PATHMUSTEXIST | OFN_SHAREAWARE /*| OFN_NODEREFERENCELINKS*/ | OFN_OVERWRITEPROMPT;
-	if (bUseXPFileDialog) {
-		ofn.Flags |= OFN_EXPLORER | OFN_ENABLESIZING | OFN_ENABLEHOOK;
-		ofn.lpfnHook = OpenSaveFileDlgHookProc;
-	}
-
-	if (GetSaveFileName(&ofn)) {
+bool Style_Export(HWND hwnd) {
+	FileDialog dialog {nullptr, IDS_FILTER_INI, 0, FileDialogType_SaveParseFilter, FileDialog_SaveFile, L"ini"};
+	if (LPWSTR szFile = dialog.Show(hwnd, nullptr, nullptr)) {
 		DWORD dwError = ERROR_SUCCESS;
 		WCHAR *pIniSectionBuf = static_cast<WCHAR *>(NP2HeapAlloc(sizeof(WCHAR) * MAX_INI_SECTION_SIZE_STYLES));
 		IniSectionBuilder section = { pIniSectionBuf };
@@ -1096,6 +1057,7 @@ bool Style_Export(HWND hwnd) noexcept {
 			dwLastIOError = dwError;
 			MsgBoxLastError(MB_OK, IDS_EXPORT_FAIL, szFile);
 		}
+		CoTaskMemFree(szFile);
 		return true;
 	}
 	return false;
@@ -3167,7 +3129,7 @@ void UpdateFoldMarginWidth() noexcept {
 //
 // Style_GetOpenDlgFilterStr()
 //
-static void AddLexFilterStr(LPWSTR szFilter, LPCEDITLEXER pLex, LPCWSTR lpszExt, int *length, int lexers[], int *index) noexcept {
+static LPWSTR AddLexFilterStr(FileDialog &dialog, LPWSTR szFilter, LPCEDITLEXER pLex, LPCWSTR lpszExt, int lexers[]) noexcept {
 	LPCWSTR p = pLex->szExtensions;
 	if (StrIsEmpty(p)) {
 		p = pLex->pszDefExt;
@@ -3205,16 +3167,16 @@ static void AddLexFilterStr(LPWSTR szFilter, LPCEDITLEXER pLex, LPCWSTR lpszExt,
 		*ptr = L'\0';
 
 		WCHAR wch[MAX_PATH];
-		wsprintf(wch, L"*%s;", lpszExt);
+		const UINT len = wsprintf(wch, L"*%s;", lpszExt);
 		if (StrStrI(extensions, wch) == nullptr) {
 			++count;
 			lstrcpy(ptr, wch);
-			ptr += lstrlen(wch);
+			ptr += len;
 		}
 	}
 
 	if (count == 0) {
-		return;
+		return szFilter;
 	}
 	if (state == 1) {
 		--ptr; // trailing semicolon
@@ -3233,28 +3195,41 @@ static void AddLexFilterStr(LPWSTR szFilter, LPCEDITLEXER pLex, LPCWSTR lpszExt,
 	LPCWSTR pszName = pLex->pszName;
 #endif
 
-	*length += wsprintf(szFilter + *length, L"%s (%s)|%s|", pszName, extensions, extensions);
-	lexers[*index] = pLex->rid;
-	*index += 1;
+	UINT len = wsprintf(szFilter, L"%s (%s)", pszName, extensions);
+	LPCWSTR lpszName = szFilter;
+	szFilter += len + 1;
+	len = static_cast<UINT>(ptr - extensions) + 1;
+	memcpy(szFilter, extensions, len * sizeof(WCHAR));
+	lpszExt = szFilter;
+	szFilter += len;
+	len = dialog.filterCount;
+	dialog.filterSpec[len].pszName = lpszName;
+	dialog.filterSpec[len].pszSpec = lpszExt;
+	dialog.filterCount += 1;
+	dialog.filterIndex += 1; // 1-based filter index
+	lexers[dialog.filterIndex] = pLex->rid;
+	return szFilter;
 }
 
-LPWSTR Style_GetOpenDlgFilterStr(bool open, LPCWSTR lpszFile, int lexers[]) noexcept {
-	int length = (MAX_FAVORITE_SCHEMES_COUNT + 2 + LEXER_INDEX_GENERAL - LEXER_INDEX_MATCH)
-				*(MAX_EDITLEXER_NAME_SIZE + MAX_EDITLEXER_EXT_SIZE*3*2);
-	LPWSTR szFilter = static_cast<LPWSTR>(NP2HeapAlloc(length * sizeof(WCHAR)));
+NP2_noinline
+void Style_GetFileDialogFilter(FileDialog &dialog, LPCWSTR lpszFile, int lexers[]) noexcept {
+	constexpr UINT maxFilterCount = MAX_FAVORITE_SCHEMES_COUNT + 2 + LEXER_INDEX_GENERAL - LEXER_INDEX_MATCH;
+	static_assert(maxFilterCount == OPENDLG_MAX_LEXER_COUNT);
+	UINT length = maxFilterCount*(MAX_EDITLEXER_NAME_SIZE + MAX_EDITLEXER_EXT_SIZE*3*2);
+	dialog.filterSpec = static_cast<COMDLG_FILTERSPEC *>(NP2HeapAlloc(maxFilterCount*sizeof(COMDLG_FILTERSPEC) + length*sizeof(WCHAR)));
+	LPWSTR szFilter = reinterpret_cast<LPWSTR>(dialog.filterSpec + maxFilterCount);
 
-	length = 0;
-	int index = 1; // 1-based filter index
-	if (open) {
+	if (dialog.dialogType & FileDialogType_FileOpen) {
+		dialog.filterIndex = 1;
 		// All Files comes first for open file dialog.
-		GetString(IDS_FILTER_ALL, szFilter, MAX_EDITLEXER_EXT_SIZE);
-		length = lstrlen(szFilter);
-		++index;
+		length = GetString(IDS_FILTER_ALL, szFilter, MAX_EDITLEXER_EXT_SIZE);
+		dialog.ParseFilter(szFilter);
+		szFilter += length + 1;
 	}
 
 	// current scheme
 	LPCWSTR lpszExt = PathFindExtension(lpszFile);
-	AddLexFilterStr(szFilter, pLexCurrent, lpszExt, &length, lexers, &index);
+	szFilter = AddLexFilterStr(dialog, szFilter, pLexCurrent, lpszExt, lexers);
 	// text file and favorite schemes
 	for (UINT iLexer = LEXER_INDEX_MATCH; iLexer < ALL_LEXER_COUNT; iLexer++) {
 		LPCEDITLEXER pLex = pLexArray[iLexer];
@@ -3262,18 +3237,17 @@ LPWSTR Style_GetOpenDlgFilterStr(bool open, LPCWSTR lpszFile, int lexers[]) noex
 			break;
 		}
 		if (pLex != pLexCurrent) {
-			AddLexFilterStr(szFilter, pLex, nullptr, &length, lexers, &index);
+			szFilter = AddLexFilterStr(dialog, szFilter, pLex, nullptr, lexers);
 		}
 	}
 
-	if (!open) {
+	dialog.filterIndex = 0;
+	if (dialog.dialogType & FileDialogType_FileSave) {
 		lexers[0] = pLexArray[iDefaultLexerIndex]->rid;
 		// All Files comes last for save file dialog.
-		GetString(IDS_FILTER_ALL, szFilter + length, MAX_EDITLEXER_EXT_SIZE);
+		GetString(IDS_FILTER_ALL, szFilter, MAX_EDITLEXER_EXT_SIZE);
+		dialog.ParseFilter(szFilter);
 	}
-
-	PrepareFilterStr(szFilter);
-	return szFilter;
 }
 
 //=============================================================================
@@ -3535,7 +3509,8 @@ bool Style_SelectFont(HWND hwnd, LPWSTR lpszStyle, int cchStyle, bool bDefaultSt
 		cf.Flags |= CF_FIXEDPITCHONLY;
 	}
 
-	if (!ChooseFont(&cf) || StrIsEmpty(lf.lfFaceName)) {
+	const BOOL result = ChooseFont(&cf);
+	if (!result || StrIsEmpty(lf.lfFaceName)) {
 		return false;
 	}
 
@@ -3608,31 +3583,34 @@ void Style_SetDefaultFont(HWND hwnd, bool bCode) noexcept {
 	}
 }
 
+static COLORREF Style_ChooseColor(HWND hwnd, COLORREF color) noexcept {
+	CHOOSECOLOR cc;
+	memset(&cc, 0, sizeof(CHOOSECOLOR));
+	cc.lStructSize = sizeof(CHOOSECOLOR);
+	cc.hwndOwner = hwnd;
+	cc.rgbResult = color;
+	cc.lpCustColors = customColor;
+	cc.Flags = CC_FULLOPEN | CC_RGBINIT | CC_SOLIDCOLOR;
+	const BOOL result = ChooseColor(&cc);
+	return result ? cc.rgbResult : color;
+}
+
 //=============================================================================
 //
 // Style_SelectColor()
 //
 bool Style_SelectColor(HWND hwnd, LPWSTR lpszStyle, int cchStyle, bool bFore) noexcept {
-	CHOOSECOLOR cc;
-	memset(&cc, 0, sizeof(CHOOSECOLOR));
-
 	COLORREF iRGBResult;
 	if (!Style_StrGetColor(bFore, lpszStyle, &iRGBResult)) {
 		iRGBResult = bFore ? GetSysColor(COLOR_WINDOWTEXT) : GetSysColor(COLOR_WINDOW);
 	}
 
-	cc.lStructSize = sizeof(CHOOSECOLOR);
-	cc.hwndOwner = hwnd;
-	cc.rgbResult = iRGBResult;
-	cc.lpCustColors = customColor;
-	cc.Flags = CC_FULLOPEN | CC_RGBINIT | CC_SOLIDCOLOR;
-
-	if (!ChooseColor(&cc) || cc.rgbResult == iRGBResult) {
+	const COLORREF rgbResult = Style_ChooseColor(hwnd, iRGBResult);
+	if (rgbResult == iRGBResult) {
 		return false;
 	}
 
-	iRGBResult = cc.rgbResult;
-	iRGBResult = ColorToRGBHex(iRGBResult);
+	iRGBResult = ColorToRGBHex(rgbResult);
 
 	// Rebuild style string
 	WCHAR szNewStyle[MAX_LEXER_STYLE_EDIT_SIZE];
@@ -4043,9 +4021,7 @@ static HTREEITEM Style_AddAllLexerToTreeView(HWND hwndTV, bool withStyles, bool 
 		++groupCount;
 	}
 
-	InitWindowCommon(hwndTV);
-	TreeView_SetExtendedStyle(hwndTV, TVS_EX_DOUBLEBUFFER, TVS_EX_DOUBLEBUFFER);
-	SetExplorerTheme(hwndTV);
+	DarkMode_InitTreeView(hwndTV);
 
 	constexpr DWORD iconFlags = SHGFI_USEFILEATTRIBUTES | SHGFI_SMALLICON | SHGFI_SYSICONINDEX;
 	SHFILEINFO shfi;
@@ -4179,7 +4155,7 @@ static void Style_ResetStyle(LPCEDITLEXER pLex, EDITSTYLE *pStyle) noexcept {
 //
 // Style_ConfigDlgProc()
 //
-static INT_PTR CALLBACK Style_ConfigDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam) noexcept {
+static INT_PTR CALLBACK Style_ConfigDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam) {
 	static const DWORD controlDefinition[] = {
 		DeferCtlMove(IDC_RESIZEGRIP3),
 		DeferCtlMove(IDOK),
@@ -4252,7 +4228,7 @@ static INT_PTR CALLBACK Style_ConfigDlgProc(HWND hwnd, UINT umsg, WPARAM wParam,
 		StyleConfigDlgParam *param = AsPointer<StyleConfigDlgParam *>(lParam);
 		param->hFontTitle = hFontTitle;
 		SetWindowLongPtr(hwnd, DWLP_USER, lParam);
-		CenterDlgInParent(hwnd);
+		DarkMode_InitDialog(hwnd);
 	}
 	return TRUE;
 
@@ -4272,8 +4248,9 @@ static INT_PTR CALLBACK Style_ConfigDlgProc(HWND hwnd, UINT umsg, WPARAM wParam,
 				if (pCurrentStyle) {
 					GetDlgItemText(hwnd, IDC_STYLEEDIT, pCurrentStyle->szValue, MAX_EDITSTYLE_VALUE_SIZE);
 				} else if (fLexerSelected && pCurrentLexer && pCurrentLexer->szExtensions) {
-					if (!GetDlgItemText(hwnd, IDC_STYLEEDIT, pCurrentLexer->szExtensions, MAX_EDITLEXER_EXT_SIZE)) {
-						lstrcpy(pCurrentLexer->szExtensions, pCurrentLexer->pszDefExt);
+					LPWSTR szValue = pCurrentLexer->szExtensions;
+					if (!GetDlgItemText(hwnd, IDC_STYLEEDIT, szValue, MAX_EDITLEXER_EXT_SIZE)) {
+						lstrcpy(szValue, pCurrentLexer->pszDefExt);
 					}
 				}
 
@@ -4281,7 +4258,8 @@ static INT_PTR CALLBACK Style_ConfigDlgProc(HWND hwnd, UINT umsg, WPARAM wParam,
 				iCurrentStyleIndex = -1;
 				pCurrentStyle = nullptr;
 
-				HTREEITEM hParent = TreeView_GetParent(hwndTV, lpnmtv->itemNew.hItem);
+				HWND hwndTree = lpnmtv->hdr.hwndFrom;
+				HTREEITEM hParent = TreeView_GetParent(hwndTree, lpnmtv->itemNew.hItem);
 				if (hParent == nullptr) {
 					if (lpnmtv->itemNew.lParam == 0) {
 						pCurrentLexer = nullptr;
@@ -4294,7 +4272,7 @@ static INT_PTR CALLBACK Style_ConfigDlgProc(HWND hwnd, UINT umsg, WPARAM wParam,
 					memset(&item, 0, sizeof(item));
 					item.mask = TVIF_PARAM;
 					item.hItem = hParent;
-					TreeView_GetItem(hwndTV, &item);
+					TreeView_GetItem(hwndTree, &item);
 
 					if (item.lParam == 0) {
 						fLexerSelected = true;
@@ -4305,46 +4283,43 @@ static INT_PTR CALLBACK Style_ConfigDlgProc(HWND hwnd, UINT umsg, WPARAM wParam,
 					}
 				}
 				if (hParent == nullptr || fLexerSelected) {
-					TreeView_Expand(hwndTV, lpnmtv->itemNew.hItem, TVE_EXPAND);
+					TreeView_Expand(hwndTree, lpnmtv->itemNew.hItem, TVE_EXPAND);
 				}
 
 				UINT enableMask = StyleControl_None;
+				WCHAR wch[MAX_EDITLEXER_EXT_SIZE];
+				memset(wch, 0, sizeof(int));
+				LPCWSTR szTitle = wch;
+				LPCWSTR szValue = wch;
+				LPCWSTR pszDefault = wch;
 				// a lexer has been selected
-				if (fLexerSelected) {
-					if (pCurrentLexer != nullptr) {
-						WCHAR wch[MAX_EDITLEXER_EXT_SIZE];
-
+				if (fLexerSelected && pCurrentLexer != nullptr) {
 						GetDlgItemText(hwnd, IDC_STYLELABELS, wch, COUNTOF(wch));
 						LPWSTR p = StrChr(wch, L'|');
 						if (p != nullptr) {
 							*p = L'\0';
 						}
 
-						SetDlgItemText(hwnd, IDC_STYLELABEL, wch);
+						szValue = pCurrentLexer->szExtensions;
+						pszDefault = pCurrentLexer->pszDefExt;
 						EnableWindow(GetDlgItem(hwnd, IDC_STYLEEDIT), (pCurrentLexer->szExtensions != nullptr));
 						EnableWindow(GetDlgItem(hwnd, IDC_STYLEDEFAULT), TRUE);
-						SetDlgItemText(hwnd, IDC_STYLEEDIT, pCurrentLexer->szExtensions);
-						SetDlgItemText(hwnd, IDC_STYLEVALUE_DEFAULT, pCurrentLexer->pszDefExt);
-					}
 				}
 
 				// a style or group has been selected
-				else {
-					if (pCurrentStyle != nullptr) {
-						WCHAR wch[MAX_EDITSTYLE_VALUE_SIZE];
-
+				else if (pCurrentStyle != nullptr) {
 						GetDlgItemText(hwnd, IDC_STYLELABELS, wch, COUNTOF(wch));
 						LPWSTR p = StrChr(wch, L'|');
 						if (p != nullptr) {
-							*p = L'\0';
+							*p++ = L'\0';
 						}
 
-						SetDlgItemText(hwnd, IDC_STYLELABEL, StrEnd(wch) + 1);
+						szTitle = p;
+						szValue = pCurrentStyle->szValue;
+						pszDefault = pCurrentStyle->pszDefault;
 						EnableWindow(GetDlgItem(hwnd, IDC_STYLEEDIT), TRUE);
 						EnableWindow(GetDlgItem(hwnd, IDC_STYLEBACK), TRUE);
 						EnableWindow(GetDlgItem(hwnd, IDC_STYLEDEFAULT), TRUE);
-						SetDlgItemText(hwnd, IDC_STYLEEDIT, pCurrentStyle->szValue);
-						SetDlgItemText(hwnd, IDC_STYLEVALUE_DEFAULT, pCurrentStyle->pszDefault);
 
 						for (UINT i = 0; i < pCurrentLexer->iStyleCount; i++) {
 							if (pCurrentStyle == &pCurrentLexer->Styles[i]) {
@@ -4353,16 +4328,16 @@ static INT_PTR CALLBACK Style_ConfigDlgProc(HWND hwnd, UINT umsg, WPARAM wParam,
 							}
 						}
 						enableMask = GetLexerStyleControlMask(pCurrentLexer->rid, iCurrentStyleIndex);
-					}
 				}
 
-				if ((fLexerSelected && pCurrentLexer == nullptr) || (!fLexerSelected && pCurrentStyle == nullptr)) {
-					SetDlgItemText(hwnd, IDC_STYLELABEL, L"");
+				else {
 					EnableWindow(GetDlgItem(hwnd, IDC_STYLEEDIT), FALSE);
 					EnableWindow(GetDlgItem(hwnd, IDC_STYLEDEFAULT), FALSE);
-					SetDlgItemText(hwnd, IDC_STYLEEDIT, L"");
-					SetDlgItemText(hwnd, IDC_STYLEVALUE_DEFAULT, L"");
 				}
+
+				SetDlgItemText(hwnd, IDC_STYLELABEL, szTitle);
+				SetDlgItemText(hwnd, IDC_STYLEEDIT, szValue);
+				SetDlgItemText(hwnd, IDC_STYLEVALUE_DEFAULT, pszDefault);
 
 				const bool changed = pCurrentStyle != nullptr && (
 					((enableMask & StyleControl_Fore) && !IsWindowEnabled(GetDlgItem(hwnd, IDC_STYLEFORE)))
@@ -4406,17 +4381,19 @@ static INT_PTR CALLBACK Style_ConfigDlgProc(HWND hwnd, UINT umsg, WPARAM wParam,
 				//if (pCurrentStyle) {
 				//	GetDlgItemText(hwnd, IDC_STYLEEDIT, pCurrentStyle->szValue, MAX_EDITSTYLE_VALUE_SIZE);
 				//}
-				TreeView_Select(hwndTV, lpnmtv->itemNew.hItem, TVGN_CARET);
+				HWND hwndTree = lpnmtv->hdr.hwndFrom;
+				TreeView_Select(hwndTree, lpnmtv->itemNew.hItem, TVGN_CARET);
 
-				//HIMAGELIST himl = TreeView_CreateDragImage(hwndTV, lpnmtv->itemNew.hItem);
+				//HIMAGELIST himl = TreeView_CreateDragImage(hwndTree, lpnmtv->itemNew.hItem);
 				//ImageList_BeginDrag(himl, 0, 0, 0);
-				//ImageList_DragEnter(hwndTV, lpnmtv->ptDrag.x, lpnmtv->ptDrag.y);
+				//ImageList_DragEnter(hwndTree, lpnmtv->ptDrag.x, lpnmtv->ptDrag.y);
+				HCURSOR cursor;
 				if (pCurrentStyle) {
-					DestroyCursor(SetCursor(LoadCursor(g_exeInstance, MAKEINTRESOURCE(IDC_COPY))));
+					cursor = LoadCursor(g_exeInstance, MAKEINTRESOURCE(IDC_COPY));
 				} else {
-					DestroyCursor(SetCursor(LoadCursor(nullptr, IDC_NO)));
+					cursor = LoadCursor(nullptr, IDC_NO);
 				}
-
+				DestroyCursor(SetCursor(cursor));
 				SetCapture(hwnd);
 				fDragging = true;
 			}
@@ -4498,15 +4475,10 @@ static INT_PTR CALLBACK Style_ConfigDlgProc(HWND hwnd, UINT umsg, WPARAM wParam,
 	case WM_COMMAND:
 		switch (LOWORD(wParam)) {
 		case IDC_PREVSTYLE:
-			if (TreeView_GetSelection(hwndTV)) {
-				TreeView_Select(hwndTV, TreeView_GetPrevVisible(hwndTV, TreeView_GetSelection(hwndTV)), TVGN_CARET);
-			}
-			PostMessage(hwnd, WM_NEXTDLGCTL, AsInteger<WPARAM>(GetDlgItem(hwnd, IDC_STYLEEDIT)), TRUE);
-			break;
-
 		case IDC_NEXTSTYLE:
-			if (TreeView_GetSelection(hwndTV)) {
-				TreeView_Select(hwndTV, TreeView_GetNextVisible(hwndTV, TreeView_GetSelection(hwndTV)), TVGN_CARET);
+			if (HTREEITEM hSelNode = TreeView_GetSelection(hwndTV)) {
+				hSelNode = (LOWORD(wParam) == IDC_PREVSTYLE) ? TreeView_GetPrevVisible(hwndTV, hSelNode) : TreeView_GetNextVisible(hwndTV, hSelNode);
+				TreeView_Select(hwndTV, hSelNode, TVGN_CARET);
 			}
 			PostMessage(hwnd, WM_NEXTDLGCTL, AsInteger<WPARAM>(GetDlgItem(hwnd, IDC_STYLEEDIT)), TRUE);
 			break;
@@ -5040,13 +5012,14 @@ static INT_PTR CALLBACK Style_SelectLexerDlgProc(HWND hwnd, UINT umsg, WPARAM wP
 			CheckDlgButton(hwnd, IDC_AUTOSELECT, BST_CHECKED);
 		}
 
-		CenterDlgInParent(hwnd);
+		DarkMode_InitDialog(hwnd);
 	}
 	return TRUE;
 
 	case WM_NOTIFY:
 		if (AsPointer<LPNMHDR>(lParam)->idFrom == IDC_STYLELIST) {
 			LPNMTREEVIEW lpnmtv = AsPointer<LPNMTREEVIEW>(lParam);
+			HWND hwndTree = lpnmtv->hdr.hwndFrom;
 			switch (lpnmtv->hdr.code) {
 			case NM_CLICK: {
 				// https://support.microsoft.com/en-us/help/261289/how-to-know-when-the-user-clicks-a-check-box-in-a-treeview-control
@@ -5054,18 +5027,18 @@ static INT_PTR CALLBACK Style_SelectLexerDlgProc(HWND hwnd, UINT umsg, WPARAM wP
 				const DWORD dwpos = GetMessagePos();
 				tvht.pt.x = GET_X_LPARAM(dwpos);
 				tvht.pt.y = GET_Y_LPARAM(dwpos);
-				MapWindowPoints(HWND_DESKTOP, hwndTV, &tvht.pt, 1);
-				TreeView_HitTest(hwndTV, &tvht);
+				MapWindowPoints(HWND_DESKTOP, hwndTree, &tvht.pt, 1);
+				TreeView_HitTest(hwndTree, &tvht);
 
 				if (tvht.hItem != nullptr && (TVHT_ONITEMSTATEICON & tvht.flags)) {
-					Lexer_OnCheckStateChanged(hwndTV, hFavoriteNode, tvht.hItem);
+					Lexer_OnCheckStateChanged(hwndTree, hFavoriteNode, tvht.hItem);
 				}
 			}
 			break;
 
 			case NM_DBLCLK:
 				// disable double click when managing favorite schemes.
-				if (Lexer_GetFromTreeView(hwndTV) != nullptr && GetWindowLongPtr(hwnd, DWLP_USER) == 0) {
+				if (Lexer_GetFromTreeView(hwndTree) != nullptr && GetWindowLongPtr(hwnd, DWLP_USER) == 0) {
 					SendWMCommand(hwnd, IDOK);
 				}
 				break;
@@ -5076,22 +5049,24 @@ static INT_PTR CALLBACK Style_SelectLexerDlgProc(HWND hwnd, UINT umsg, WPARAM wP
 				if (selected) {
 					CheckDlgButton(hwnd, IDC_DEFAULTSCHEME, (iInternalDefault == pLex->rid)? BST_CHECKED : BST_UNCHECKED);
 				} else {
-					TreeView_Expand(hwndTV, lpnmtv->itemNew.hItem, TVE_EXPAND);
+					TreeView_Expand(hwndTree, lpnmtv->itemNew.hItem, TVE_EXPAND);
 				}
 				EnableWindow(GetDlgItem(hwnd, IDC_DEFAULTSCHEME), selected);
 			}
 			break;
 
 			case TVN_BEGINDRAG: {
-				TreeView_Select(hwndTV, lpnmtv->itemNew.hItem, TVGN_CARET);
+				TreeView_Select(hwndTree, lpnmtv->itemNew.hItem, TVGN_CARET);
 				// prevent dragging group folder or Text File
-				if (lpnmtv->itemNew.lParam != 0 && TreeView_GetParent(hwndTV, lpnmtv->itemNew.hItem) != nullptr) {
+				HCURSOR cursor;
+				if (lpnmtv->itemNew.lParam != 0 && TreeView_GetParent(hwndTree, lpnmtv->itemNew.hItem) != nullptr) {
 					hDraggingNode = lpnmtv->itemNew.hItem;
-					DestroyCursor(SetCursor(LoadCursor(g_exeInstance, MAKEINTRESOURCE(IDC_COPY))));
+					cursor = LoadCursor(g_exeInstance, MAKEINTRESOURCE(IDC_COPY));
 				} else {
 					hDraggingNode = nullptr;
-					DestroyCursor(SetCursor(LoadCursor(nullptr, IDC_NO)));
+					cursor = LoadCursor(nullptr, IDC_NO);
 				}
+				DestroyCursor(SetCursor(cursor));
 				SetCapture(hwnd);
 				fDragging = true;
 			}
@@ -5256,7 +5231,7 @@ static INT_PTR CALLBACK SelectCSVOptionsDlgProc(HWND hwnd, UINT umsg, WPARAM wPa
 		if (option & CsvOption_MergeDelimiter) {
 			CheckDlgButton(hwnd, IDC_CSV_MERGE_DELIMITER, BST_CHECKED);
 		}
-		CenterDlgInParent(hwnd);
+		DarkMode_InitDialog(hwnd);
 	}
 	return TRUE;
 
@@ -5413,17 +5388,11 @@ void EditClickCallTip(HWND hwnd) noexcept {
 
 		const unsigned back = callTipInfo.currentColor;
 		unsigned color = back & 0xffffffU;
-		CHOOSECOLOR cc;
-		memset(&cc, 0, sizeof(CHOOSECOLOR));
-		cc.lStructSize = sizeof(CHOOSECOLOR);
-		cc.hwndOwner = hwnd;
-		cc.rgbResult = color;
-		cc.lpCustColors = customColor;
-		cc.Flags = CC_FULLOPEN | CC_RGBINIT | CC_SOLIDCOLOR;
+		const COLORREF rgbResult = Style_ChooseColor(hwnd, color);
 
-		if (ChooseColor(&cc) && cc.rgbResult != color) {
+		if (rgbResult != color) {
 			const ShowCallTip colorFormat = callTipInfo.showCallTip;
-			color = cc.rgbResult | (back & 0xff000000U);
+			color = rgbResult | (back & 0xff000000U);
 			const int width = (color > 0xffffffU) ? 8 : 6;
 			if (width == 6) {
 				if (colorFormat == ShowCallTip_ColorRGBA || colorFormat == ShowCallTip_ColorARGB) {

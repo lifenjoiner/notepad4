@@ -260,6 +260,11 @@ inline T DLLFunctionEx(LPCWSTR lpDllName, LPCSTR lpProcName) noexcept {
 	return DLLFunction<T>(::GetModuleHandleW(lpDllName), lpProcName);
 }
 
+inline int GetWinCtrlID(HWND hwnd) noexcept {
+	// same as GetWindowID(), GetDlgCtrlID()
+	return static_cast<int>(::GetWindowLongPtr(hwnd, GWLP_ID));
+}
+
 // High DPI Reference
 // https://docs.microsoft.com/en-us/windows/desktop/hidpi/high-dpi-reference
 #ifndef WM_DPICHANGED
@@ -443,12 +448,6 @@ LSTATUS Registry_SetString(HKEY hKey, LPCWSTR valueName, LPCWSTR lpszText) noexc
 inline LSTATUS Registry_CreateKey(HKEY hKey, LPCWSTR lpSubKey, PHKEY phkResult) noexcept {
 	return RegCreateKeyEx(hKey, lpSubKey, 0, nullptr, 0, KEY_WRITE, nullptr, phkResult, nullptr);
 }
-#if _WIN32_WINNT >= _WIN32_WINNT_VISTA
-#define Registry_DeleteTree(hKey, lpSubKey)			RegDeleteTree((hKey), (lpSubKey))
-#else
-LSTATUS Registry_DeleteTree(HKEY hKey, LPCWSTR lpSubKey) noexcept;
-#endif
-
 
 inline bool KeyboardIsKeyDown(int key) noexcept {
 	return ::GetKeyState(key) & 0x8000;
@@ -480,9 +479,6 @@ HRESULT PrivateSetCurrentProcessExplicitAppUserModelID(LPCWSTR AppID) noexcept;
 bool IsElevated() noexcept;
 bool ExeNameFromWnd(HWND hwnd, LPWSTR szExeName, DWORD cchExeName) noexcept;
 //bool Is32bitExe(LPCWSTR lpszExeName) noexcept;
-
-#define SetExplorerTheme(hwnd)		SetWindowTheme((hwnd), L"Explorer", nullptr)
-#define SetListViewTheme(hwnd)		SetWindowTheme((hwnd), L"Listview", nullptr)
 
 HBITMAP LoadBitmapFile(LPCWSTR path) noexcept;
 HBITMAP ResizeImageForDPI(HBITMAP hbmp, UINT dpi) noexcept;
@@ -711,8 +707,33 @@ DLGTEMPLATE *LoadThemedDialogTemplate(LPCWSTR lpDialogTemplateID, HINSTANCE hIns
 	ThemedDialogBoxParam(hInstance, lpTemplate, hWndParent, lpDialogFunc, 0)
 INT_PTR ThemedDialogBoxParam(HINSTANCE hInstance, LPCWSTR lpTemplate, HWND hWndParent, DLGPROC lpDialogFunc, LPARAM dwInitParam) noexcept;
 
-//==== File Dialog Hook =========================================================
-UINT_PTR CALLBACK OpenSaveFileDlgHookProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) noexcept;
+enum FileDialogType {
+	FileDialogType_FileOpen = 1,
+	FileDialogType_FileSave = 2,
+	FileDialogType_ParseFilter = 4,
+	FileDialogType_OpenParseFilter = FileDialogType_FileOpen | FileDialogType_ParseFilter,
+	FileDialogType_SaveParseFilter = FileDialogType_FileSave | FileDialogType_ParseFilter,
+};
+
+#define FileDialog_BrowseFolder		(FOS_NOCHANGEDIR | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_DONTADDTORECENT | FOS_PICKFOLDERS)
+#define FileDialog_FileCommon		(FOS_NOCHANGEDIR | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_DONTADDTORECENT | FOS_SHAREAWARE | FOS_NOTESTFILECREATE)
+#define FileDialog_OpenFile			(FileDialog_FileCommon | FOS_NOREADONLYRETURN | FOS_FILEMUSTEXIST)
+#define FileDialog_SaveFile			(FileDialog_FileCommon | FOS_NOREADONLYRETURN | FOS_OVERWRITEPROMPT)
+#define FileDialog_FindFile			(FileDialog_FileCommon | FOS_FILEMUSTEXIST | FOS_NODEREFERENCELINKS)
+
+struct FileDialog {
+	COMDLG_FILTERSPEC *filterSpec;
+	UINT filterCount;
+	UINT filterIndex;
+	FileDialogType dialogType;
+	DWORD dialogOptions; // FILEOPENDIALOGOPTIONS
+	LPCWSTR pszDefaultExtension;
+
+	LPWSTR Show(HWND hwndOwner, LPCWSTR lpstrInitialDir, LPCWSTR lpstrFile, UINT idsTitle = 0);
+	void ParseFilter(LPWSTR szFilter) noexcept;
+	// File Dialog Hook
+	static LRESULT CALLBACK SubProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
+};
 
 //==== MinimizeToTray Functions - see comments in Helpers.cpp ===================
 bool GetDoAnimateMinimize() noexcept;
