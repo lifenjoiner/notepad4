@@ -252,27 +252,11 @@ void IniSectionBuilder::SetStringEx(LPCWSTR key, LPCWSTR value, LPCWSTR lpDefaul
 	}
 }
 
-LPWSTR Registry_GetString(HKEY hKey, LPCWSTR valueName) noexcept {
-	LPWSTR lpszText = nullptr;
-	DWORD type = REG_NONE;
-	DWORD size = 0;
-
-	LSTATUS status = RegQueryValueEx(hKey, valueName, nullptr, &type, nullptr, &size);
-	if (status == ERROR_SUCCESS && type == REG_SZ && size != 0) {
-		size = (size + 1)*sizeof(WCHAR);
-		lpszText = static_cast<LPWSTR>(NP2HeapAlloc(size));
-		status = RegQueryValueEx(hKey, valueName, nullptr, &type, reinterpret_cast<LPBYTE>(lpszText), &size);
-		if (status != ERROR_SUCCESS || type != REG_SZ || size == 0) {
-			NP2HeapFree(lpszText);
-			lpszText = nullptr;
-		}
-	}
-	return lpszText;
-}
-
+NP2_noinline
 LSTATUS Registry_SetString(HKEY hKey, LPCWSTR valueName, LPCWSTR lpszText) noexcept {
 	DWORD len = lstrlen(lpszText);
-	len = len ? ((len + 1)*sizeof(WCHAR)) : 0;
+	len += len != 0;
+	len *= sizeof(WCHAR);
 	const LSTATUS status = RegSetValueEx(hKey, valueName, 0, REG_SZ, reinterpret_cast<const BYTE *>(lpszText), len);
 	return status;
 }
@@ -1767,11 +1751,11 @@ void HistoryList::Empty() noexcept {
 	}
 }
 
-bool HistoryList::Add(LPCWSTR pszNew) noexcept {
+void HistoryList::Add(LPCWSTR pszNew) noexcept {
 	// Item to be added is equal to current item
 	if (iCurItem >= 0 && iCurItem < HISTORY_ITEMS) {
 		if (pszItems[iCurItem] != nullptr && PathEqual(pszNew, pszItems[iCurItem])) {
-			return false;
+			return;
 		}
 	}
 
@@ -1785,6 +1769,7 @@ bool HistoryList::Add(LPCWSTR pszNew) noexcept {
 		}
 	} else {
 		// Shift
+		iCurItem = 0;
 		if (pszItems[0]) {
 			LocalFree(pszItems[0]);
 		}
@@ -1793,8 +1778,6 @@ bool HistoryList::Add(LPCWSTR pszNew) noexcept {
 	}
 
 	pszItems[iCurItem] = StrDup(pszNew);
-
-	return true;
 }
 
 bool HistoryList::Forward(LPWSTR pszItem, int cItem) noexcept {
