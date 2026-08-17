@@ -51,6 +51,7 @@ static HWND hwndReBar;
 
 #define TOOLBAR_COMMAND_BASE	IDT_HISTORY_BACK
 #define DefaultToolbarButtons	L"1 2 3 4 5 0 8"
+// NOLINTBEGIN(readability-redundant-zero-initializer)
 static TBBUTTON tbbMainWnd[] = {
 	{0, 0, 0, TBSTYLE_SEP, {0}, 0, 0},
 	{0, IDT_HISTORY_BACK, TBSTATE_ENABLED, TBSTYLE_BUTTON, {0}, 0, 0},
@@ -69,6 +70,7 @@ static TBBUTTON tbbMainWnd[] = {
 	{13, IDT_VIEW_FILTER, TBSTATE_ENABLED, TBSTYLE_BUTTON, {0}, 0, 0},
 	// TB_ADD_FILTER_BMP and TB_DEL_FILTER_BMP both used for IDT_VIEW_FILTER
 };
+// NOLINTEND(readability-redundant-zero-initializer)
 
 static HWND hwndDriveBox;
 HWND	hwndDirList;
@@ -223,9 +225,7 @@ static inline bool HasFilter() noexcept {
 //
 static void CleanUpResources(bool initialized) noexcept {
 	DarkMode_Cleanup();
-	if (tchToolbarBitmap != nullptr) {
-		LocalFree(tchToolbarBitmap);
-	}
+	NP2HeapFree(tchToolbarBitmap);
 	if (hTrayIcon) {
 		DestroyIcon(hTrayIcon);
 	}
@@ -493,7 +493,7 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 	// Pathname parameter
 	if (lpPathArg) {
 		DisplayPath(lpPathArg, IDS_ERR_CMDLINE);
-		GlobalFree(lpPathArg);
+		NP2HeapFree(lpPathArg);
 	} else if (iStartupDir != StartupDirectory_None) {
 		// Use a startup directory
 		if (iStartupDir == StartupDirectory_MRU) {
@@ -2754,12 +2754,7 @@ CommandParseState ParseCommandLineOption(LPWSTR lp1, LPWSTR lp2) noexcept {
 		case L'M':
 			state = CommandParseState_Argument;
 			if (ExtractFirstArgument(lp2, lp1, lp2)) {
-				if (lpFilterArg) {
-					NP2HeapFree(lpFilterArg);
-				}
-
-				lpFilterArg = static_cast<LPWSTR>(NP2HeapAlloc(sizeof(WCHAR) * (lstrlen(lp1) + 1)));
-				lstrcpy(lpFilterArg, lp1);
+				HeapStrDupExW(lpFilterArg, lp1);
 				state = CommandParseState_Consumed;
 			}
 			break;
@@ -2857,10 +2852,10 @@ void ParseCommandLine() noexcept {
 		// pathname
 		{
 			if (lpPathArg) {
-				GlobalFree(lpPathArg);
+				NP2HeapFree(lpPathArg);
 			}
 
-			lpPathArg = static_cast<LPWSTR>(GlobalAlloc(GPTR, sizeof(WCHAR) * (MAX_PATH + 2)));
+			lpPathArg = static_cast<LPWSTR>(NP2HeapAlloc(sizeof(WCHAR) * (MAX_PATH + 2)));
 			lstrcpyn(lpPathArg, lp3, MAX_PATH);
 			PathFixBackslashes(lpPathArg);
 			StrTrim(lpPathArg, L" \"");
@@ -2903,7 +2898,7 @@ void LoadFlags() noexcept {
 
 	LPCWSTR strValue = section.GetValue(L"ToolbarImage");
 	if (StrNotEmpty(strValue)) {
-		tchToolbarBitmap = StrDup(strValue);
+		 HeapStrDupExW(tchToolbarBitmap, strValue);
 	}
 
 	if (StrIsEmpty(g_wchAppUserModelID)) {
@@ -3206,15 +3201,18 @@ bool ActivatePrevInst() noexcept {
 					lstrcpy(lpPathArg, tchTmp);
 				}
 
+				LPWSTR params = static_cast<LPWSTR>(GlobalAlloc(GPTR, sizeof(WCHAR) * (MAX_PATH + 2)));
+				lstrcpy(params, lpPathArg);
 				COPYDATASTRUCT cds;
 				cds.dwData = DATA_MATEPATH_PATHARG;
-				cds.cbData = static_cast<DWORD>(GlobalSize(lpPathArg));
-				cds.lpData = lpPathArg;
+				cds.cbData = static_cast<DWORD>(GlobalSize(params));
+				cds.lpData = params;
 
 				// Send lpPathArg to previous instance
 				SendMessage(hwnd, WM_COPYDATA, 0, AsInteger<LPARAM>(&cds));
 
-				GlobalFree(lpPathArg);
+				GlobalFree(params);
+				NP2HeapFree(lpPathArg);
 			}
 			return true;
 		}

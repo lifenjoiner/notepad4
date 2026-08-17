@@ -68,6 +68,7 @@ static UINT uTrayIconDPI = 0;
 
 #define TOOLBAR_COMMAND_BASE	IDT_FILE_NEW
 #define DefaultToolbarButtons	L"22 3 0 1 27 2 0 4 18 19 0 5 6 0 7 8 9 20 0 10 11 0 12 0 24 0 13 14 0 15 16 0 17"
+// NOLINTBEGIN(readability-redundant-zero-initializer)
 static TBBUTTON tbbMainWnd[] = {
 	{0, 	0, 					0, 				 TBSTYLE_SEP, {0}, 0, 0},
 	{0, 	IDT_FILE_NEW, 		TBSTATE_ENABLED, TBSTYLE_BUTTON, {0}, 0, 0},
@@ -98,6 +99,7 @@ static TBBUTTON tbbMainWnd[] = {
 	{25, 	IDT_VIEW_ALWAYSONTOP, 	TBSTATE_ENABLED, TBSTYLE_BUTTON, {0}, 0, 0},
 	{26, 	IDT_FILE_NEWWINDOW, 	TBSTATE_ENABLED, TBSTYLE_BUTTON, {0}, 0, 0},
 };
+// NOLINTEND(readability-redundant-zero-initializer)
 
 WCHAR	szIniFile[MAX_PATH];
 WCHAR szExeRealPath[MAX_PATH];
@@ -265,8 +267,7 @@ static struct WatchFileInformation {
 	DWORD		nFileSizeLow;
 } fdCurFile;
 
-static EDITFINDREPLACE efrData;
-bool	bReplaceInitialized = false;
+static EditFindReplace efrData;
 EditMarkAll editMarkAll;
 HANDLE idleTaskTimer;
 
@@ -412,9 +413,13 @@ static inline void InvalidateStyleRedraw() noexcept {
 //
 //
 static void CleanUpResources(bool initialized) noexcept {
-	LocalFree(tchToolbarBitmap);
-	LocalFree(lpSchemeArg);
-	LocalFree(lpEncodingArg);
+	NP2HeapFree(tchToolbarBitmap);
+	NP2HeapFree(lpSchemeArg);
+	NP2HeapFree(lpEncodingArg);
+	NP2HeapFree(efrData.wszFind);
+	NP2HeapFree(efrData.wszReplace);
+	NP2HeapFree(efrData.szFind);
+	NP2HeapFree(efrData.szReplace);
 
 	Encoding_ReleaseResources();
 	Style_ReleaseResources();
@@ -695,11 +700,11 @@ BOOL InitApplication(HINSTANCE hInstance) noexcept {
 	return RegisterClassEx(&wc);
 }
 
+NP2_noinline
 static void HandleMatchText(MatchTextFlag flag, LPCWSTR lpszText, bool jumpTo) noexcept {
 	if (StrNotEmpty(lpszText) && SciCall_GetLength()) {
-		const UINT cpEdit = SciCall_GetCodePage();
-		WideCharToMultiByte(cpEdit, 0, lpszText, -1, efrData.szFind, COUNTOF(efrData.szFind), nullptr, nullptr);
-		lstrcpyn(efrData.szFindUTF16, lpszText, COUNTOF(efrData.szFindUTF16));
+		efrData.wszFind = HeapStrDupW(lpszText);
+		efrData.status |= FindReplaceStatus_HasFindText | FindReplaceStatus_FindUpdated | FindReplaceStatus_ReplaceUpdated;
 
 		if (flag & MatchTextFlag_Regex) {
 			efrData.fuFlags |= (iFindReplaceOption & FindReplaceOption_UseCxxRegex) ? (SCFIND_REGEXP | SCFIND_CXX11REGEX) : (SCFIND_REGEXP | SCFIND_POSIX);
@@ -714,12 +719,12 @@ static void HandleMatchText(MatchTextFlag flag, LPCWSTR lpszText, bool jumpTo) n
 			if (!jumpTo) {
 				SciCall_DocumentEnd();
 			}
-			EditFindPrev(&efrData, false);
+			EditFindPrev(efrData, false);
 		} else {
 			if (!jumpTo) {
 				SciCall_DocumentStart();
 			}
-			EditFindNext(&efrData, false);
+			EditFindNext(efrData, false);
 		}
 		EditEnsureSelectionVisible();
 	}
@@ -949,7 +954,7 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 	// Match Text
 	if (lpMatchArg) {
 		HandleMatchText(flagMatchText, lpMatchArg, flagJumpTo);
-		LocalFree(lpMatchArg);
+		NP2HeapFree(lpMatchArg);
 	}
 
 	// Check for Paste Board option -- after loading files
@@ -968,7 +973,7 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 		flagLexerSpecified = false;
 		if (lpSchemeArg) {
 			Style_SetLexerFromName(szCurFile, lpSchemeArg);
-			LocalFree(lpSchemeArg);
+			NP2HeapFree(lpSchemeArg);
 			lpSchemeArg = nullptr;
 		} else {
 			Style_SetLexerFromID(iInitialLexer);
@@ -2745,7 +2750,8 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		WCHAR szModuleName[MAX_PATH];
 		GetModuleFileName(nullptr, szModuleName, COUNTOF(szModuleName));
 		LPWSTR szParameters = static_cast<LPWSTR>(NP2HeapAlloc(sizeof(WCHAR) * 1024));
-		GetRelaunchParameters(szParameters, szCurFile, true, emptyWind);
+		const RelaunchOption option = emptyWind ? static_cast<RelaunchOption>(RelaunchOption_NewWindow | RelaunchOption_EmptyWindow) : RelaunchOption_NewWindow;
+		GetRelaunchParameters(szParameters, szCurFile, option);
 
 		SHELLEXECUTEINFO sei;
 		memset(&sei, 0, sizeof(SHELLEXECUTEINFO));
@@ -3107,7 +3113,8 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 			SciCall_SetSel(iPos, iNewPos);
 			SendWMCommand(hwnd, IDM_EDIT_CLEARCLIPBOARD);
 		} else {
-			char *pClip = EditGetClipboardText();
+			UINT len = 0;
+			char *pClip = EditGetClipboardText(len);
 			if (pClip == nullptr) {
 				break;
 			}
@@ -3117,7 +3124,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 			SciCall_BeginUndoAction();
 			SciCall_Cut(false);
 			SciCall_ReplaceSel(pClip);
-			const size_t len = strlen(pClip);
+			NP2HeapFree(pClip);
 			if (iPos > iAnchor) {
 				iPos = iAnchor + len;
 			} else {
@@ -3125,7 +3132,6 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 			}
 			SciCall_SetSel(iAnchor, iPos);
 			SciCall_EndUndoAction();
-			LocalFree(pClip);
 		}
 		break;
 
@@ -3688,12 +3694,12 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	case IDM_EDIT_REPLACE: {
 		const bool bReplace = (LOWORD(wParam) == IDM_EDIT_REPLACE) || (LOWORD(wParam) == IDT_EDIT_REPLACE);
 		if (hDlgFindReplace == nullptr) {
-			hDlgFindReplace = EditFindReplaceDlg(hwndEdit, &efrData, bReplace);
+			hDlgFindReplace = EditFindReplaceDlg(hwndEdit, efrData, bReplace);
 		} else {
 			if (bReplace != (GetDlgItem(hDlgFindReplace, IDC_REPLACETEXT) != nullptr)) {
 				SendWMCommand(hDlgFindReplace, IDC_TOGGLEFINDREPLACE);
 				DestroyWindow(hDlgFindReplace);
-				hDlgFindReplace = EditFindReplaceDlg(hwndEdit, &efrData, bReplace);
+				hDlgFindReplace = EditFindReplaceDlg(hwndEdit, efrData, bReplace);
 			} else {
 				SetForegroundWindow(hDlgFindReplace);
 				SendMessage(hDlgFindReplace, APPM_COPYDATA, 0, 0);
@@ -3711,9 +3717,9 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 			break;
 		}
 
-		if (StrIsEmpty(efrData.szFind) && LOWORD(wParam) != IDM_EDIT_REPLACENEXT) {
-			EditSaveSelectionAsFindText(&efrData, IDM_EDIT_SAVEFIND, false);
-			if (StrIsEmpty(efrData.szFind)) {
+		if (!efrData.HasFindText() && LOWORD(wParam) != IDM_EDIT_REPLACENEXT) {
+			EditSaveSelectionAsFindText(efrData, IDM_EDIT_SAVEFIND, false);
+			if (!efrData.HasFindText()) {
 				SendWMCommand(hwnd, IDM_EDIT_FIND);
 				break;
 			}
@@ -3721,27 +3727,27 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
 		switch (LOWORD(wParam)) {
 		case IDM_EDIT_FINDNEXT:
-			EditFindNext(&efrData, false);
+			EditFindNext(efrData, false);
 			break;
 
 		case IDM_EDIT_FINDPREV:
-			EditFindPrev(&efrData, false);
+			EditFindPrev(efrData, false);
 			break;
 
 		case IDM_EDIT_REPLACENEXT:
-			if (bReplaceInitialized && StrNotEmpty(efrData.szFind)) {
-				EditReplace(&efrData);
+			if (efrData.ReplaceInitialized()) {
+				EditReplace(efrData);
 			} else {
 				SendWMCommand(hwnd, IDM_EDIT_REPLACE);
 			}
 			break;
 
 		case IDM_EDIT_SELTONEXT:
-			EditFindNext(&efrData, true);
+			EditFindNext(efrData, true);
 			break;
 
 		case IDM_EDIT_SELTOPREV:
-			EditFindPrev(&efrData, true);
+			EditFindPrev(efrData, true);
 			break;
 		}
 		break;
@@ -4514,7 +4520,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 	case CMD_FINDNEXTSEL:
 	case CMD_FINDPREVSEL:
 	case IDM_EDIT_SAVEFIND:
-		EditSaveSelectionAsFindText(&efrData, LOWORD(wParam), true);
+		EditSaveSelectionAsFindText(efrData, LOWORD(wParam), true);
 		break;
 
 	case CMD_INCLINELIMIT:
@@ -4889,7 +4895,7 @@ LRESULT MsgNotify(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 			break;
 
 		case SCN_CODEPAGECHANGED:
-			EditOnCodePageChanged(scn->oldCodePage, bShowUnicodeControlCharacter, &efrData);
+			EditOnCodePageChanged(scn->oldCodePage, bShowUnicodeControlCharacter, efrData);
 			break;
 
 		case SCN_HOTSPOTCLICK:
@@ -5434,7 +5440,7 @@ void SaveSettings(bool bSaveSettingsNow) noexcept {
 	iValue = iFindReplaceOption | ((efrData.option & FindReplaceOption_BehaviorMask) << 4);
 	section.SetIntEx(L"FindReplaceOption", iValue, FindReplaceOption_Default);
 	if (bSaveFindReplace) {
-		iValue = efrData.fuFlags | ((efrData.option & FindReplaceOption_SearchMask) << 10);
+		iValue = PackFindFlagOption(efrData.fuFlags, efrData.option, FindReplaceOption_MRUSaveMask);
 		section.SetIntEx(L"FindReplaceFlag", iValue, SCFIND_NONE);
 	}
 
@@ -5681,11 +5687,11 @@ CommandParseState ParseCommandLineOption(LPWSTR lp1, LPWSTR lp2) noexcept {
 			break;
 
 		case L'D':
-			if (lpSchemeArg) {
-				LocalFree(lpSchemeArg);
-				lpSchemeArg = nullptr;
-			}
-			iInitialLexer = NP2LEX_TEXTFILE;
+		case L'H':
+		case L'X':
+			NP2HeapFree(lpSchemeArg);
+			lpSchemeArg = nullptr;
+			iInitialLexer = (ch == 'D') ? NP2LEX_TEXTFILE : ((ch == 'H') ? NP2LEX_HTML : NP2LEX_XML);
 			flagLexerSpecified = true;
 			state = CommandParseState_Consumed;
 			break;
@@ -5693,10 +5699,7 @@ CommandParseState ParseCommandLineOption(LPWSTR lp1, LPWSTR lp2) noexcept {
 		case L'E':
 			state = CommandParseState_Argument;
 			if (ExtractFirstArgument(lp2, lp1, lp2)) {
-				if (lpEncodingArg) {
-					LocalFree(lpEncodingArg);
-				}
-				lpEncodingArg = StrDup(lp1);
+				HeapStrDupExW(lpEncodingArg, lp1);
 				state = CommandParseState_Consumed;
 			}
 			break;
@@ -5718,16 +5721,6 @@ CommandParseState ParseCommandLineOption(LPWSTR lp1, LPWSTR lp2) noexcept {
 					iInitialColumn = cord[1];
 				}
 			}
-			break;
-
-		case L'H':
-			if (lpSchemeArg) {
-				LocalFree(lpSchemeArg);
-				lpSchemeArg = nullptr;
-			}
-			iInitialLexer = NP2LEX_HTML;
-			flagLexerSpecified = true;
-			state = CommandParseState_Consumed;
 			break;
 
 		case L'I':
@@ -5767,10 +5760,7 @@ CommandParseState ParseCommandLineOption(LPWSTR lp1, LPWSTR lp2) noexcept {
 		case L'S':
 			state = CommandParseState_Argument;
 			if (ExtractFirstArgument(lp2, lp1, lp2)) {
-				if (lpSchemeArg) {
-					LocalFree(lpSchemeArg);
-				}
-				lpSchemeArg = StrDup(lp1);
+				HeapStrDupExW(lpSchemeArg, lp1);
 				flagLexerSpecified = true;
 				state = CommandParseState_Consumed;
 			}
@@ -5792,16 +5782,6 @@ CommandParseState ParseCommandLineOption(LPWSTR lp1, LPWSTR lp2) noexcept {
 
 		case L'W':
 			flagSetEncoding = IDM_ENCODING_UNICODE - IDM_ENCODING_ANSI + 1;
-			state = CommandParseState_Consumed;
-			break;
-
-		case L'X':
-			if (lpSchemeArg) {
-				LocalFree(lpSchemeArg);
-				lpSchemeArg = nullptr;
-			}
-			iInitialLexer = NP2LEX_XML;
-			flagLexerSpecified = true;
 			state = CommandParseState_Consumed;
 			break;
 
@@ -5943,11 +5923,7 @@ CommandParseState ParseCommandLineOption(LPWSTR lp1, LPWSTR lp2) noexcept {
 
 			state = CommandParseState_Argument;
 			if (ExtractFirstArgument(lp2, lp1, lp2)) {
-				if (lpMatchArg) {
-					LocalFree(lpMatchArg);
-				}
-
-				lpMatchArg = StrDup(lp1);
+				HeapStrDupExW(lpMatchArg, lp1);
 				flagMatchText = static_cast<MatchTextFlag>(flag | MatchTextFlag_Default);
 				state = CommandParseState_Consumed;
 			}
@@ -6213,7 +6189,7 @@ void ParseCommandLine() noexcept {
 
 				while (cFileList < 32 && ExtractFirstArgument(lp3, lpFileBuf, lp3)) {
 					PathQuoteSpaces(lpFileBuf);
-					lpFileList[cFileList++] = StrDup(lpFileBuf);
+					lpFileList[cFileList++] = HeapStrDupW(lpFileBuf);
 				}
 			}
 
@@ -6284,7 +6260,7 @@ void LoadFlags() noexcept {
 
 	LPCWSTR strValue = section.GetValue(L"ToolbarImage");
 	if (StrNotEmpty(strValue)) {
-		tchToolbarBitmap = StrDup(strValue);
+		HeapStrDupExW(tchToolbarBitmap, strValue);
 	}
 
 	if (StrIsEmpty(g_wchAppUserModelID)) {
@@ -6449,7 +6425,7 @@ void UpdateStatusbar() noexcept {
 	StopWatch watch;
 	watch.Start();
 #endif
-	Sci_TextToFindFull ft = { { SciCall_PositionFromLine(iLine), iPos }, nullptr, { 0, 0 } };
+	Sci_TextToFindFull ft = { { SciCall_PositionFromLine(iLine), iPos }, nullptr, 0, { 0, 0 } };
 	SciCall_CountCharactersAndColumns(&ft);
 	const Sci_Position iChar = ft.chrgText.cpMin + 1;
 	const Sci_Position iCol = ft.chrgText.cpMax + 1;
@@ -6907,7 +6883,7 @@ bool FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile) {
 					Style_SetLexer(pLexCurrent, true);
 				} else if (lpSchemeArg) {
 					Style_SetLexerFromName(szCurFile, lpSchemeArg);
-					LocalFree(lpSchemeArg);
+					NP2HeapFree(lpSchemeArg);
 					lpSchemeArg = nullptr;
 				} else {
 					Style_SetLexerFromID(iInitialLexer);
@@ -7455,9 +7431,9 @@ bool ActivatePrevInst() noexcept {
 		}
 
 		NP2HeapFree(lpFileArg);
-		LocalFree(lpSchemeArg);
-		LocalFree(lpMatchArg);
-		LocalFree(lpEncodingArg);
+		NP2HeapFree(lpSchemeArg);
+		NP2HeapFree(lpMatchArg);
+		NP2HeapFree(lpEncodingArg);
 		return true;
 	}
 	return false;
@@ -7471,7 +7447,7 @@ bool ActivatePrevInst() noexcept {
 bool RelaunchMultiInst() noexcept {
 	if (flagMultiFileArg == TripleBoolean_True && cFileList > 1) {
 		const LPCWSTR lpCmdLine = GetCommandLine();
-		LPWSTR lpCmdLineNew = StrDup(lpCmdLine);
+		LPWSTR lpCmdLineNew = HeapStrDupW(lpCmdLine);
 
 		StrTab2Space(lpCmdLineNew);
 		StrCpyEx(lpCmdLineNew + cchiFileList, L"");
@@ -7489,7 +7465,7 @@ bool RelaunchMultiInst() noexcept {
 		for (i = 0; i < cFileList; i++) {
 			lstrcpy(lpCmdLineNew + cchiFileList, L" /n - ");
 			lstrcat(lpCmdLineNew, lpFileList[i]);
-			LocalFree(lpFileList[i]);
+			NP2HeapFree(lpFileList[i]);
 
 			STARTUPINFO si;
 			memset(&si, 0, sizeof(STARTUPINFO));
@@ -7503,19 +7479,19 @@ bool RelaunchMultiInst() noexcept {
 			}
 		}
 
-		LocalFree(lpCmdLineNew);
+		NP2HeapFree(lpCmdLineNew);
 		NP2HeapFree(lpFileArg);
 
 		return true;
 	}
 
 	for (int i = 0; i < cFileList; i++) {
-		LocalFree(lpFileList[i]);
+		NP2HeapFree(lpFileList[i]);
 	}
 	return false;
 }
 
-void GetRelaunchParameters(LPWSTR szParameters, LPCWSTR lpszFile, bool newWind, bool emptyWind) noexcept {
+void GetRelaunchParameters(LPWSTR szParameters, LPCWSTR lpszFile, RelaunchOption option) noexcept {
 	WCHAR tch[64];
 	wsprintf(tch, L"-appid=\"%s\"", g_wchAppUserModelID);
 	lstrcpy(szParameters, tch);
@@ -7523,7 +7499,7 @@ void GetRelaunchParameters(LPWSTR szParameters, LPCWSTR lpszFile, bool newWind, 
 	wsprintf(tch, L" -sysmru=%i", (flagUseSystemMRU == TripleBoolean_True));
 	lstrcat(szParameters, tch);
 
-	if (newWind) {
+	if (option & RelaunchOption_NewWindow) {
 		lstrcat(szParameters, L" -n");
 	}
 
@@ -7537,8 +7513,8 @@ void GetRelaunchParameters(LPWSTR szParameters, LPCWSTR lpszFile, bool newWind, 
 	GetMonitorInfo(hMonitor, &mi);
 
 	// offset new window position +10/+10
-	int x = wndpl.rcNormalPosition.left + (newWind? 10 : 0);
-	int y = wndpl.rcNormalPosition.top	+ (newWind? 10 : 0);
+	int x = wndpl.rcNormalPosition.left + ((option & RelaunchOption_NewWindow)? 10 : 0);
+	int y = wndpl.rcNormalPosition.top	+ ((option & RelaunchOption_NewWindow)? 10 : 0);
 	const int cx = wndpl.rcNormalPosition.right - wndpl.rcNormalPosition.left;
 	const int cy = wndpl.rcNormalPosition.bottom - wndpl.rcNormalPosition.top;
 
@@ -7552,7 +7528,7 @@ void GetRelaunchParameters(LPWSTR szParameters, LPCWSTR lpszFile, bool newWind, 
 	wsprintf(tch, L" -pos %i,%i,%i,%i,%i", x, y, cx, cy, imax);
 	lstrcat(szParameters, tch);
 
-	if (!emptyWind && StrNotEmpty(lpszFile)) {
+	if (!(option & RelaunchOption_EmptyWindow) && StrNotEmpty(lpszFile)) {
 		// read only mode
 		if (bReadOnlyMode) {
 			lstrcat(szParameters, L" -ro");
@@ -7585,6 +7561,9 @@ void GetRelaunchParameters(LPWSTR szParameters, LPCWSTR lpszFile, bool newWind, 
 		default: {
 			const char *enc = mEncoding[iCurrentEncoding].pszParseNames;
 			const char *sep = strchr(enc, ',');
+			if (sep == nullptr) {
+				break;
+			}
 			memset(tch, 0, sizeof(tch));
 			MultiByteToWideChar(CP_UTF8, 0, enc, static_cast<int>(sep - enc), tch, COUNTOF(tch));
 			lstrcat(szParameters, L" -e \"");
@@ -7665,7 +7644,7 @@ bool RelaunchElevated() {
 			lpArg1 = static_cast<LPWSTR>(NP2HeapAlloc(sizeof(WCHAR) * (cmdSize + 1024)));
 			lpArg2 = lpArg1 + cmdSize;
 			GetModuleFileName(nullptr, lpArg1, MAX_PATH);
-			GetRelaunchParameters(lpArg2, tchFile, !exit, false);
+			GetRelaunchParameters(lpArg2, tchFile, (exit ? RelaunchOption_None : RelaunchOption_NewWindow));
 			exit = !IsDocumentModified();
 		} else {
 			const LPCWSTR lpCmdLine = GetCommandLine();
@@ -8040,7 +8019,7 @@ void AutoSave_Stop(BOOL keepBackup) noexcept {
 				if (!keepBackup) {
 					DeleteFile(path);
 				}
-				LocalFree(path);
+				NP2HeapFree(path);
 			}
 		}
 
@@ -8197,14 +8176,14 @@ void AutoSave_DoWork(FileSaveFlag saveFlag) noexcept {
 				if (!(iAutoSaveOption & AutoSaveOption_ManuallyDelete)) {
 					DeleteFile(old);
 				}
-				LocalFree(old);
+				NP2HeapFree(old);
 			}
 			memmove(AsVoidPointer(autoSavePathList), AsVoidPointer(autoSavePathList + 1), (AllAutoSaveCount - 1) * sizeof(LPWSTR));
 			autoSavePathList[AllAutoSaveCount - 1] = nullptr;
 			--autoSaveCount;
 		}
 
-		autoSavePathList[autoSaveCount++] = StrDup(tchPath);
+		autoSavePathList[autoSaveCount++] = HeapStrDupW(tchPath);
 		dwLastSavedDocReversion = dwCurrentDocReversion;
 	} else {
 		DeleteFile(tchPath);
