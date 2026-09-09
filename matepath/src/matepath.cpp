@@ -324,11 +324,15 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 #endif
 #if _WIN32_WINNT < _WIN32_WINNT_VISTA
 	// Set the Windows version global variable
+	OSVERSIONINFOW version;
+	version.dwOSVersionInfoSize = sizeof(version);
+	version.dwMajorVersion = 0;
+	version.dwMinorVersion = 0;
 	NP2_COMPILER_WARNING_PUSH
 	NP2_IGNORE_WARNING_DEPRECATED_DECLARATIONS
-	g_uWinVer = LOWORD(GetVersion());
+	GetVersionEx(&version);
 	NP2_COMPILER_WARNING_POP
-	g_uWinVer = MAKEWORD(HIBYTE(g_uWinVer), LOBYTE(g_uWinVer));
+	g_uWinVer = (version.dwMajorVersion << 8) | version.dwMinorVersion;
 #endif
 
 	g_hDefaultHeap = GetProcessHeap();
