@@ -14,7 +14,7 @@ SinglyWordMap = {
 	'properties': 'property',
 	'alias': 'alias',
 }
-LexerKeywordCount = 15
+KEYWORDSET_MAX = 15
 AllKeywordAttrList = {}
 # for keyword list used in AutoC_AddSpecWord()
 SpecialKeywordIndexList = {}
@@ -114,7 +114,7 @@ def BuildKeywordContent(rid, lexer, keywordList, reservedCount=0):
 		output.append("")
 
 		indexName = build_enum_name(comment)
-		if index > LexerKeywordCount:
+		if index >= KEYWORDSET_MAX:
 			attr |= KeywordAttr.NoLexer
 		# keyword index for lexer
 		if (attr & KeywordAttr.NoLexer) == 0 and comment != 'unused':
@@ -138,7 +138,7 @@ def BuildKeywordContent(rid, lexer, keywordList, reservedCount=0):
 		# keyword attribute for lexer
 		if lines and (attr & KeywordAttr.NoLexer) == 0:
 			attr |= KeywordAttr.PreSorted
-		if attr != KeywordAttr.Default:
+		if attr != KeywordAttr.Default and index <= KEYWORDSET_MAX:
 			attrList.append((index, attr, comment))
 
 	if maxKeywordLen:
@@ -146,7 +146,7 @@ def BuildKeywordContent(rid, lexer, keywordList, reservedCount=0):
 		if '@' not in indexList or indexList['@'][0] < maxKeywordLen:
 			indexList['@'] = (maxKeywordLen, 0)
 	index = len(keywordList)
-	while reservedCount != 0:
+	while reservedCount != 0 and index <= KEYWORDSET_MAX:
 		attrList.append((index, KeywordAttr.NoLexer, 'Code Snippet'))
 		index += 1
 		reservedCount -= 1
