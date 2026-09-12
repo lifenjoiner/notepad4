@@ -391,6 +391,7 @@ static bool	flagPasteBoard			= false;
 static int	flagSetEncoding			= 0;
 static int	flagSetEOLMode			= 0;
 static bool	flagJumpTo				= false;
+static bool	flagJumpToLinePos		= false;
 static MatchTextFlag flagMatchText	= MatchTextFlag_None;
 static TripleBoolean flagChangeNotify = TripleBoolean_NotSet;
 static bool	flagLexerSpecified		= false;
@@ -892,6 +893,10 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 
 		if (bOpened) {
 			if (flagJumpTo) { // Jump to position
+				if (flagJumpToLinePos) {
+					iInitialColumn = SciCall_GetColumn(SciCall_PositionFromLine(iInitialLine - 1) + iInitialColumn);
+					flagJumpToLinePos = false;
+				}
 				EditJumpTo(iInitialLine, iInitialColumn);
 			}
 			if (flagChangeNotify != TripleBoolean_NotSet) {
@@ -1339,7 +1344,8 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 
 			if (params->flagJumpTo) {
 				const Sci_Line iLine = params->iInitialLine ? params->iInitialLine : 1;
-				EditJumpTo(iLine, params->iInitialColumn);
+				const Sci_Position iColumn = params->flagJumpToLinePos ? params->iInitialColumn :  SciCall_GetColumn(SciCall_PositionFromLine(iLine - 1) + params->iInitialColumn);
+				EditJumpTo(iLine, iColumn);
 			}
 			if (bOpened && params->flagMatchText != MatchTextFlag_None) {
 				HandleMatchText(params->flagMatchText, lpsz, params->flagJumpTo);
@@ -5717,6 +5723,7 @@ CommandParseState ParseCommandLineOption(LPWSTR lp1, LPWSTR lp2) noexcept {
 #endif
 				if (itok != 0) {
 					flagJumpTo = true;
+					flagJumpToLinePos = true;
 					state = CommandParseState_Consumed;
 					iInitialLine = cord[0];
 					iInitialColumn = cord[1];
@@ -7348,6 +7355,7 @@ static void ActivatePrevWindow(HWND hwnd, LPCWSTR lpszFile) noexcept {
 	params->flagQuietCreate = flagQuietCreate;
 	params->flagTitleExcerpt = false;
 	params->flagJumpTo = flagJumpTo;
+	params->flagJumpToLinePos = flagJumpToLinePos;
 	params->flagChangeNotify = flagChangeNotify;
 
 	LPWSTR lpsz = &params->wchData;
