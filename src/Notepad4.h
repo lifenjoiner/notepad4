@@ -68,6 +68,7 @@ struct NP2PARAMS {
 	int		iInitialLexer;
 	Sci_Line		iInitialLine;
 	Sci_Position	iInitialColumn;
+	int				iInitialColumnOpt;
 	int		iSrcEncoding;
 	int		flagSetEncoding;
 	int		flagSetEOLMode;
