@@ -311,11 +311,12 @@ INT_PTR CALLBACK AboutDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam
 				WCHAR tch[512];
 				LPCWSTR arch = GetProcessorArchitecture();
 				const int iEncoding = Encoding_GetIndex(mEncoding[CPI_DEFAULT].uCodePage);
-				Encoding_GetLabel(iEncoding);
+				LPCWSTR defaultEncoding = Encoding_GetLabel(iEncoding);
+				LPCWSTR currentEncoding = Encoding_GetLabel(iCurrentEncoding);
 				GetDlgItemText(hwnd, IDC_BUILD_INFO, wch, COUNTOF(wch));
 				wsprintf(tch, L"%s\n%s\nEncoding: %s, %s\nScheme: %s, %s\nSystem: %u.%u.%u %s %s\n",
 					VERSION_FILEVERSION_LONG, wch,
-					mEncoding[iCurrentEncoding].wchLabel, mEncoding[iEncoding].wchLabel,
+					currentEncoding, defaultEncoding,
 					PathFindExtension(szCurFile), pLexCurrent->pszName,
 					version.dwMajorVersion, version.dwMinorVersion, version.dwBuildNumber,
 					version.szCSDVersion, arch);
@@ -958,11 +959,10 @@ static INT_PTR CALLBACK FileMRUDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPAR
 			}
 		} else if (pnmhdr->idFrom == IDC_EMPTY_MRU) {
 			if ((pnmhdr->code == NM_CLICK || pnmhdr->code == NM_RETURN)) {
-				mruFile.Empty(false);
+				mruFile.Empty(bSaveRecentFiles);
 				if (StrNotEmpty(szCurFile)) {
 					mruFile.Add(szCurFile);
 				}
-				mruFile.Save();
 				SendWMCommand(hwnd, IDC_FILEMRU_UPDATE_VIEW);
 			}
 		}
@@ -1024,8 +1024,7 @@ static INT_PTR CALLBACK FileMRUDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPAR
 				if (!PathIsFile(tch)) {
 					// Ask...
 					if (IDYES == MsgBoxWarn(MB_YESNO, IDS_ERR_MRUDLG)) {
-						mruFile.DeleteFileFromStore(tch);
-						mruFile.Delete(lvi.iItem);
+						mruFile.DeleteFileFromStore(tch, lvi.iItem);
 
 						// must use recreate the list, index might change...
 						//ListView_DeleteItem(hwndLV, lvi.iItem);
@@ -1584,9 +1583,8 @@ struct ENCODEDLG {
 static INT_PTR CALLBACK SelectDefEncodingDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam) noexcept {
 	switch (umsg) {
 	case WM_INITDIALOG: {
-		const int iEncoding = iDefaultEncoding;
-		Encoding_GetLabel(iEncoding);
-		SetDlgItemText(hwnd, IDC_ENCODING_LABEL, mEncoding[iEncoding].wchLabel);
+		LPCWSTR wchLabel = Encoding_GetLabel(iDefaultEncoding);
+		SetDlgItemText(hwnd, IDC_ENCODING_LABEL, wchLabel);
 
 		if (bSkipUnicodeDetection) {
 			CheckDlgButton(hwnd, IDC_NOUNICODEDETECTION, BST_CHECKED);
@@ -1618,9 +1616,8 @@ static INT_PTR CALLBACK SelectDefEncodingDlgProc(HWND hwnd, UINT umsg, WPARAM wP
 		case NM_RETURN:
 			if (pnmhdr->idFrom == IDC_ENCODING_LINK) {
 				if (SelectEncodingDlg(hwndMain, &iDefaultEncoding, IDS_SELRECT_DEFAULT_ENCODING)) {
-					const int iEncoding = iDefaultEncoding;
-					Encoding_GetLabel(iEncoding);
-					SetDlgItemText(hwnd, IDC_ENCODING_LABEL, mEncoding[iEncoding].wchLabel);
+					LPCWSTR wchLabel = Encoding_GetLabel(iDefaultEncoding);
+					SetDlgItemText(hwnd, IDC_ENCODING_LABEL, wchLabel);
 				}
 			}
 			break;
@@ -1849,9 +1846,11 @@ bool SelectDefLineEndingDlg(HWND hwnd) noexcept {
 	return iResult == IDOK;
 }
 
+extern HWND hDlgWarnLineEnding;
 static INT_PTR CALLBACK WarnLineEndingDlgProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam) noexcept {
 	switch (umsg) {
 	case WM_INITDIALOG: {
+		hDlgWarnLineEnding = hwnd;
 		SetWindowLongPtr(hwnd, DWLP_USER, lParam);
 		const EditFileIOStatus * const status = AsPointer<EditFileIOStatus *>(lParam);
 
@@ -1892,6 +1891,7 @@ static INT_PTR CALLBACK WarnLineEndingDlgProc(HWND hwnd, UINT umsg, WPARAM wPara
 			EditFileIOStatus *status = AsPointer<EditFileIOStatus *>(GetWindowLongPtr(hwnd, DWLP_USER));
 			const int iEOLMode = static_cast<int>(SendDlgItemMessage(hwnd, IDC_EOLMODELIST, CB_GETCURSEL, 0, 0));
 			status->iEOLMode = GetScintillaEOLMode(iEOLMode);
+			status->bInconsistent = true;
 			bWarnLineEndings = IsButtonChecked(hwnd, IDC_WARNINCONSISTENTEOLS);
 			EndDialog(hwnd, IDOK);
 		}
@@ -1907,10 +1907,10 @@ static INT_PTR CALLBACK WarnLineEndingDlgProc(HWND hwnd, UINT umsg, WPARAM wPara
 	return FALSE;
 }
 
-bool WarnLineEndingDlg(HWND hwnd, EditFileIOStatus *status) noexcept {
+void WarnLineEndingDlg(HWND hwnd, EditFileIOStatus *status) noexcept {
 	MessageBeep(MB_ICONEXCLAMATION);
-	const INT_PTR iResult = ThemedDialogBoxParam(g_hInstance, MAKEINTRESOURCE(IDD_WARNLINEENDS), hwnd, WarnLineEndingDlgProc, AsInteger<LPARAM>(status));
-	return iResult == IDOK;
+	ThemedDialogBoxParam(g_hInstance, MAKEINTRESOURCE(IDD_WARNLINEENDS), hwnd, WarnLineEndingDlgProc, AsInteger<LPARAM>(status));
+	hDlgWarnLineEnding = nullptr;
 }
 
 void InitZoomLevelComboBox(HWND hwnd, int nCtlId, int zoomLevel) noexcept {

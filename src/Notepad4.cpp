@@ -60,6 +60,7 @@ HWND	hwndEdit;
 HWND	hwndMain;
 static HMENU hmenuMain;
 HWND	hDlgFindReplace = nullptr;
+HWND	hDlgWarnLineEnding = nullptr;
 static bool bInitDone = false;
 static HACCEL hAccMain;
 static HACCEL hAccFindReplace;
@@ -69,7 +70,12 @@ static UINT uTrayIconDPI = 0;
 #define TOOLBAR_COMMAND_BASE	IDT_FILE_NEW
 #define DefaultToolbarButtons	L"22 3 0 1 27 2 0 4 18 19 0 5 6 0 7 8 9 20 0 10 11 0 12 0 24 0 13 14 0 15 16 0 17"
 // NOLINTBEGIN(readability-redundant-zero-initializer)
-static TBBUTTON tbbMainWnd[] = {
+#if NP2_ENABLE_CUSTOMIZE_TOOLBAR_LABELS
+static TBBUTTON tbbMainWnd[] =
+#else
+static const TBBUTTON tbbMainWnd[] =
+#endif
+{
 	{0, 	0, 					0, 				 TBSTYLE_SEP, {0}, 0, 0},
 	{0, 	IDT_FILE_NEW, 		TBSTATE_ENABLED, TBSTYLE_BUTTON, {0}, 0, 0},
 	{1, 	IDT_FILE_OPEN, 		TBSTATE_ENABLED, BTNS_DROPDOWN, {0}, 0, 0},
@@ -106,7 +112,7 @@ WCHAR szExeRealPath[MAX_PATH];
 static bool bSaveSettings;
 bool	bSaveRecentFiles;
 int iMaxRecentFiles;
-static bool bSaveFindReplace;
+bool bSaveFindReplace;
 static WCHAR tchLastSaveCopyDir[MAX_PATH];
 WCHAR	tchOpenWithDir[MAX_PATH];
 WCHAR	tchFavoritesDir[MAX_PATH];
@@ -385,7 +391,7 @@ static bool	flagNewFromClipboard	= false;
 static bool	flagPasteBoard			= false;
 static int	flagSetEncoding			= 0;
 static int	flagSetEOLMode			= 0;
-static bool	flagJumpTo				= false;
+static unsigned	flagJumpTo			= FALSE;
 static MatchTextFlag flagMatchText	= MatchTextFlag_None;
 static TripleBoolean flagChangeNotify = TripleBoolean_NotSet;
 static bool	flagLexerSpecified		= false;
@@ -404,7 +410,7 @@ static inline bool IsTopMost() noexcept {
 
 // temporary fix for https://github.com/zufuliu/notepad4/issues/77: force InvalidateStyleRedraw().
 static inline void InvalidateStyleRedraw() noexcept {
-	SciCall_SetViewEOL(bViewEOLs);
+	SciCall_SetCaretLineVisibleAlways(true);
 }
 
 //=============================================================================
@@ -511,6 +517,22 @@ static void SetShortcutEnvironments(WCHAR *wCD) {
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nShowCmd) {
 	UNREFERENCED_PARAMETER(hPrevInstance);
 	UNREFERENCED_PARAMETER(lpCmdLine);
+	// HANDLE startEvent = OpenEventW(EVENT_MODIFY_STATE, TRUE, L"startup-time-event");
+	// SetEvent(startEvent);
+	// CloseHandle(startEvent);
+	// RestrictDLLPath() from SciTEWin.cxx, only load system or full path DLL
+#if _WIN32_WINNT >= _WIN32_WINNT_WIN8
+	SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
+#else
+	using SetDefaultDllDirectoriesSig = BOOL (WINAPI *)(DWORD DirectoryFlags) noexcept;
+	if (auto fnSetDefaultDllDirectories = DLLFunctionEx<SetDefaultDllDirectoriesSig>(L"kernel32.dll", "SetDefaultDllDirectories")) {
+		kSystemLibraryLoadFlags = LOAD_LIBRARY_SEARCH_SYSTEM32;
+		fnSetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
+	} else {
+		SetDllDirectory(L""); // remove current directory from the DLL search path
+	}
+#endif
+
 #if 0 // used for Clang UBSan or printing debug message on console.
 	if (AttachConsole(ATTACH_PARENT_PROCESS)) {
 		SetConsoleCtrlHandler(ConsoleHandlerRoutine, TRUE);
@@ -530,11 +552,15 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 #endif
 #if _WIN32_WINNT < _WIN32_WINNT_WIN8
 	// Set the Windows version global variable
+	OSVERSIONINFOW version;
+	version.dwOSVersionInfoSize = sizeof(version);
+	version.dwMajorVersion = 0;
+	version.dwMinorVersion = 0;
 	NP2_COMPILER_WARNING_PUSH
 	NP2_IGNORE_WARNING_DEPRECATED_DECLARATIONS
-	g_uWinVer = LOWORD(GetVersion());
+	GetVersionEx(&version);
 	NP2_COMPILER_WARNING_POP
-	g_uWinVer = MAKEWORD(HIBYTE(g_uWinVer), LOBYTE(g_uWinVer));
+	g_uWinVer = (version.dwMajorVersion << 8) | version.dwMinorVersion;
 #endif
 
 	g_hDefaultHeap = GetProcessHeap();
@@ -619,11 +645,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 
 	msgTaskbarCreated = RegisterWindowMessage(L"TaskbarCreated");
 
-#if _WIN32_WINNT < _WIN32_WINNT_WIN8
-	// see LoadD2D() in PlatWin.cxx
-	kSystemLibraryLoadFlags = (DLLFunctionEx<FARPROC>(L"kernel32.dll", "SetDefaultDllDirectories") != nullptr) ? LOAD_LIBRARY_SEARCH_SYSTEM32 : 0;
-#endif
-
 #if NP2_ENABLE_APP_LOCALIZATION_DLL
 	hResDLL = LoadLocalizedResourceDLL(uiLanguage, WC_NOTEPAD4 L".dll");
 	if (hResDLL) {
@@ -701,7 +722,7 @@ BOOL InitApplication(HINSTANCE hInstance) noexcept {
 }
 
 NP2_noinline
-static void HandleMatchText(MatchTextFlag flag, LPCWSTR lpszText, bool jumpTo) noexcept {
+static void HandleMatchText(MatchTextFlag flag, LPCWSTR lpszText, BOOL jumpTo) noexcept {
 	if (StrNotEmpty(lpszText) && SciCall_GetLength()) {
 		efrData.wszFind = HeapStrDupW(lpszText);
 		efrData.status |= FindReplaceStatus_HasFindText | FindReplaceStatus_FindUpdated | FindReplaceStatus_ReplaceUpdated;
@@ -831,7 +852,7 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 	}
 
 	HWND hwnd = CreateWindowEx(
-				   0,
+				   WS_EX_ACCEPTFILES,
 				   wchWndClass,
 				   WC_NOTEPAD4,
 				   WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
@@ -854,7 +875,6 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 	}
 	if (!flagStartAsTrayIcon) {
 		ShowWindow(hwnd, wi.max ? SW_SHOWMAXIMIZED : nCmdShow);
-		UpdateWindow(hwnd);
 	} else {
 		ShowWindow(hwnd, SW_HIDE); // trick ShowWindow()
 		ShowNotifyIcon(hwnd, true);
@@ -871,6 +891,8 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 	bool bFileLoadCalled = false;
 	// Pathname parameter
 	if (lpFileArg /*&& !flagNewFromClipboard*/) {
+		// paint main window to avoid blank window while loading large file
+		UpdateWindow(hwnd);
 
 		// Open from Directory
 		if (PathIsDirectory(lpFileArg)) {
@@ -887,7 +909,7 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 
 		if (bOpened) {
 			if (flagJumpTo) { // Jump to position
-				EditJumpTo(iInitialLine, iInitialColumn);
+				EditJumpTo(iInitialLine, iInitialColumn, flagJumpTo - TRUE);
 			}
 			if (flagChangeNotify != TripleBoolean_NotSet) {
 				iFileWatchingMode = (flagChangeNotify == TripleBoolean_False) ? FileWatchingMode_None : FileWatchingMode_AutoReload;
@@ -932,7 +954,7 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 			SciCall_EndUndoAction();
 			autoCompletionConfig.bIndentText = back;
 			if (flagJumpTo) {
-				EditJumpTo(iInitialLine, iInitialColumn);
+				EditJumpTo(iInitialLine, iInitialColumn, flagJumpTo - TRUE);
 			} else {
 				EditEnsureSelectionVisible();
 			}
@@ -1133,7 +1155,6 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 			AutoSave_Stop(TRUE);
 			// Terminate file watching
 			InstallFileWatching(true);
-			DragAcceptFiles(hwnd, FALSE);
 
 			// Terminate clipboard watching
 			if (flagPasteBoard) {
@@ -1262,7 +1283,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 		// Reset Change Notify
 		//bPendingChangeNotify = false;
 
-		if (pcds->dwData == DATA_NOTEPAD4_PARAMS) {
+		if (pcds->dwData == DATA_NOTEPAD4_PARAMS && pcds->cbData >= sizeof(NP2PARAMS)) {
 			const NP2PARAMS * const params = static_cast<NP2PARAMS *>(pcds->lpData);
 
 			if (params->flagReadOnlyMode) {
@@ -1334,8 +1355,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 			}
 
 			if (params->flagJumpTo) {
-				const Sci_Line iLine = params->iInitialLine ? params->iInitialLine : 1;
-				EditJumpTo(iLine, params->iInitialColumn);
+				EditJumpTo(params->iInitialLine, params->iInitialColumn, params->flagJumpTo - TRUE);
 			}
 			if (bOpened && params->flagMatchText != MatchTextFlag_None) {
 				HandleMatchText(params->flagMatchText, lpsz, params->flagJumpTo);
@@ -1872,13 +1892,12 @@ LRESULT MsgCreate(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 	ChangeWindowMessageFilterEx(hwnd, WM_COPYDATA, MSGFLT_ADD, nullptr);
 	ChangeWindowMessageFilterEx(hwnd, 0x0049 /*WM_COPYGLOBALDATA*/, MSGFLT_ADD, nullptr);
 #endif
-	DragAcceptFiles(hwnd, TRUE);
 
 	// File MRU
 	const int flags = MRUFlags_FilePath | (static_cast<int>(flagRelativeFileMRU) * MRUFlags_RelativePath) | (static_cast<int>(flagPortableMyDocs) * MRUFlags_PortableMyDocs);
-	mruFile.Init(MRU_KEY_RECENT_FILES, iMaxRecentFiles, flags);
-	mruFind.Init(MRU_KEY_RECENT_FIND, MRU_MAXITEMS, MRUFlags_QuoteValue);
-	mruReplace.Init(MRU_KEY_RECENT_REPLACE, MRU_MAXITEMS, MRUFlags_QuoteValue);
+	mruFile.Init(MRU_KEY_RECENT_FILES, iMaxRecentFiles, flags, bSaveRecentFiles);
+	mruFind.Init(MRU_KEY_RECENT_FIND, MRU_MAXITEMS, MRUFlags_QuoteValue, bSaveFindReplace);
+	mruReplace.Init(MRU_KEY_RECENT_REPLACE, MRU_MAXITEMS, MRUFlags_QuoteValue, bSaveFindReplace);
 	return 0;
 }
 
@@ -2148,8 +2167,7 @@ void UpdateStatusBarCache(int item) noexcept {
 		break;
 
 	case StatusItem_Encoding:
-		Encoding_GetLabel(iCurrentEncoding);
-		cachedStatusItem.pszEncoding = mEncoding[iCurrentEncoding].wchLabel;
+		cachedStatusItem.pszEncoding = Encoding_GetLabel(iCurrentEncoding);
 		break;
 
 	case StatusItem_EolMode:
@@ -2337,6 +2355,7 @@ void MsgInitMenu(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 		IDM_FILE_PROPERTIES,
 		IDM_FILE_READONLY_FILE,
 		IDM_FILE_REVERT,
+		IDM_FILE_UPDATE_TIMESTAMP,
 		IDM_RECODE_SELECT,
 	};
 	for (unsigned k = 0; k < COUNTOF(menuRequiresPath); k++) {
@@ -2699,6 +2718,14 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
 	case IDM_FILE_SAVEORIGINALTIMESTAMP:
 		FileSave(static_cast<FileSaveFlag>(FileSaveFlag_SaveAlways | FileSaveFlag_OriginalTimestamp));
+		break;
+
+	case IDM_FILE_UPDATE_TIMESTAMP:
+		if (StrNotEmpty(szCurFile)) {
+			EditFileIOStatus status{};
+			EditSaveFile(szCurFile, FileSaveFlag_OriginalTimestamp | FileSaveFlag_UpdateTimestamp, status);
+			InstallFileWatching(false);
+		}
 		break;
 
 	case IDM_FILE_READONLY_FILE:
@@ -3428,7 +3455,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 		if (sep != nullptr) {
 			strncpy(msz, enc, min<size_t>(sep - enc, COUNTOF(msz) - 1));
 		} else {
-			WideCharToMultiByte(CP_UTF8, 0, mEncoding[iCurrentEncoding].wchLabel, -1, msz, COUNTOF(msz), nullptr, nullptr);
+			WideCharToMultiByte(CP_UTF8, 0, cachedStatusItem.pszEncoding, -1, msz, COUNTOF(msz), nullptr, nullptr);
 		}
 		if (pLexCurrent->iLexer == SCLEX_PYTHON || pLexCurrent->iLexer == SCLEX_RUBY) {
 			const Sci_Position iCurrentPos = SciCall_GetCurrentPos();
@@ -4611,8 +4638,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 			if (path) {
 				if (!PathIsFile(path)) {
 					if (IDYES == MsgBoxWarn(MB_YESNO, IDS_ERR_MRUDLG)) {
-						mruFile.DeleteFileFromStore(path);
-						mruFile.Delete(index);
+						mruFile.DeleteFileFromStore(path, index);
 					}
 				} else if (FileSave(FileSaveFlag_Ask)) {
 					FileLoad(FileLoadFlag_DontSave, path);
@@ -5704,24 +5730,30 @@ CommandParseState ParseCommandLineOption(LPWSTR lp1, LPWSTR lp2) noexcept {
 			}
 			break;
 
-		case L'G':
+		case L'G': {
+			const wchar_t option = opt[0];
 			state = CommandParseState_Argument;
 			if (ExtractFirstArgument(lp2, lp1, lp2)) {
 #if defined(_WIN64)
-				int64_t cord[2]{};
+				int64_t cord[3]{};
 				const UINT itok = ParseCommaList64(lp1, cord, COUNTOF(cord));
 #else
-				int cord[2]{};
+				int cord[3]{};
 				const UINT itok = ParseCommaList(lp1, cord, COUNTOF(cord));
 #endif
 				if (itok != 0) {
-					flagJumpTo = true;
 					state = CommandParseState_Consumed;
 					iInitialLine = cord[0];
 					iInitialColumn = cord[1];
+					if (option & 0x20) { // lower case: character, byte
+						flagJumpTo = (TRUE + SC_COLUMN_CHARACTER) + (cord[2] & TRUE);
+					} else { // upper case: column
+						const unsigned iTabWidth = min(static_cast<unsigned>(cord[2]), static_cast<unsigned>(TAB_WIDTH_MAX));
+						flagJumpTo = (TRUE + SC_COLUMN_DEFAULT) | (iTabWidth << 4);
+					}
 				}
 			}
-			break;
+		} break;
 
 		case L'I':
 			flagStartAsTrayIcon = true;
@@ -6313,7 +6345,9 @@ void FindIniFile() noexcept {
 		memcpy(lpszIniFile, tchModule, nameIndex*sizeof(WCHAR));
 		lstrcpy(&lpszIniFile[nameIndex], L"Notepad4.ini");
 	}
-	if (!PathIsFile(lpszIniFile)) {
+	WIN32_FILE_ATTRIBUTE_DATA data;
+	BOOL success = GetFileAttributesEx(lpszIniFile, GetFileExInfoStandard, &data);
+	if (!success) {
 		if (!portable) {
 			SHCreateDirectoryEx(nullptr, appData, nullptr);
 		}
@@ -6329,6 +6363,10 @@ void FindIniFile() noexcept {
 		lstrcpy(&source[nameIndex], L"Notepad4 DarkTheme.ini-default");
 		PathAppend(appData, L"Notepad4 DarkTheme.ini");
 		CopyFile(source, appData, TRUE);
+		success = GetFileAttributesEx(lpszIniFile, GetFileExInfoStandard, &data);
+	}
+	if (success && (data.nFileSizeLow >= 2 || data.nFileSizeHigh != 0 || (data.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_READONLY)) != 0)) {
+		return;
 	}
 
 	// inline CreateIniFile() to avoid slow directory creation
@@ -6347,7 +6385,20 @@ void FindIniFile() noexcept {
 }
 
 bool CreateIniFile(LPCWSTR lpszIniFile) noexcept {
-	if (StrNotEmpty(lpszIniFile)) {
+	if (StrIsEmpty(lpszIniFile)) {
+		return false;
+	}
+	WIN32_FILE_ATTRIBUTE_DATA data;
+	const BOOL success = GetFileAttributesEx(lpszIniFile, GetFileExInfoStandard, &data);
+	if (success) {
+		if ((data.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_READONLY)) != 0) {
+			return false;
+		}
+		if (data.nFileSizeLow >= 2 || data.nFileSizeHigh != 0) {
+			return true;
+		}
+	}
+	{
 		WCHAR *pwchTail = StrRChr(lpszIniFile, nullptr, L'\\');
 
 		if (pwchTail != nullptr) {
@@ -6742,7 +6793,7 @@ bool FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile) {
 			iCurPos = SciCall_GetCurrentPos();
 			iAnchorPos = SciCall_GetAnchor();
 			iLine = SciCall_LineFromPosition(iCurPos) + 1;
-			iCol = SciCall_GetColumn(iCurPos) + 1;
+			iCol = SciCall_GetColumn(iCurPos, iLine - 1) + 1;
 			iVisTopLine = SciCall_GetFirstVisibleLine();
 			iDocTopLine = SciCall_DocLineFromVisible(iVisTopLine);
 			iXOffset = SciCall_GetXOffset();
@@ -6954,8 +7005,12 @@ bool FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile) {
 		//DisableDelayedStatusBarRedraw(); // already set in MsgSize()
 		UpdateStatusbar();
 		UpdateWindowTitle();
+		if (hDlgWarnLineEnding) {
+			EndDialog(hDlgWarnLineEnding, IDCANCEL);
+			hDlgWarnLineEnding = nullptr;
+		}
 		// Show warning: Unicode file loaded as ANSI
-		if (status.bUnicodeErr) {
+		if (status.bUnicodeError) {
 			MsgBoxWarn(MB_OK, IDS_ERR_UNICODE);
 		}
 		// notify binary file opened in read only mode
@@ -6970,7 +7025,9 @@ bool FileLoad(FileLoadFlag loadFlag, LPCWSTR lpszFile) {
 			// Set default button to "No" for diff/patch and unknown file.
 			// diff/patch file may contain content from files with different line endings.
 			status.bLineEndingsDefaultNo = bUnknownFile || pLexCurrent->iLexer == SCLEX_DIFF;
-			if (WarnLineEndingDlg(hwndMain, &status)) {
+			status.bInconsistent = false;
+			WarnLineEndingDlg(hwndMain, &status);
+			if (status.bInconsistent) {
 				ConvertLineEndings(status.iEOLMode);
 			}
 		}
@@ -7117,9 +7174,13 @@ bool FileSave(FileSaveFlag saveFlag) {
 			if (PathEqual(szCurFile, szIniFile)) {
 				LoadFlags();
 				LoadSettings();
-				mruFile.Reload();
-				mruFind.Reload();
-				mruReplace.Reload();
+				if (bSaveRecentFiles) {
+					mruFile.Reload();
+				}
+				if (bSaveFindReplace) {
+					mruFind.Reload();
+					mruReplace.Reload();
+				}
 				if (np2StyleTheme == StyleTheme_Default) {
 					Style_LoadAll(static_cast<StyleLoadFlag>(StyleLoadFlag_Reload | StyleLoadFlag_Apply));
 				}
@@ -7597,15 +7658,15 @@ void GetRelaunchParameters(LPWSTR szParameters, LPCWSTR lpszFile, RelaunchOption
 		const Sci_Position pos = SciCall_GetCurrentPos();
 		if (pos > 0) {
 			const Sci_Line line = SciCall_LineFromPosition(pos) + 1;
-			const Sci_Position col = SciCall_GetColumn(pos) + 1;
+			const Sci_Position col = SciCall_GetColumn(pos, line - 1) + 1;
 #if defined(_WIN64)
 			WCHAR tchLn[32];
 			WCHAR tchCol[32];
 			PosToStr(line, tchLn);
 			PosToStr(col, tchCol);
-			wsprintf(tch, L" -g %s,%s", tchLn, tchCol);
+			wsprintf(tch, L" -G %s,%s", tchLn, tchCol);
 #else
-			wsprintf(tch, L" -g %d,%d", static_cast<int>(line), static_cast<int>(col));
+			wsprintf(tch, L" -G %d,%d", static_cast<int>(line), static_cast<int>(col));
 #endif
 			lstrcat(szParameters, tch);
 		}
@@ -7832,6 +7893,7 @@ void ShowNotificationMessage(WPARAM notifyPos, UINT uidMessage, ...) noexcept {
 // InstallFileWatching()
 //
 //
+NP2_noinline
 void InstallFileWatching(bool terminate) noexcept {
 	terminate = terminate || iFileWatchingMode == FileWatchingMode_None || StrIsEmpty(szCurFile);
 	// Terminate
@@ -7856,7 +7918,7 @@ void InstallFileWatching(bool terminate) noexcept {
 		PathRemoveFileSpec(tchDirectory);
 
 		// Save data of current file
-		WIN32_FIND_DATA data;
+		WIN32_FILE_ATTRIBUTE_DATA data;
 		if (GetFileAttributesEx(szCurFile, GetFileExInfoStandard, &data)) {
 			memcpy(&fdCurFile, &data.ftLastWriteTime, sizeof(fdCurFile));
 		} else {
@@ -7879,7 +7941,7 @@ void InstallFileWatching(bool terminate) noexcept {
 
 static inline bool IsCurrentFileChangedOutsideApp() noexcept {
 	// Check if the file has been changed
-	WIN32_FIND_DATA fdUpdated;
+	WIN32_FILE_ATTRIBUTE_DATA fdUpdated;
 	if (!GetFileAttributesEx(szCurFile, GetFileExInfoStandard, &fdUpdated)) {
 		// The current file has been removed
 		return true;
@@ -8074,15 +8136,14 @@ void AutoSave_DoWork(FileSaveFlag saveFlag) noexcept {
 	}
 
 	WCHAR tchPath[MAX_PATH + 40];
-	LPCWSTR extension = L"bak";
+	LPCWSTR extension = L".bak";
 	if (Untitled) {
 		lstrcpy(tchPath, L"Untitled");
 	} else {
 		lstrcpy(tchPath, szCurFile);
 		LPWSTR lpszExt = StrChr(tchPath, L'.'); // address for first file extension
 		if (lpszExt) {
-			lpszExt[0] = L'\0';
-			extension = lpszExt + 1;
+			extension = lpszExt;
 		}
 	}
 
@@ -8093,10 +8154,14 @@ void AutoSave_DoWork(FileSaveFlag saveFlag) noexcept {
 	SYSTEMTIME lt;
 	GetLocalTime(&lt);
 	//printf("%u AutoSave at %02d:%02d:%02d.%03d\n", pid, lt.wHour, lt.wMinute, lt.wSecond, lt.wMilliseconds);
-	wsprintf(suffix, L" %04d%02d%02d %02d%02d%02d %03d%u.%s",
+	wsprintf(suffix, L" %04d%02d%02d %02d%02d%02d %03d%u%s",
 		lt.wYear, lt.wMonth, lt.wDay,
 		lt.wHour, lt.wMinute, lt.wSecond,
 		lt.wMilliseconds, pid, extension);
+	if (saveFlag == FileSaveFlag_SaveAlways) { // omit millisecond & pid for save backup
+		LPWSTR lpsz = StrRChr(suffix, nullptr, L' ');
+		lstrcpy(lpsz, extension);
+	}
 	lstrcat(tchPath, suffix);
 
 	// TODO: check free space with GetDiskFreeSpaceExW()

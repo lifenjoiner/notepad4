@@ -52,7 +52,12 @@ static HWND hwndReBar;
 #define TOOLBAR_COMMAND_BASE	IDT_HISTORY_BACK
 #define DefaultToolbarButtons	L"1 2 3 4 5 0 8"
 // NOLINTBEGIN(readability-redundant-zero-initializer)
-static TBBUTTON tbbMainWnd[] = {
+#if NP2_ENABLE_CUSTOMIZE_TOOLBAR_LABELS
+static TBBUTTON tbbMainWnd[] =
+#else
+static const TBBUTTON tbbMainWnd[] =
+#endif
+{
 	{0, 0, 0, TBSTYLE_SEP, {0}, 0, 0},
 	{0, IDT_HISTORY_BACK, TBSTATE_ENABLED, TBSTYLE_BUTTON, {0}, 0, 0},
 	{1, IDT_HISTORY_FORWARD, TBSTATE_ENABLED, TBSTYLE_BUTTON, {0}, 0, 0},
@@ -215,7 +220,7 @@ static int	iOpacityLevel		= 75;
 static bool	flagPosParam		= false;
 
 static inline bool HasFilter() noexcept {
-	return !StrEqualEx(tchFilter, L"*.*") || bNegFilter;
+	return bNegFilter || !StrEqualEx(tchFilter, L"*.*");
 }
 
 //=============================================================================
@@ -288,6 +293,18 @@ static LONG WINAPI TopLevelHandler(EXCEPTION_POINTERS *ep) {
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nShowCmd) {
 	UNREFERENCED_PARAMETER(hPrevInstance);
 	UNREFERENCED_PARAMETER(lpCmdLine);
+	// RestrictDLLPath() from SciTEWin.cxx, only load system or full path DLL
+#if _WIN32_WINNT >= _WIN32_WINNT_WIN8
+	SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
+#else
+	using SetDefaultDllDirectoriesSig = BOOL (WINAPI *)(DWORD DirectoryFlags) noexcept;
+	if (auto fnSetDefaultDllDirectories = DLLFunctionEx<SetDefaultDllDirectoriesSig>(L"kernel32.dll", "SetDefaultDllDirectories")) {
+		fnSetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
+	} else {
+		SetDllDirectory(L""); // remove current directory from the DLL search path
+	}
+#endif
+
 #if 0 // used for Clang UBSan or printing debug message on console.
 	if (AttachConsole(ATTACH_PARENT_PROCESS)) {
 		SetConsoleCtrlHandler(ConsoleHandlerRoutine, TRUE);
@@ -307,11 +324,15 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 #endif
 #if _WIN32_WINNT < _WIN32_WINNT_VISTA
 	// Set the Windows version global variable
+	OSVERSIONINFOW version;
+	version.dwOSVersionInfoSize = sizeof(version);
+	version.dwMajorVersion = 0;
+	version.dwMinorVersion = 0;
 	NP2_COMPILER_WARNING_PUSH
 	NP2_IGNORE_WARNING_DEPRECATED_DECLARATIONS
-	g_uWinVer = LOWORD(GetVersion());
+	GetVersionEx(&version);
 	NP2_COMPILER_WARNING_POP
-	g_uWinVer = MAKEWORD(HIBYTE(g_uWinVer), LOBYTE(g_uWinVer));
+	g_uWinVer = (version.dwMajorVersion << 8) | version.dwMinorVersion;
 #endif
 
 	g_hDefaultHeap = GetProcessHeap();
@@ -464,7 +485,7 @@ void InitInstance(HINSTANCE hInstance, int nCmdShow) {
 	}
 
 	HWND hwnd = CreateWindowEx(
-				   0,
+				   WS_EX_ACCEPTFILES,
 				   WC_MATEPATH,
 				   WC_MATEPATH,
 				   WS_MATEPATH,
@@ -543,7 +564,6 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 			FindCloseChangeNotification(hChangeHandle);
 
 			DirList_Destroy(hwndDirList);
-			DragAcceptFiles(hwnd, FALSE);
 
 			mHistory.Empty();
 
@@ -570,14 +590,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 		SendMessage(hwndToolbar, WM_SYSCOLORCHANGE, wParam, lParam);
 		const LRESULT lret = DefWindowProc(hwnd, umsg, wParam, lParam);
 
-		COLORREF color = GetSysColor(COLOR_WINDOWTEXT);
-		if (HasFilter()) {
-			color = bDefColorFilter ? color : colorFilter;
-		} else {
-			color = bDefColorNoFilter ? color : colorNoFilter;
-		}
-		ListView_SetTextColor(hwndDirList, color);
-		ListView_RedrawItems(hwndDirList, 0, ListView_GetItemCount(hwndDirList) - 1);
+		DarkMode_SetFileListViewColor(hwndDirList, true);
 		return lret;
 	}
 
@@ -658,7 +671,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 	case WM_COPYDATA: {
 		PCOPYDATASTRUCT pcds = AsPointer<PCOPYDATASTRUCT>(lParam);
 
-		if (pcds->dwData == DATA_MATEPATH_PATHARG) {
+		if (pcds->dwData == DATA_MATEPATH_PATHARG && pcds->cbData > MAX_PATH*sizeof(WCHAR)) {
 			LPCWSTR lpsz = static_cast<LPCWSTR>(pcds->lpData);
 			DisplayPath(lpsz, IDS_ERR_CMDLINE);
 		}
@@ -844,7 +857,6 @@ LRESULT MsgCreate(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 	DirList_Init(hwndDirList);
 	ListView_SetHoverTime(hwndDirList, 50);
 	// Drag & Drop
-	DragAcceptFiles(hwnd, TRUE);
 	// History
 	mHistory.Init();
 	mHistory.UpdateToolbar(hwndToolbar, IDT_HISTORY_BACK, IDT_HISTORY_FORWARD);
@@ -1056,7 +1068,7 @@ void MsgThemeChanged(HWND hwnd, WPARAM wParam, LPARAM lParam) noexcept {
 	DWORD dwExStyle = GetWindowExStyle(hwndDirList);
 	if (IsAppThemed()) {
 		dwExStyle &= ~WS_EX_CLIENTEDGE;
-		SetWindowTheme(hwndDirList, (bFullRowSelect ? L"Explorer" : L"Listview"), nullptr);
+		DarkMode_SetFileListViewTheme(hwndDirList, bFullRowSelect);
 	} else {
 		dwExStyle |= WS_EX_CLIENTEDGE;
 	}
@@ -1484,7 +1496,7 @@ LRESULT MsgCommand(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 			break;
 		}
 
-		WCHAR tch[512];
+		WCHAR tch[MAX_PATH + 4];
 		memset(tch, 0, sizeof(tch));
 		lstrcpy(tch, dli.szFileName);
 
@@ -2042,16 +2054,13 @@ LRESULT MsgNotify(HWND hwnd, WPARAM wParam, LPARAM lParam) {
 
 				WCHAR tch[64];
 				if ((pnmlv->uNewState & LVIS_SELECTED)) {
-					WIN32_FIND_DATA fd;
+					WIN32_FILE_ATTRIBUTE_DATA fd;
 					DirListItem dli;
 					dli.mask  = DLI_FILENAME;
 					dli.ntype = DLE_NONE;
+					memset(&fd, 0, sizeof(fd));
 					DirList_GetItem(hwndDirList, -1, &dli);
-					DirList_GetItemEx(hwndDirList, -1, &fd);
-
-					if (fd.nFileSizeLow >= MAXDWORD) {
-						GetFileAttributesEx(dli.szFileName, GetFileExInfoStandard, &fd);
-					}
+					GetFileAttributesEx(dli.szFileName, GetFileExInfoStandard, &fd);
 
 					const LONGLONG isize = (static_cast<LONGLONG>(fd.nFileSizeHigh) << 32) | fd.nFileSizeLow;
 					WCHAR tchsize[64];
@@ -2222,15 +2231,8 @@ bool ChangeDirectory(HWND hwnd, LPCWSTR lpszNewDir, bool bUpdateHistory) {
 		GetCurrentDirectory(COUNTOF(szCurDir), szCurDir);
 		SetWindowPathTitle(hwnd, szCurDir);
 
-		COLORREF color = GetSysColor(COLOR_WINDOWTEXT);
-		const bool has = HasFilter();
-		if (has) {
-			color = bDefColorFilter ? color : colorFilter;
-		} else {
-			color = bDefColorNoFilter ? color : colorNoFilter;
-		}
-		Toolbar_SetButtonImage(hwndToolbar, IDT_VIEW_FILTER, (has ? TB_DEL_FILTER_BMP : TB_ADD_FILTER_BMP));
-		ListView_SetTextColor(hwndDirList, color);
+		const bool hasFilter = DarkMode_SetFileListViewColor(hwndDirList, false);
+		Toolbar_SetButtonImage(hwndToolbar, IDT_VIEW_FILTER, (hasFilter ? TB_DEL_FILTER_BMP : TB_ADD_FILTER_BMP));
 
 		const int cItems = DirList_Fill(hwndDirList, szCurDir, dwFillMask, tchFilter, bNegFilter, flagNoFadeHidden, nSortFlags, fSortRev);
 		DirList_StartIconThread(hwndDirList);
@@ -2945,7 +2947,9 @@ void FindIniFile() noexcept {
 		memcpy(lpszIniFile, tchModule, nameIndex*sizeof(WCHAR));
 		lstrcpy(&lpszIniFile[nameIndex], L"matepath.ini");
 	}
-	if (!PathIsFile(lpszIniFile)) {
+	WIN32_FILE_ATTRIBUTE_DATA data;
+	BOOL success = GetFileAttributesEx(lpszIniFile, GetFileExInfoStandard, &data);
+	if (!success) {
 		if (!portable) {
 			SHCreateDirectoryEx(nullptr, appData, nullptr);
 		}
@@ -2953,6 +2957,10 @@ void FindIniFile() noexcept {
 		memcpy(source, tchModule, nameIndex*sizeof(WCHAR));
 		lstrcpy(&source[nameIndex], L"matepath.ini-default");
 		CopyFile(source, lpszIniFile, TRUE);
+		success = GetFileAttributesEx(lpszIniFile, GetFileExInfoStandard, &data);
+	}
+	if (success && (data.nFileSizeLow >= 2 || data.nFileSizeHigh != 0 || (data.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_READONLY)) != 0)) {
+		return;
 	}
 
 	// inline CreateIniFile() to avoid slow directory creation
@@ -2971,7 +2979,20 @@ void FindIniFile() noexcept {
 }
 
 bool CreateIniFile(LPCWSTR lpszIniFile) noexcept {
-	if (StrNotEmpty(lpszIniFile)) {
+	if (StrIsEmpty(lpszIniFile)) {
+		return false;
+	}
+	WIN32_FILE_ATTRIBUTE_DATA data;
+	const BOOL success = GetFileAttributesEx(lpszIniFile, GetFileExInfoStandard, &data);
+	if (success) {
+		if ((data.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_READONLY)) != 0) {
+			return false;
+		}
+		if (data.nFileSizeLow >= 2 || data.nFileSizeHigh != 0) {
+			return true;
+		}
+	}
+	{
 		WCHAR *pwchTail = StrRChr(lpszIniFile, nullptr, L'\\');
 
 		if (pwchTail != nullptr) {
